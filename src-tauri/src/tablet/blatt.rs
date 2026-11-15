@@ -12,8 +12,7 @@
 //! drucken**. Genau daran ist v0.9.246 gescheitert, als das Raster 16 mm
 //! über den Blattrand lief und das erst am Papier auffiel.
 
-use super::scoresheet::{Grid, SheetDoc};
-use relay_proto::EventKind;
+use super::scoresheet::{traegt_person, Grid, SheetDoc, MARKEN_JE_ZELLE};
 
 // ── Blattmaße ───────────────────────────────────────────────────────────
 //
@@ -88,6 +87,11 @@ const LABEL_PT: f32 = 7.0;
 const WERT_PT: f32 = 8.5;
 const ZELLE_PT: f32 = 7.0;
 const MARKER_PT: f32 = 5.0;
+/// Höhe des Markenkastens an der Oberkante der Zelle. Der Text sitzt darin
+/// senkrecht mittig — so niedrig, dass die Marke über dem Zellwert endet.
+const MARKE_HOEHE_MM: f32 = 2.0;
+/// Abstand der Marken zur senkrechten Zelllinie.
+const MARKE_EINZUG_MM: f32 = 0.3;
 const KLEIN_PT: f32 = 6.5;
 
 // Strichstärken.
@@ -695,19 +699,20 @@ fn block_zeichnen(seite: &mut Seite, doc: &SheetDoc, bp: Option<&BlockPlan>, y: 
                 .pt(ZELLE_PT)
                 .mitte(),
         );
-        if let Some(m) = z.marker {
-            seite.text(
-                tk(
-                    x,
-                    yy,
-                    ZELLE_BREITE_MM - 0.3,
-                    ZELLE_BREITE_MM * 0.5,
-                    m.to_string(),
-                )
-                .pt(MARKER_PT)
-                .fett()
-                .rechts(),
-            );
+        // Bis zu zwei Marken (ADR 0095): die wichtigere rechts oben wie
+        // bisher, die zweite links oben. Beide in der oberen Zellkante, damit
+        // der Zellwert in der Mitte frei bleibt.
+        for (i, m) in z.marken.iter().take(MARKEN_JE_ZELLE).enumerate() {
+            let kasten = tk(
+                x + MARKE_EINZUG_MM,
+                yy,
+                ZELLE_BREITE_MM - 2.0 * MARKE_EINZUG_MM,
+                MARKE_HOEHE_MM,
+                m.to_string(),
+            )
+            .pt(MARKER_PT)
+            .fett();
+            seite.text(if i == 0 { kasten.rechts() } else { kasten });
         }
     }
 
@@ -828,6 +833,10 @@ fn fuss(seite: &mut Seite, doc: &SheetDoc) {
     );
 }
 
+/// Breite der Art-Spalte im Anhang — der Test
+/// `laengste_art_zeile_passt_in_die_spalte` hält jede mögliche Zeile darin.
+const ART_SPALTE_MM: f32 = 90.0;
+
 /// Anhangseite mit dem Protokoll der Vorkommnisse.
 fn anhang(doc: &SheetDoc) -> Seite {
     let mut seite = Seite::default();
@@ -846,7 +855,7 @@ fn anhang(doc: &SheetDoc) -> Seite {
         (18.0, "Uhrzeit"),
         (12.0, "Satz"),
         (18.0, "Stand"),
-        (90.0, "Art"),
+        (ART_SPALTE_MM, "Art"),
         (20.0, "Spieler"),
     ];
     let mut x = x0;
@@ -860,22 +869,14 @@ fn anhang(doc: &SheetDoc) -> Seite {
     for z in &doc.grid.protokoll {
         let mut x = x0;
         let mannschaft = if z.team == 0 { "A" } else { "B" };
-        let spieler = match (z.art, doc.grid.zeilen) {
-            // Betrifft beide Mannschaften — keine Spalte zu füllen.
-            (EventKind::TeamsCorrected, _) => String::new(),
-            (_, 4) => format!("{mannschaft}{}", z.player + 1),
-            _ => mannschaft.to_string(),
+        // Positivliste (ADR 0095): Behandlung, Aufgabe & Co. tragen keine
+        // Person — „A1" wäre dort eine Gesundheitsangabe an der falschen.
+        let spieler = match (traegt_person(z.art), doc.grid.zeilen) {
+            (false, _) => String::new(),
+            (true, 4) => format!("{mannschaft}{}", z.player + 1),
+            (true, _) => mannschaft.to_string(),
         };
-        let art = format!(
-            "{}{}{}",
-            super::scoresheet::art_klartext(z.art),
-            super::scoresheet::phase_klartext(z.phase),
-            if z.zurueckgenommen {
-                " — zurückgenommen"
-            } else {
-                ""
-            }
-        );
+        let art = super::scoresheet::art_zeile(z);
         let werte = [
             z.nr.to_string(),
             super::scoresheet::uhrzeit(z.ts_ms),
@@ -944,7 +945,7 @@ mod tests {
                 col,
                 gruppe: (col - 1) / BALLWECHSEL_JE_BLOCK,
                 wert: col as i64,
-                marker: None,
+                marken: Vec::new(),
             })
             .collect()
     }
@@ -1266,6 +1267,7 @@ mod tests {
                 team: 0,
                 player: 1,
                 zurueckgenommen: false,
+                behandlung: crate::tablet::scoresheet::Behandlung::Keine,
             });
         let seiten = blatt(&d);
         assert_eq!(seiten.len(), 2);
@@ -1304,5 +1306,163 @@ mod tests {
         d.team_b.truncate(1);
         assert_eq!(zeile_fuer(&d.grid, 0, 1), 0);
         assert_eq!(zeile_fuer(&d.grid, 1, 1), 2);
+    }
+
+    // ── Behandlung (ADR 0095) ────────────────────────────────────────────
+
+    const PT_IN_MM: f32 = 0.352_777_8;
+    /// Versalhöhe gängiger Grotesk-Schriften, großzügig gerundet.
+    const VERSAL_ANTEIL: f32 = 0.75;
+    /// Mittlere Zeichenbreite (Anteil der Schriftgröße), großzügig für
+    /// gemischten Text mit Umlauten und Gedankenstrichen.
+    const ZEICHEN_ANTEIL: f32 = 0.55;
+
+    fn kasten<'a>(seite: &'a Seite, text: &str) -> &'a TextKasten {
+        seite
+            .elemente
+            .iter()
+            .find_map(|e| match e {
+                Element::Text(t) if t.text == text => Some(t),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("Text {text:?} fehlt"))
+    }
+
+    /// Zwei Marken sitzen in der oberen Zellkante, links und rechts — der
+    /// zweistellige Zellwert in der Mitte bleibt lesbar.
+    #[test]
+    fn zwei_marken_ueberdecken_den_zellwert_nicht() {
+        let mut s = satz(1, 1);
+        s.zellen[0].wert = 21;
+        s.zellen[0].marken = vec!['W', 'B'];
+        let seiten = blatt(&doc(vec![s]));
+        let wert = kasten(&seiten[0], "21");
+        let rechts = kasten(&seiten[0], "W");
+        let links = kasten(&seiten[0], "B");
+        assert_eq!(rechts.ausrichtung, Ausrichtung::Rechts);
+        assert_eq!(links.ausrichtung, Ausrichtung::Links);
+
+        // Senkrecht: Marke endet über dem Zellwert.
+        let versal = |pt: f32| pt * PT_IN_MM * VERSAL_ANTEIL;
+        for m in [rechts, links] {
+            let unten = m.y + m.hoehe / 2.0 + versal(MARKER_PT) / 2.0;
+            let wert_oben = wert.y + wert.hoehe / 2.0 - versal(ZELLE_PT) / 2.0;
+            assert!(
+                unten <= wert_oben,
+                "Marke {} endet bei {unten} mm, Zellwert beginnt bei {wert_oben} mm",
+                m.text
+            );
+            // Und bleibt in der Zelle.
+            assert!(m.x >= wert.x && m.x + m.breite <= wert.x + wert.breite + 0.01);
+            assert!(m.y >= wert.y);
+        }
+        // Waagerecht: die beiden Marken berühren sich nicht.
+        let breite_marke = MARKER_PT * PT_IN_MM; // ein Geviert, großzügig
+        assert!(links.x + breite_marke < rechts.x + rechts.breite - breite_marke);
+    }
+
+    /// Jede mögliche Art-Zeile passt in die Art-Spalte der Anhangseite.
+    #[test]
+    fn laengste_art_zeile_passt_in_die_spalte() {
+        use crate::tablet::scoresheet::{art_zeile, Behandlung, ProtokollZeile, BEHANDLUNG_MAX_MS};
+        use relay_proto::{EventKind, Phase};
+        let arten = [
+            EventKind::ServeStart,
+            EventKind::CardYellow,
+            EventKind::CardRed,
+            EventKind::CardBlack,
+            EventKind::InjuryStart,
+            EventKind::InjuryEnd,
+            EventKind::Suspension,
+            EventKind::Overrule,
+            EventKind::RefereeCall,
+            EventKind::Retired,
+            EventKind::Disqualified,
+            EventKind::Retract,
+            EventKind::TeamsCorrected,
+        ];
+        let phasen = [
+            Phase::Play,
+            Phase::BreakEleven,
+            Phase::BreakGame,
+            Phase::BreakInjury,
+            Phase::PreMatch,
+            Phase::PostMatch,
+        ];
+        let behandlungen = [
+            Behandlung::Keine,
+            Behandlung::Dauer(BEHANDLUNG_MAX_MS / 1000),
+            Behandlung::Offen,
+            Behandlung::Unplausibel,
+        ];
+        let mut laengste = String::new();
+        for art in arten {
+            for phase in phasen {
+                for behandlung in behandlungen {
+                    for zurueckgenommen in [false, true] {
+                        let z = ProtokollZeile {
+                            nr: 1,
+                            ts_ms: 0,
+                            satz: 1,
+                            score_a: 0,
+                            score_b: 0,
+                            art,
+                            phase,
+                            team: 0,
+                            player: 0,
+                            zurueckgenommen,
+                            behandlung,
+                        };
+                        let t = art_zeile(&z);
+                        if t.chars().count() > laengste.chars().count() {
+                            laengste = t;
+                        }
+                    }
+                }
+            }
+        }
+        let gebraucht = laengste.chars().count() as f32 * ZEICHEN_ANTEIL * KLEIN_PT * PT_IN_MM;
+        assert!(
+            gebraucht <= ART_SPALTE_MM,
+            "{laengste:?} braucht ~{gebraucht} mm, die Spalte hat {ART_SPALTE_MM} mm"
+        );
+    }
+
+    /// Behandlung ohne Person: Die Spieler-Spalte bleibt leer, auch wenn
+    /// ein alter Handeintrag `team`/`player` trägt; die Karte daneben
+    /// behält ihren Spieler.
+    #[test]
+    fn behandlung_ohne_person_leere_spieler_spalte() {
+        use crate::tablet::scoresheet::{Behandlung, ProtokollZeile};
+        use relay_proto::{EventKind, Phase};
+        let zeile = |nr, art, player| ProtokollZeile {
+            nr,
+            ts_ms: 1_755_000_000_000,
+            satz: 1,
+            score_a: 3,
+            score_b: 2,
+            art,
+            phase: Phase::Play,
+            team: 1,
+            player,
+            zurueckgenommen: false,
+            behandlung: Behandlung::Offen,
+        };
+        let mut d = doc(vec![satz(1, 5)]);
+        d.grid.protokoll = vec![
+            zeile(1, EventKind::InjuryStart, 1),
+            zeile(2, EventKind::Retired, 1),
+            zeile(3, EventKind::CardYellow, 0),
+        ];
+        let anhang = &blatt(&d)[1];
+        let t = texte(anhang);
+        assert!(t.iter().any(|x| x == "B1"), "Karte trägt ihren Spieler");
+        assert!(
+            !t.iter().any(|x| x == "B2"),
+            "Behandlung/Aufgabe ohne Person"
+        );
+        assert!(t
+            .iter()
+            .any(|x| x == "Behandlung Beginn — Ende —, Dauer offen"));
     }
 }

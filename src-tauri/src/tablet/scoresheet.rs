@@ -49,8 +49,12 @@ pub struct Zelle {
     pub wert: i64,
     /// Druckbar in Schwarz-Weiß, Zeichen des DBV-Bogens (ADR 0043):
     /// `W` Warnung, `F` Fault (rote Karte), `R` Referee gerufen,
-    /// `D` Disqualifikation.
-    pub marker: Option<char>,
+    /// `D` Disqualifikation, `B` Behandlung (ADR 0095).
+    ///
+    /// **Höchstens zwei**, nach Rang geordnet (`D > F > W > R > B`): die
+    /// erste steht rechts oben, die zweite links oben. Eine dritte Marke
+    /// steht nur im Protokoll — der Zellwert bliebe sonst nicht lesbar.
+    pub marken: Vec<char>,
 }
 
 /// Ein Ereignis ohne Trägerballwechsel (Karte in der Satzpause, vor dem
@@ -100,7 +104,35 @@ pub struct ProtokollZeile {
     /// **nicht** im Raster. Für einen Archivbeleg ist das ehrlicher als
     /// spurloses Verschwinden (ADR 0038).
     pub zurueckgenommen: bool,
+    /// Ergebnis der Behandlungs-Paarung (ADR 0095) — nur an
+    /// `InjuryStart`/`InjuryEnd` je von [`Behandlung::Keine`] verschieden.
+    pub behandlung: Behandlung,
 }
+
+/// Was die Paarung über eine Behandlungszeile herausgefunden hat.
+///
+/// Die Dauer entsteht **nur hier** aus den zwei Zeitstempeln — auf dem
+/// Draht reist keine (ADR 0095). So erhalten auch alte Handeinträge eine
+/// Dauer, und es gibt keinen zweiten, ungeprüften Wert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Behandlung {
+    /// Nichts zu sagen: kein Behandlungsereignis, ein gepaarter Beginn
+    /// (die Dauer steht am Ende) oder ein Ende ohne offenen Beginn.
+    #[default]
+    Keine,
+    /// Am Ende: Dauer in Sekunden.
+    Dauer(u64),
+    /// Am Beginn: kein Ende aufgezeichnet (Spiel vom Feld, Tablet weg).
+    Offen,
+    /// Am Ende: Ende vor dem Beginn oder länger als
+    /// [`BEHANDLUNG_MAX_MS`] — eine Uhr lag daneben, geraten wird nicht.
+    Unplausibel,
+}
+
+/// Längste glaubhafte Behandlung. Darüber hat eine Uhr gesprungen (oder
+/// jemand hat das Ende vergessen und Stunden später nachgetragen) — der
+/// Zettel sagt dann „Dauer —" statt einer erfundenen Zahl.
+pub const BEHANDLUNG_MAX_MS: u64 = 6 * 60 * 60 * 1000;
 
 /// Das fertige Raster.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -118,15 +150,140 @@ pub struct Grid {
 /// `None` = erscheint nur im Protokoll.
 ///
 /// `W` Warnung (gelbe Karte) · `F` Fault (rote Karte) · `R` Referee
-/// gerufen · `D` Disqualifikation. Vorher standen dort die hausgemachten
-/// `V`/`F`/`D`; Schiedsrichter erkennen jetzt ihre gewohnten Zeichen.
+/// gerufen · `D` Disqualifikation · `B` Behandlung (nur der Beginn, ADR
+/// 0095). Vorher standen dort die hausgemachten `V`/`F`/`D`;
+/// Schiedsrichter erkennen jetzt ihre gewohnten Zeichen.
 fn marker_fuer(art: EventKind) -> Option<char> {
     match art {
         EventKind::CardYellow => Some('W'),
         EventKind::CardRed => Some('F'),
         EventKind::RefereeCall => Some('R'),
         EventKind::CardBlack | EventKind::Disqualified => Some('D'),
+        EventKind::InjuryStart => Some('B'),
         _ => None,
+    }
+}
+
+/// Rang einer Marke — kleiner = wichtiger. Bei mehr als zwei Marken an
+/// einem Ballwechsel bleiben die beiden wichtigsten im Raster.
+fn rang(marke: char) -> u8 {
+    match marke {
+        'D' => 0,
+        'F' => 1,
+        'W' => 2,
+        'R' => 3,
+        _ => 4,
+    }
+}
+
+/// Höchstens so viele Marken trägt eine Zelle (ADR 0095).
+pub const MARKEN_JE_ZELLE: usize = 2;
+
+/// Marke in eine Zelle eintragen: Duplikate entfallen, Rangfolge
+/// `D > F > W > R > B`, gedeckelt auf [`MARKEN_JE_ZELLE`].
+fn marke_setzen(zelle: &mut Zelle, marke: char) {
+    if zelle.marken.contains(&marke) {
+        return;
+    }
+    zelle.marken.push(marke);
+    zelle.marken.sort_by_key(|m| rang(*m));
+    zelle.marken.truncate(MARKEN_JE_ZELLE);
+}
+
+/// Trägt diese Art eine **Person** in der Spieler-Spalte?
+///
+/// Positivliste (ADR 0095): nur Aufschlagfolge, Karten und
+/// Disqualifikation betreffen einen bestimmten Spieler. Alles andere —
+/// vor allem Behandlung und Aufgabe — bleibt leer: `team`/`player` stehen
+/// dort auf 0 und ergäben „A1", eine Gesundheitsangabe an der falschen
+/// Person. Bewusst **ohne** Wildcard: eine neue Art muss hier
+/// entschieden werden, sonst baut der Code nicht.
+pub(crate) fn traegt_person(art: EventKind) -> bool {
+    match art {
+        EventKind::ServeStart
+        | EventKind::CardYellow
+        | EventKind::CardRed
+        | EventKind::CardBlack
+        | EventKind::Disqualified => true,
+        EventKind::InjuryStart
+        | EventKind::InjuryEnd
+        | EventKind::Suspension
+        | EventKind::Overrule
+        | EventKind::RefereeCall
+        | EventKind::Retired
+        | EventKind::Retract
+        | EventKind::TeamsCorrected => false,
+    }
+}
+
+/// Dauer als `m:ss` — Minuten laufen über 59 hinaus weiter (`75:00`).
+pub(crate) fn dauer_text(sekunden: u64) -> String {
+    format!("{}:{:02}", sekunden / 60, sekunden % 60)
+}
+
+/// Behandlungen paaren (ADR 0095): Ein Ende schließt den **jüngsten
+/// offenen** Beginn. Ordnung wie im Bestand `(set, after_n, seq, id)`;
+/// bei gleicher Position entscheidet zuerst `ts_ms` — nur für die
+/// Paarung, das Protokoll behält seine Reihenfolge.
+///
+/// Liefert je Ereignis-Kennung, was in seiner Zeile steht. Nur wirksame
+/// Ereignisse gehen hinein; Zurückgenommenes hat der Aufrufer gefiltert.
+fn behandlungen_paaren<'a>(
+    wirksam: &[&'a MatchEvent],
+) -> std::collections::HashMap<&'a str, Behandlung> {
+    let mut folge: Vec<&MatchEvent> = wirksam
+        .iter()
+        .copied()
+        .filter(|e| matches!(e.kind, EventKind::InjuryStart | EventKind::InjuryEnd))
+        .collect();
+    folge.sort_by(|a, b| {
+        (a.set, a.after_n, a.ts_ms, a.seq, &a.id).cmp(&(b.set, b.after_n, b.ts_ms, b.seq, &b.id))
+    });
+    let mut ergebnis = std::collections::HashMap::new();
+    let mut offen: Vec<&MatchEvent> = Vec::new();
+    for e in folge {
+        match e.kind {
+            EventKind::InjuryStart => offen.push(e),
+            _ => {
+                let wert = match offen.pop() {
+                    // Überlauffest: `ts_ms` ist auf dem Draht ungedeckelt.
+                    Some(beginn) => match e.ts_ms.checked_sub(beginn.ts_ms) {
+                        Some(ms) if ms <= BEHANDLUNG_MAX_MS => Behandlung::Dauer(ms / 1000),
+                        _ => Behandlung::Unplausibel,
+                    },
+                    None => Behandlung::Keine,
+                };
+                ergebnis.insert(e.id.as_str(), wert);
+            }
+        }
+    }
+    for beginn in offen {
+        ergebnis.insert(beginn.id.as_str(), Behandlung::Offen);
+    }
+    ergebnis
+}
+
+/// Text der Art-Spalte einer Protokollzeile.
+///
+/// Der Beginn behält seinen Phasenzusatz („(Intervall)"); das Ende steht
+/// ohne, dafür mit der Dauer — es gehört zur selben Behandlung.
+pub(crate) fn art_zeile(z: &ProtokollZeile) -> String {
+    let art = art_klartext(z.art);
+    let kern = match (z.art, z.behandlung) {
+        (EventKind::InjuryEnd, Behandlung::Dauer(s)) => format!("{art} (Dauer {})", dauer_text(s)),
+        (EventKind::InjuryEnd, Behandlung::Unplausibel) => format!("{art} (Dauer —)"),
+        (EventKind::InjuryEnd, _) => art.to_string(),
+        // Nur wirksame Beginne werden gepaart; ein zurückgenommener ist nie
+        // „offen" — die Wache hält die Zeile trotzdem in der Spalte.
+        (EventKind::InjuryStart, Behandlung::Offen) if !z.zurueckgenommen => {
+            format!("{art}{} — Ende —, Dauer offen", phase_klartext(z.phase))
+        }
+        _ => format!("{art}{}", phase_klartext(z.phase)),
+    };
+    if z.zurueckgenommen {
+        format!("{kern} — zurückgenommen")
+    } else {
+        kern
     }
 }
 
@@ -316,7 +473,7 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
                 col,
                 gruppe: (col - 1) / BALLWECHSEL_JE_BLOCK,
                 wert: punkte[team as usize],
-                marker: None,
+                marken: Vec::new(),
             });
         }
 
@@ -333,13 +490,17 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
                 } else {
                     0
                 }) as usize;
-            let treffer = (e.phase == Phase::Play)
+            // Eine Behandlung aus dem Intervall gehört noch zum Ballwechsel
+            // davor (ADR 0095); Karten im Intervall bleiben am Rand.
+            let in_zelle = e.phase == Phase::Play
+                || (e.kind == EventKind::InjuryStart && e.phase == Phase::BreakEleven);
+            let treffer = in_zelle
                 .then(|| zellen.iter_mut().find(|z| z.col as i64 == e.after_n))
                 .flatten();
             match treffer {
                 // Genau EINE Zelle je Karte: die des Ballwechsels, den sie
                 // erzeugt hat.
-                Some(zelle) => zelle.marker = Some(zeichen),
+                Some(zelle) => marke_setzen(zelle, zeichen),
                 None => rand_marker.push(RandMarker {
                     row,
                     nach_ballwechsel: e.after_n,
@@ -361,10 +522,25 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
         });
     }
 
+    let behandlungen = behandlungen_paaren(&wirksam);
+    // Eine neu verankerte Behandlung (Undo, ADR 0095) besteht aus dem
+    // zurückgenommenen Original und einer wirksamen Kopie mit gleicher Art
+    // und gleichem Zeitstempel. Sie erscheint nur **einmal** — durchgestrichen
+    // daneben sähe sie aus, als hätte es sie nicht gegeben.
+    let verschoben = |e: &MatchEvent| -> bool {
+        matches!(e.kind, EventKind::InjuryStart | EventKind::InjuryEnd)
+            && ist_zurueckgenommen(e)
+            && wirksam.iter().any(|w| {
+                // Die Neuverankerung bleibt im Satz; `after_n` ändert sie
+                // dagegen gerade — deshalb kein Vergleich darauf.
+                w.kind == e.kind && w.set == e.set && w.ts_ms == e.ts_ms && w.id != e.id
+            })
+    };
+
     // Protokoll: alles, auch Zurückgenommenes — dort durchgestrichen.
     let mut protokoll: Vec<ProtokollZeile> = events
         .iter()
-        .filter(|e| e.kind != EventKind::Retract)
+        .filter(|e| e.kind != EventKind::Retract && !verschoben(e))
         .enumerate()
         .map(|(i, e)| ProtokollZeile {
             nr: i + 1,
@@ -377,6 +553,7 @@ pub fn sheet_grid(timeline: &MatchTimeline, events: &[MatchEvent], doppel: bool)
             team: e.team,
             player: e.player,
             zurueckgenommen: ist_zurueckgenommen(e),
+            behandlung: behandlungen.get(e.id.as_str()).copied().unwrap_or_default(),
         })
         .collect();
     for (i, z) in protokoll.iter_mut().enumerate() {
@@ -843,8 +1020,10 @@ mod tests {
         assert_eq!(marker_fuer(EventKind::RefereeCall), Some('R'));
         assert_eq!(marker_fuer(EventKind::CardBlack), Some('D'));
         assert_eq!(marker_fuer(EventKind::Disqualified), Some('D'));
+        // Behandlung: nur der Beginn markiert (ADR 0095).
+        assert_eq!(marker_fuer(EventKind::InjuryStart), Some('B'));
         // Was keine Zelle bekommt, steht nur im Protokoll.
-        assert_eq!(marker_fuer(EventKind::InjuryStart), None);
+        assert_eq!(marker_fuer(EventKind::InjuryEnd), None);
         assert_eq!(marker_fuer(EventKind::ServeStart), None);
     }
 
@@ -896,11 +1075,11 @@ mod tests {
         let mit_marker: Vec<&Zelle> = grid.blocks[0]
             .zellen
             .iter()
-            .filter(|z| z.marker.is_some())
+            .filter(|z| !z.marken.is_empty())
             .collect();
         assert_eq!(mit_marker.len(), 1, "genau eine Zelle");
         assert_eq!(mit_marker[0].col, 3);
-        assert_eq!(mit_marker[0].marker, Some('F'));
+        assert_eq!(mit_marker[0].marken, vec!['F']);
         assert!(grid.blocks[0].rand_marker.is_empty());
     }
 
@@ -930,7 +1109,7 @@ mod tests {
             false,
         );
         assert_eq!(grid.blocks[0].rand_marker.len(), 2);
-        assert!(grid.blocks[0].zellen.iter().all(|z| z.marker.is_none()));
+        assert!(grid.blocks[0].zellen.iter().all(|z| z.marken.is_empty()));
     }
 
     /// Ein Satz läuft nach 32 Ballwechseln im nächsten Block weiter — der
@@ -995,7 +1174,7 @@ mod tests {
             false,
         );
         assert!(
-            grid.blocks[0].zellen.iter().all(|z| z.marker.is_none()),
+            grid.blocks[0].zellen.iter().all(|z| z.marken.is_empty()),
             "nicht im Raster"
         );
         assert!(grid.blocks[0].rand_marker.is_empty());
@@ -1429,6 +1608,493 @@ mod tests {
         let grid = sheet_grid(&tl(vec![]), &[karte], false);
         assert!(grid.blocks.is_empty());
         assert_eq!(grid.protokoll.len(), 1);
+    }
+
+    // ── Behandlung (ADR 0095) ────────────────────────────────────────────
+
+    /// Zeitstempel einer Behandlung: Minuten nach einem festen Anker.
+    const T0: u64 = 1_755_600_000_000;
+    fn min(m: u64) -> u64 {
+        T0 + m * 60_000
+    }
+
+    /// Automatisches Behandlungsereignis, wie es das Tablet erzeugt: ohne
+    /// Person (`team`/`player` = 0).
+    fn beh(
+        id: &str,
+        set: i64,
+        after_n: i64,
+        kind: EventKind,
+        ts_ms: u64,
+        phase: Phase,
+    ) -> MatchEvent {
+        let mut e = ev(id, set, after_n, kind, 0, 0);
+        e.ts_ms = ts_ms;
+        e.phase = phase;
+        e
+    }
+
+    fn ruecknahme(id: &str, von: &MatchEvent) -> MatchEvent {
+        let mut r = ev(id, von.set, von.after_n, EventKind::Retract, 0, 0);
+        r.retracts = von.id.clone();
+        r
+    }
+
+    fn zeile_von(grid: &Grid, art: EventKind) -> Vec<&ProtokollZeile> {
+        grid.protokoll.iter().filter(|z| z.art == art).collect()
+    }
+
+    fn zelle(grid: &Grid, col: usize) -> &Zelle {
+        grid.blocks[0]
+            .zellen
+            .iter()
+            .find(|z| z.col == col)
+            .expect("Zelle vorhanden")
+    }
+
+    #[test]
+    fn behandlung_beginn_markiert_seine_zelle_mit_b() {
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[
+                aufschlag(1, 0, 0, 1, 0),
+                beh("b1", 1, 3, EventKind::InjuryStart, min(0), Phase::Play),
+            ],
+            false,
+        );
+        assert_eq!(zelle(&grid, 3).marken, vec!['B']);
+        let andere: usize = grid.blocks[0]
+            .zellen
+            .iter()
+            .filter(|z| !z.marken.is_empty())
+            .count();
+        assert_eq!(andere, 1, "genau eine Zelle");
+        assert!(grid.blocks[0].rand_marker.is_empty());
+    }
+
+    /// Im Intervall bei 11 gehört die Behandlung noch zum Ballwechsel davor.
+    #[test]
+    fn behandlung_aus_dem_intervall_markiert_die_zelle() {
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[
+                aufschlag(1, 0, 0, 1, 0),
+                beh(
+                    "b1",
+                    1,
+                    5,
+                    EventKind::InjuryStart,
+                    min(0),
+                    Phase::BreakEleven,
+                ),
+            ],
+            false,
+        );
+        assert_eq!(zelle(&grid, 5).marken, vec!['B']);
+        assert!(grid.blocks[0].rand_marker.is_empty());
+    }
+
+    #[test]
+    fn behandlung_ende_markiert_nichts() {
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[
+                aufschlag(1, 0, 0, 1, 0),
+                beh("e1", 1, 4, EventKind::InjuryEnd, min(3), Phase::Play),
+            ],
+            false,
+        );
+        assert!(grid.blocks[0].zellen.iter().all(|z| z.marken.is_empty()));
+        assert!(grid.blocks[0].rand_marker.is_empty());
+    }
+
+    /// Vor dem ersten Ballwechsel gibt es keine Trägerzelle.
+    #[test]
+    fn behandlung_bei_satzbeginn_steht_am_rand() {
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[
+                aufschlag(1, 0, 0, 1, 0),
+                beh("b1", 1, 0, EventKind::InjuryStart, min(0), Phase::Play),
+            ],
+            false,
+        );
+        assert!(grid.blocks[0].zellen.iter().all(|z| z.marken.is_empty()));
+        assert_eq!(grid.blocks[0].rand_marker.len(), 1);
+        assert_eq!(grid.blocks[0].rand_marker[0].marker, 'B');
+    }
+
+    /// Satzpause: Das Tablet verankert sie bei `(set + 1, 0)` — Rand.
+    #[test]
+    fn behandlung_aus_der_satzpause_steht_am_rand() {
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA"), satz(0, 0, "BA")]),
+            &[
+                aufschlag(1, 0, 0, 1, 0),
+                aufschlag(2, 1, 0, 0, 0),
+                beh("b1", 2, 0, EventKind::InjuryStart, min(0), Phase::BreakGame),
+            ],
+            false,
+        );
+        assert!(grid
+            .blocks
+            .iter()
+            .all(|b| b.zellen.iter().all(|z| z.marken.is_empty())));
+        assert_eq!(grid.blocks[1].rand_marker.len(), 1);
+        // Auch eine Behandlung in der Satzpause mit Anker im Vorsatz
+        // (Altbestand) bekäme keine Zelle.
+        let alt = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[
+                aufschlag(1, 0, 0, 1, 0),
+                beh("b2", 1, 5, EventKind::InjuryStart, min(0), Phase::BreakGame),
+            ],
+            false,
+        );
+        assert!(alt.blocks[0].zellen.iter().all(|z| z.marken.is_empty()));
+        assert_eq!(alt.blocks[0].rand_marker.len(), 1);
+    }
+
+    #[test]
+    fn zelle_traegt_bis_zu_zwei_marken() {
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[
+                aufschlag(1, 0, 0, 1, 0),
+                beh("b1", 1, 3, EventKind::InjuryStart, min(0), Phase::Play),
+                ev("k1", 1, 3, EventKind::CardYellow, 1, 0),
+                // Zweimal dieselbe Marke zählt einmal.
+                ev("k2", 1, 3, EventKind::CardYellow, 1, 0),
+            ],
+            false,
+        );
+        // Rang: W vor B — W rechts oben, B links oben.
+        assert_eq!(zelle(&grid, 3).marken, vec!['W', 'B']);
+    }
+
+    #[test]
+    fn dritte_marke_faellt_nach_rangfolge_aus_dem_raster() {
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[
+                aufschlag(1, 0, 0, 1, 0),
+                beh("b1", 1, 3, EventKind::InjuryStart, min(0), Phase::Play),
+                ev("k1", 1, 3, EventKind::CardYellow, 1, 0),
+                ev("k2", 1, 3, EventKind::CardRed, 1, 0),
+            ],
+            false,
+        );
+        assert_eq!(zelle(&grid, 3).marken, vec!['F', 'W']);
+        // Die Behandlung steht trotzdem im Protokoll.
+        assert_eq!(zeile_von(&grid, EventKind::InjuryStart).len(), 1);
+        // Und die volle Rangfolge D > F > W > R > B gilt in jeder Lage.
+        let mut z = Zelle {
+            row: 0,
+            col: 1,
+            gruppe: 0,
+            wert: 1,
+            marken: Vec::new(),
+        };
+        for m in ['B', 'R', 'W', 'F', 'D'] {
+            marke_setzen(&mut z, m);
+        }
+        assert_eq!(z.marken, vec!['D', 'F']);
+    }
+
+    #[test]
+    fn paarung_beginn_ende_liefert_dauer() {
+        let beginn = beh("b1", 1, 3, EventKind::InjuryStart, T0, Phase::Play);
+        let mut ende = beh(
+            "e1",
+            1,
+            3,
+            EventKind::InjuryEnd,
+            T0 + 252_400,
+            Phase::BreakInjury,
+        );
+        ende.seq = 4;
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[beginn, ende], false);
+        let b = zeile_von(&grid, EventKind::InjuryStart)[0];
+        let e = zeile_von(&grid, EventKind::InjuryEnd)[0];
+        assert_eq!(b.behandlung, Behandlung::Keine, "Dauer steht am Ende");
+        assert_eq!(e.behandlung, Behandlung::Dauer(252));
+        assert_eq!(art_zeile(b), "Behandlung Beginn");
+        // Das Ende ohne Phasenzusatz, mit Dauer.
+        assert_eq!(art_zeile(e), "Behandlung Ende (Dauer 4:12)");
+        assert_eq!(dauer_text(0), "0:00");
+        assert_eq!(dauer_text(59), "0:59");
+        assert_eq!(dauer_text(60), "1:00");
+        assert_eq!(dauer_text(4499), "74:59");
+    }
+
+    #[test]
+    fn beginn_ohne_ende_ist_dauer_offen() {
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[beh(
+                "b1",
+                1,
+                5,
+                EventKind::InjuryStart,
+                T0,
+                Phase::BreakEleven,
+            )],
+            false,
+        );
+        let b = zeile_von(&grid, EventKind::InjuryStart)[0];
+        assert_eq!(b.behandlung, Behandlung::Offen);
+        assert_eq!(
+            art_zeile(b),
+            "Behandlung Beginn (Intervall) — Ende —, Dauer offen"
+        );
+    }
+
+    #[test]
+    fn ende_ohne_beginn_ist_nur_eine_zeile() {
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[beh(
+                "e1",
+                1,
+                4,
+                EventKind::InjuryEnd,
+                T0,
+                Phase::BreakInjury,
+            )],
+            false,
+        );
+        assert_eq!(grid.protokoll.len(), 1);
+        let e = &grid.protokoll[0];
+        assert_eq!(e.behandlung, Behandlung::Keine);
+        assert_eq!(art_zeile(e), "Behandlung Ende");
+    }
+
+    /// Zwei offene Beginne: Das Ende schließt den jüngeren, der ältere
+    /// bleibt offen.
+    #[test]
+    fn ende_schliesst_den_juengsten_offenen_beginn() {
+        let alt = beh("b1", 1, 2, EventKind::InjuryStart, min(0), Phase::Play);
+        let jung = beh("b2", 1, 4, EventKind::InjuryStart, min(10), Phase::Play);
+        let ende = beh(
+            "e1",
+            1,
+            4,
+            EventKind::InjuryEnd,
+            min(13),
+            Phase::BreakInjury,
+        );
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[alt, jung, ende], false);
+        let beginne = zeile_von(&grid, EventKind::InjuryStart);
+        assert_eq!(beginne[0].behandlung, Behandlung::Offen);
+        assert_eq!(beginne[1].behandlung, Behandlung::Keine);
+        assert_eq!(
+            zeile_von(&grid, EventKind::InjuryEnd)[0].behandlung,
+            Behandlung::Dauer(180)
+        );
+
+        // Gleiche Position: `ts_ms` ordnet für die Paarung, nicht `seq`.
+        let mut b = beh("b9", 1, 4, EventKind::InjuryStart, min(20), Phase::Play);
+        b.seq = 9;
+        let mut e = beh(
+            "e9",
+            1,
+            4,
+            EventKind::InjuryEnd,
+            min(22),
+            Phase::BreakInjury,
+        );
+        e.seq = 1;
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[e, b], false);
+        assert_eq!(
+            zeile_von(&grid, EventKind::InjuryEnd)[0].behandlung,
+            Behandlung::Dauer(120)
+        );
+    }
+
+    #[test]
+    fn zurueckgenommenes_wird_vor_der_paarung_gefiltert() {
+        let falsch = beh("b1", 1, 2, EventKind::InjuryStart, min(0), Phase::Play);
+        let weg = ruecknahme("r1", &falsch);
+        let echt = beh("b2", 1, 3, EventKind::InjuryStart, min(5), Phase::Play);
+        let ende = beh("e1", 1, 3, EventKind::InjuryEnd, min(7), Phase::BreakInjury);
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[falsch, weg, echt, ende],
+            false,
+        );
+        let beginne = zeile_von(&grid, EventKind::InjuryStart);
+        assert_eq!(beginne.len(), 2, "Zurückgenommenes bleibt sichtbar");
+        assert!(beginne[0].zurueckgenommen);
+        assert_eq!(beginne[0].behandlung, Behandlung::Keine);
+        assert_eq!(
+            zeile_von(&grid, EventKind::InjuryEnd)[0].behandlung,
+            Behandlung::Dauer(120)
+        );
+        // Zurückgenommenes markiert nichts.
+        assert!(zelle(&grid, 2).marken.is_empty());
+        assert_eq!(zelle(&grid, 3).marken, vec!['B']);
+    }
+
+    /// Undo neu verankert: Original zurückgenommen, Kopie mit gleichem
+    /// Zeitstempel weiter vorn. Im Protokoll steht die Behandlung einmal.
+    #[test]
+    fn verschobene_behandlung_erscheint_einmal_im_protokoll() {
+        let b_alt = beh("b1", 1, 4, EventKind::InjuryStart, min(0), Phase::Play);
+        let e_alt = beh("e1", 1, 4, EventKind::InjuryEnd, min(3), Phase::BreakInjury);
+        let r_b = ruecknahme("r1", &b_alt);
+        let r_e = ruecknahme("r2", &e_alt);
+        let mut b_neu = beh("b2", 1, 3, EventKind::InjuryStart, min(0), Phase::Play);
+        b_neu.seq = 10;
+        let mut e_neu = beh("e2", 1, 3, EventKind::InjuryEnd, min(3), Phase::BreakInjury);
+        e_neu.seq = 11;
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABB")]),
+            &[b_neu, e_neu, b_alt, e_alt, r_b, r_e],
+            false,
+        );
+        assert_eq!(zeile_von(&grid, EventKind::InjuryStart).len(), 1);
+        assert_eq!(zeile_von(&grid, EventKind::InjuryEnd).len(), 1);
+        assert!(grid.protokoll.iter().all(|z| !z.zurueckgenommen));
+        assert_eq!(
+            zeile_von(&grid, EventKind::InjuryEnd)[0].behandlung,
+            Behandlung::Dauer(180)
+        );
+        // Nummern bleiben lückenlos.
+        let nrn: Vec<usize> = grid.protokoll.iter().map(|z| z.nr).collect();
+        assert_eq!(nrn, vec![1, 2]);
+        assert_eq!(zelle(&grid, 3).marken, vec!['B']);
+        assert!(zelle(&grid, 4).marken.is_empty());
+    }
+
+    #[test]
+    fn ende_vor_beginn_ist_unplausibel() {
+        // Ende positionsmäßig nach dem Beginn, aber mit früherer Uhrzeit
+        // (Uhrensprung beim Tablet-Wechsel).
+        let b = beh("b1", 1, 2, EventKind::InjuryStart, min(10), Phase::Play);
+        let e = beh("e1", 1, 3, EventKind::InjuryEnd, min(4), Phase::BreakInjury);
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[b, e], false);
+        let e = zeile_von(&grid, EventKind::InjuryEnd)[0];
+        assert_eq!(e.behandlung, Behandlung::Unplausibel);
+        assert_eq!(art_zeile(e), "Behandlung Ende (Dauer —)");
+
+        // Länger als sechs Stunden: ebenso.
+        let b = beh("b2", 1, 2, EventKind::InjuryStart, T0, Phase::Play);
+        let e = beh(
+            "e2",
+            1,
+            3,
+            EventKind::InjuryEnd,
+            T0 + BEHANDLUNG_MAX_MS + 1,
+            Phase::Play,
+        );
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[b, e], false);
+        assert_eq!(
+            zeile_von(&grid, EventKind::InjuryEnd)[0].behandlung,
+            Behandlung::Unplausibel
+        );
+        // Genau sechs Stunden gelten noch.
+        let b = beh("b3", 1, 2, EventKind::InjuryStart, T0, Phase::Play);
+        let e = beh(
+            "e3",
+            1,
+            3,
+            EventKind::InjuryEnd,
+            T0 + BEHANDLUNG_MAX_MS,
+            Phase::Play,
+        );
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[b, e], false);
+        assert_eq!(
+            zeile_von(&grid, EventKind::InjuryEnd)[0].behandlung,
+            Behandlung::Dauer(6 * 3600)
+        );
+    }
+
+    /// `ts_ms` ist auf dem Draht ungedeckelt — die Rechnung darf weder
+    /// überlaufen noch in Panik geraten.
+    #[test]
+    fn riesige_zeitstempel_ueberlaufen_nicht() {
+        for (tb, te) in [(u64::MAX, 0), (0, u64::MAX), (u64::MAX, u64::MAX), (0, 0)] {
+            let b = beh("b1", 1, 2, EventKind::InjuryStart, tb, Phase::Play);
+            let e = beh("e1", 1, 3, EventKind::InjuryEnd, te, Phase::Play);
+            let grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[b, e], false);
+            let z = zeile_von(&grid, EventKind::InjuryEnd)[0];
+            let erwartet = if tb == te {
+                Behandlung::Dauer(0)
+            } else {
+                Behandlung::Unplausibel
+            };
+            assert_eq!(z.behandlung, erwartet, "{tb} → {te}");
+            let _ = art_zeile(z);
+            let _ = uhrzeit(z.ts_ms);
+        }
+    }
+
+    /// Positivliste: nur Aufschlagfolge, Karten und Disqualifikation tragen
+    /// eine Person. Der `match` hier hat bewusst **keine** Wildcard — eine
+    /// neue Art muss auch im Test entschieden werden.
+    #[test]
+    fn ereignisse_ohne_person_lassen_die_spieler_spalte_leer() {
+        let alle = [
+            EventKind::ServeStart,
+            EventKind::CardYellow,
+            EventKind::CardRed,
+            EventKind::CardBlack,
+            EventKind::InjuryStart,
+            EventKind::InjuryEnd,
+            EventKind::Suspension,
+            EventKind::Overrule,
+            EventKind::RefereeCall,
+            EventKind::Retired,
+            EventKind::Disqualified,
+            EventKind::Retract,
+            EventKind::TeamsCorrected,
+        ];
+        for art in alle {
+            let erwartet = match art {
+                EventKind::ServeStart
+                | EventKind::CardYellow
+                | EventKind::CardRed
+                | EventKind::CardBlack
+                | EventKind::Disqualified => true,
+                EventKind::InjuryStart
+                | EventKind::InjuryEnd
+                | EventKind::Suspension
+                | EventKind::Overrule
+                | EventKind::RefereeCall
+                | EventKind::Retired
+                | EventKind::Retract
+                | EventKind::TeamsCorrected => false,
+            };
+            assert_eq!(traegt_person(art), erwartet, "{art:?}");
+        }
+    }
+
+    /// Handeinträge aus dem Schiri-Menü (Altbestand) tragen eine Person und
+    /// teils die Behandlungspause als Phase — sie werden genauso gepaart
+    /// und markiert.
+    #[test]
+    fn alte_handeintraege_werden_gepaart() {
+        let mut b = ev("h1", 1, 3, EventKind::InjuryStart, 1, 1);
+        b.ts_ms = min(0);
+        let mut e = ev("h2", 1, 3, EventKind::InjuryEnd, 1, 1);
+        e.ts_ms = min(2) + 30_000;
+        e.seq = 4;
+        e.phase = Phase::BreakInjury;
+        let grid = sheet_grid(
+            &tl(vec![satz(0, 0, "AABBA")]),
+            &[aufschlag(1, 0, 0, 1, 0), b, e],
+            true,
+        );
+        assert_eq!(zelle(&grid, 3).marken, vec!['B']);
+        assert_eq!(
+            zeile_von(&grid, EventKind::InjuryEnd)[0].behandlung,
+            Behandlung::Dauer(150)
+        );
+        // Ein einzelner alter Beginn wird „Dauer offen".
+        let mut nur = ev("h3", 1, 2, EventKind::InjuryStart, 0, 1);
+        nur.ts_ms = min(0);
+        let grid = sheet_grid(&tl(vec![satz(0, 0, "AABBA")]), &[nur], false);
+        assert_eq!(grid.protokoll[0].behandlung, Behandlung::Offen);
     }
 }
 

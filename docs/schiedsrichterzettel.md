@@ -132,11 +132,32 @@ kennen (ADR [0043](adr/0043-zettelblatt-nach-dbv-vorbild.md)):
   das **Turnierlogo** (sofern hinterlegt) und der Turniername — **kein
   Verbandslogo**, das ist geschützt.
 - **Marker in der Zelle** in der gewohnten Konvention: **W** Warnung (gelb),
-  **F** Fault (rot), **R** Oberschiedsrichter gerufen, **D** Disqualifikation.
+  **F** Fault (rot), **R** Oberschiedsrichter gerufen, **D** Disqualifikation,
+  **B** Behandlung (am Beginn der Verletzungsunterbrechung, ADR
+  [0095](adr/0095-behandlung-als-ereignispaar.md)). Eine Zelle trägt **bis zu
+  zwei** Marken: die wichtigere rechts oben, die zweite links oben (Rangfolge
+  D > F > W > R > B). Eine dritte Marke am selben Ballwechsel steht nur im
+  Anhang.
+- **B** steht in der Zelle des Ballwechsels, nach dem die Behandlung begann —
+  auch im Intervall bei 11. Vor dem ersten Ballwechsel eines Satzes, in der
+  Satzpause oder vor/nach dem Spiel gibt es keine Trägerzelle; dann steht sie im
+  Anhang unter „Ohne Ballwechsel".
 - **Fuß:** Unterschriftszeilen „Schiedsrichter" und „Referee".
 - **Vorkommnisse** (Karten, Behandlungen, Rücknahmen) stehen auf einer eigenen
   **Anhangseite** mit Uhrzeit, Satz, Stand und Art — der Bogen selbst hat dafür
   keinen Platz. Ein Spiel ohne Vorkommnisse hat auch keine Anhangseite.
+- **Behandlungen** erscheinen dort als zwei Zeilen: „Behandlung Beginn" (mit
+  Phase, z. B. „(Intervall)") und „Behandlung Ende (Dauer 4:12)". Die Dauer
+  rechnet der Zettel aus den beiden Uhrzeiten; ein Ende schließt immer den
+  jüngsten noch offenen Beginn. Fehlt das Ende (Spiel vom Feld, Tablet
+  gewechselt), heißt es „— Ende —, Dauer offen". Liegt das Ende vor dem Beginn
+  oder über sechs Stunden danach, steht „(Dauer —)" — eine Uhr lag daneben,
+  geraten wird nicht. Das gilt auch für alte Einträge aus dem Schiri-Menü.
+- **Spieler-Spalte nur, wo eine Person gemeint ist:** Aufschlagfolge, Karten und
+  Disqualifikation. Behandlung, Aufgabe, Unterbrechung, Überstimmung und
+  Oberschiedsrichter-Ruf bleiben leer — auch bei alten Einträgen, die intern eine
+  Mannschaft tragen. Eine Behandlung bei „A1" wäre eine Gesundheitsangabe an der
+  womöglich falschen Person.
 
 Das Layout ist eine Elementliste in Millimetern
 (ADR [0042](adr/0042-stiller-druck-ueber-elementliste.md)); Breite und Höhe des

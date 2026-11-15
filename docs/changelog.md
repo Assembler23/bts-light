@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.417
+
+- **Schiedsrichterzettel: Behandlungen mit Dauer.** Eine
+  Verletzungsunterbrechung steht jetzt vollständig auf dem Zettel: Im Raster
+  markiert ein **„B"** den Ballwechsel, nach dem die Behandlung begann (auch
+  im Intervall bei 11), im Anhang stehen „Behandlung Beginn" und
+  „Behandlung Ende (Dauer 4:12)". Fehlt das Ende, heißt es „Dauer offen";
+  passen die Uhrzeiten nicht zusammen, „Dauer —". Gilt auch für Einträge, die
+  schon über das Schiri-Menü erfasst wurden.
+  - Eine Zelle trägt jetzt **bis zu zwei Marken** (die wichtigere rechts
+    oben, die zweite links oben).
+  - Die **Spieler-Spalte** im Anhang ist nur noch bei Aufschlagfolge, Karten
+    und Disqualifikation gefüllt. Behandlung, Aufgabe, Unterbrechung,
+    Überstimmung und „Oberschiedsrichter gerufen" stehen ohne Spieler — eine
+    Behandlung bei „A1" wäre eine Gesundheitsangabe an der womöglich falschen
+    Person.
+
 ## v0.9.416
 
 - **Demofeld zum Üben am Tablet.** Schiedsrichter und Helfer können das
