@@ -23,6 +23,8 @@ import * as aa from "../src/io/abschlussAnsicht.mjs";
 import * as bz from "../src/io/ballzaehler.mjs";
 import * as sp from "../src/io/satzpunkt.mjs";
 import * as as from "../src/io/ansageSchrift.mjs";
+import * as me from "../src/io/matchEvents.mjs";
+import * as bu from "../src/io/behandlungsUhr.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -434,6 +436,92 @@ for (const name of ["tablet.html", "anzeige.html", "lobby.html"]) {
     ok("tablet.html: ansageSchriftWaehlen wie Modul", FAELLE.map((x) => ruf(f, x)), FAELLE.map((x) => ruf(as, x)));
     const ROH = ["1", "0", null, undefined, "", 1, true];
     ok("tablet.html: grosseSchriftAus wie Modul", ROH.map((r) => f.grosseSchriftAus(r)), ROH.map((r) => as.grosseSchriftAus(r)));
+  }
+}
+
+// ── Zettel-Ereignisse + Behandlungsuhr (Spec verletzungsunterbrechung) ──
+// Die `me*`-Kopie hatte bis hierher keine Drift-Prüfung. Eine abweichende
+// Kopie nähme beim Undo eine Behandlung mit (Zeit-Tatsache gelöscht) oder
+// verschöbe sie über den Deckel hinaus; eine abweichende Uhr-Kopie erzeugte
+// Behandlungsereignisse hinter einem Host, der sie bei „A1" druckt.
+{
+  const text = seite("tablet.html");
+  const zuordnung = {
+    meSortiere: "sortiere",
+    meVereinigen: "vereinigen",
+    meUndoSchnitt: "undoSchnitt",
+    meUndoNeuverankern: "undoNeuverankern",
+    meAufschlagJenseitsSatz: "aufschlagJenseitsSatz",
+    meIstZurueckgenommen: "istZurueckgenommen",
+    meAnkerNachBuchung: "ankerNachBuchung",
+  };
+  const namen = Object.keys(zuordnung);
+  const quellen = namen.map((n) => funktion(text, n));
+  ok("tablet.html: me*-Kopien vorhanden", quellen.every(Boolean), true);
+  const max = text.match(/const ME_MAX_EVENTS = (\d+);/);
+  ok("tablet.html: ME_MAX_EVENTS wie Modul", max ? Number(max[1]) : null, me.MAX_EVENTS);
+  const zt = text.match(/const ME_ZEIT_TATSACHEN = (\[[^\]]*\]);/);
+  ok("tablet.html: ME_ZEIT_TATSACHEN wie Modul",
+    zt ? JSON.parse(zt[1].replace(/'/g, '"')) : null, me.ZEIT_TATSACHEN);
+  if (quellen.every(Boolean) && max && zt) {
+    // eslint-disable-next-line no-new-func
+    const f = new Function(`const ME_MAX_EVENTS = ${max[1]};\nconst ME_ZEIT_TATSACHEN = ${zt[1]};\n`
+      + quellen.join("\n") + "\nreturn { " + namen.join(", ") + " };")();
+    const gleich = (kopie, faelle, ruf) =>
+      ok("tablet.html: " + kopie + " wie Modul",
+        faelle.map((x) => ruf(f[kopie], x)), faelle.map((x) => ruf(me[zuordnung[kopie]], x)));
+    const e = (id, set, afterN, seq, kind, extra = {}) => ({ id, set, afterN, seq, kind, tsMs: seq * 1000, phase: "play", ...extra });
+    const BESTAND = [
+      e("k1", 1, 5, 1, "card_yellow"),
+      e("b1", 1, 5, 2, "injury_start"),
+      e("e1", 1, 5, 3, "injury_end", { phase: "break_injury" }),
+      e("b0", 1, 2, 4, "injury_start"),
+      e("s2", 2, 0, 5, "serve_start"),
+      e("x9", 2, 3, 6, "injury_start", { tsMs: 1 }),
+      e("r1", 1, 2, 7, "retract", { retracts: "b0" }),
+      // Gleicher Zeitstempel: Ende vor Beginn in der Liste, Beginn zuerst
+      // verschieben.
+      e("e7", 1, 6, 8, "injury_end", { tsMs: 7000 }),
+      e("b7", 1, 6, 9, "injury_start", { tsMs: 7000 }),
+    ];
+    const VARIANTEN = [[], BESTAND, BESTAND.slice().reverse(), null, BESTAND.slice(0, 3)];
+    gleich("meSortiere", VARIANTEN.filter(Boolean), (fn, x) => fn(x).map((y) => y.id));
+    gleich("meVereinigen", VARIANTEN.flatMap((a) => VARIANTEN.map((b) => [a, b])),
+      (fn, [a, b]) => fn(a, b).map((y) => y.id));
+    const SCHNITTE = [];
+    for (const v of VARIANTEN) for (const set of [1, 2, 3]) for (const n of [0, 2, 4, 5])
+      for (const aus of [undefined, [], ["injury_start", "injury_end"]]) SCHNITTE.push([v, set, n, aus]);
+    gleich("meUndoSchnitt", SCHNITTE, (fn, [v, set, n, aus]) => fn(v, set, n, aus));
+    gleich("meUndoNeuverankern", SCHNITTE.flatMap(([v, set, n]) => [3, 7, 9, 64, undefined].map((mx) => [v, set, n, mx])),
+      (fn, [v, set, n, mx]) => fn(v, set, n, mx));
+    gleich("meAufschlagJenseitsSatz", SCHNITTE, (fn, [v, set]) => fn(v, set));
+    gleich("meIstZurueckgenommen", ["b0", "b1", "nix"].flatMap((id) => VARIANTEN.map((v) => [v, id])),
+      (fn, [v, id]) => fn(v, id));
+    gleich("meAnkerNachBuchung", [{ set: 1, afterN: 0 }, { set: 2, afterN: 7 }, { set: 3 }], (fn, x) => fn(x));
+  }
+
+  const uNamen = ["hostKenntBehandlung", "richtzeitAusBrief", "uhrText", "behandlungsUhr"];
+  const uQuellen = uNamen.map((n) => funktion(text, n));
+  ok("tablet.html: Behandlungsuhr-Kopien vorhanden", uQuellen.every(Boolean), true);
+  const konst = ["RICHTZEIT_STANDARD_S", "RICHTZEIT_MIN_S", "RICHTZEIT_MAX_S"];
+  const werte = konst.map((k) => { const m = text.match(new RegExp("const " + k + " = (\\d+);")); return m ? Number(m[1]) : null; });
+  ok("tablet.html: Richtzeit-Konstanten wie Modul", werte, konst.map((k) => bu[k]));
+  if (uQuellen.every(Boolean)) {
+    // eslint-disable-next-line no-new-func
+    const f = new Function(konst.map((k, i) => `const ${k} = ${werte[i]};`).join("\n") + "\n"
+      + uQuellen.join("\n") + "\nreturn { " + uNamen.join(", ") + " };")();
+    const BRIEFE = [null, undefined, {}, ...[0, -1, 1, 59.6, 60, 300, 420.4, 1800, 1801, 1e9, NaN, Infinity, "300", null, true]
+      .map((s) => ({ injuryGuideSecs: s }))];
+    ok("tablet.html: hostKenntBehandlung wie Modul", BRIEFE.map(f.hostKenntBehandlung), BRIEFE.map(bu.hostKenntBehandlung));
+    ok("tablet.html: richtzeitAusBrief wie Modul", BRIEFE.map(f.richtzeitAusBrief), BRIEFE.map(bu.richtzeitAusBrief));
+    const SEK = [0, 1, 59, 60, 61, 599, 4499, 4503, -5, 1.7, NaN, "12", null, undefined];
+    ok("tablet.html: uhrText wie Modul", SEK.map(f.uhrText), SEK.map(bu.uhrText));
+    const T = 1_755_600_000_000;
+    const UHR = [];
+    for (const start of [T, 0, null, undefined, NaN, "x", T + 10_000, -1])
+      for (const d of [0, 999, 299_999, 300_000, 4_503_000]) for (const r of [60, 300, 1800]) UHR.push([T + d, start, r]);
+    ok("tablet.html: behandlungsUhr wie Modul",
+      UHR.map(([j, s, r]) => f.behandlungsUhr(j, s, r)), UHR.map(([j, s, r]) => bu.behandlungsUhr(j, s, r)));
   }
 }
 

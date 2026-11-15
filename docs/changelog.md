@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.419
+
+- **Schiedsrichterzettel: Korrektur löscht keine Behandlung mehr.** Wird nach
+  einer Behandlung ein Punkt zurückgenommen, verschiebt das Tablet Beginn und
+  Ende der Behandlung an die richtige Stelle, statt sie zu streichen — auf dem
+  Zettel steht sie einmal, mit dem „B" am richtigen Ballwechsel. (Wirkt mit
+  einem Turnier-PC ab v0.9.418.)
+- **Uhrzeiten auf dem Zettel** kommen jetzt einheitlich von der Uhr des
+  Turnier-PCs statt vom jeweiligen Tablet.
+
 ## v0.9.418
 
 - **Richtzeit für die Behandlungspause.** Neuer Abschnitt

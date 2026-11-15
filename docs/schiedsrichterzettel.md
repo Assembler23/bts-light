@@ -50,6 +50,26 @@ die danach erfasst wurden.
 > versehentlich vergebene Karte bleibt sichtbar.** Wer das nicht möchte, muss vor
 > dem Bestätigen genau hinsehen.
 
+**Ausnahme Behandlung** (ADR [0095](adr/0095-behandlung-als-ereignispaar.md)):
+Beginn und Ende einer Behandlung sind Zeit-Tatsachen — sie haben stattgefunden,
+auch wenn danach ein Punkt korrigiert wird. Ein Undo nimmt sie deshalb nicht
+zurück, sondern **verschiebt** sie an die neue Stelle: Das Original wird
+zurückgenommen und mit derselben Uhrzeit am neuen Ballwechsel neu erfasst. Auf
+dem Zettel erscheint die Behandlung trotzdem nur einmal, mit der Marke „B" am
+richtigen Ballwechsel. Das geschieht nur, wenn der Turnier-PC die
+Behandlungs-Darstellung kennt (ab v0.9.416, gemeldet über die Richtzeit im
+Spiel-Brief); hinter einem älteren Turnier-PC gilt die Regel von oben. Passt die
+Verschiebung nicht mehr unter die Höchstzahl von 64 Ereignissen je Spiel,
+bleibt die Behandlung an ihrer alten Stelle stehen.
+
+**Uhrzeit:** Alle Ereignisse tragen die Uhrzeit des Turnier-PCs (dieselbe Uhr wie
+die Pausen-Uhr), nicht die des Tablets. So passen Beginn und Ende einer
+Behandlung auch dann zusammen, wenn das Tablet dazwischen gewechselt wurde.
+Nur wenn die Tablet-Seite mitten in einer Behandlung aktualisiert wird, trägt der
+Beginn noch die Tablet-Uhr und das Ende schon die Uhr des Turnier-PCs; weichen
+beide um einige Sekunden ab, kann die Dauer dieser einen Behandlung entsprechend
+daneben liegen oder als „Dauer —" erscheinen.
+
 ### Mannschaften getauscht (seit v0.9.319)
 
 Wurde am Tablet die falsche Mannschaft als „links" aufgestellt und danach mit

@@ -69,8 +69,12 @@ export function vereinigen(vorhanden, neu) {
  *
  * Liefert die Kennungen der Ereignisse, die im Satz `set` **nach**
  * `afterN` liegen und noch nicht zurückgenommen sind.
+ *
+ * `ausgenommen` (Arten) nimmt der Schnitt nicht mit — gedacht für die
+ * [ZEIT_TATSACHEN], die stattdessen [undoNeuverankern] verschiebt. Ohne
+ * Angabe gilt ADR 0038 unverändert (alter Host ohne Fähigkeit).
  */
-export function undoSchnitt(events, set, afterN) {
+export function undoSchnitt(events, set, afterN, ausgenommen = []) {
   const zurueckgenommen = new Set(
     (events || []).filter((e) => e.kind === "retract").map((e) => e.retracts),
   );
@@ -78,11 +82,61 @@ export function undoSchnitt(events, set, afterN) {
     .filter(
       (e) =>
         e.kind !== "retract" &&
+        !ausgenommen.includes(e.kind) &&
         !zurueckgenommen.has(e.id) &&
         (e.set || 0) === set &&
         (e.afterN || 0) > afterN,
     )
     .map((e) => e.id);
+}
+
+/**
+ * Arten, die eine **Zeit-Tatsache** festhalten (ADR 0095): Eine Behandlung
+ * hat stattgefunden, auch wenn danach ein Punkt korrigiert wird. Der
+ * Undo-Schnitt löscht sie nicht, er verschiebt sie.
+ */
+export const ZEIT_TATSACHEN = ["injury_start", "injury_end"];
+
+/**
+ * Undo über eine Behandlung: Welche Zeit-Tatsachen liegen hinter dem neuen
+ * Schnitt und müssen **neu verankert** werden?
+ *
+ * Nur stehen lassen genügte nicht: Ihr Anker `afterN` zeigte nach dem Undo
+ * auf den Ballwechsel, der als nächstes neu vergeben wird — „B" säße am
+ * Ballwechsel *nach* der Behandlung. Also Rücknahme des Originals plus
+ * Kopie mit demselben Zeitstempel, derselben Phase und dem neuen Schnitt
+ * als Anker. Der Zettel zeigt die verschobene Behandlung nur einmal.
+ *
+ * Liefert `[{ retracts, kind, tsMs, phase }]` — Beginn vor Ende, nach
+ * Zeitstempel geordnet. **Alles oder nichts:** Jede Verschiebung kostet zwei
+ * Ereignisse; passt das nicht unter `max`, bleibt alles stehen (die Marke
+ * steht dann leicht versetzt, geht aber nicht verloren).
+ */
+export function undoNeuverankern(events, set, afterN, max = MAX_EVENTS) {
+  const liste = events || [];
+  const zurueckgenommen = new Set(
+    liste.filter((e) => e.kind === "retract").map((e) => e.retracts),
+  );
+  const betroffen = liste
+    .filter(
+      (e) =>
+        ZEIT_TATSACHEN.includes(e.kind) &&
+        !zurueckgenommen.has(e.id) &&
+        (e.set || 0) === set &&
+        (e.afterN || 0) > afterN,
+    )
+    .sort(
+      (a, b) =>
+        (a.tsMs || 0) - (b.tsMs || 0) ||
+        (a.kind === "injury_start" ? 0 : 1) - (b.kind === "injury_start" ? 0 : 1),
+    );
+  if (liste.length + 2 * betroffen.length > max) return [];
+  return betroffen.map((e) => ({
+    retracts: e.id,
+    kind: e.kind,
+    tsMs: e.tsMs,
+    phase: e.phase,
+  }));
 }
 
 /**
