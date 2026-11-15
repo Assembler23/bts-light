@@ -170,6 +170,10 @@ jobs:
       # dem Speicher — alles, was hier durchrutscht, umgeht die PIN.
       - name: PIN-Freigabe (JS)
         run: node scripts/test-pin-freigabe.mjs
+      # Autovervollständigung im Ergebnis-Dialog des Tablets: Ein falscher
+      # Vorschlag sähe wie eine Eingabe aus und ginge als Ergebnis nach BTP.
+      - name: Satz ergänzen (JS)
+        run: node scripts/test-satz-ergaenzen.mjs
 
       # Ordnung zwischen Push und Voll-Abruf auf den Anzeige-Seiten: Push nur
       # bei echt neuerer Sequenz, ein Voll-Abruf darf gleichziehen (der

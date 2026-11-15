@@ -673,10 +673,11 @@ Nach vielen einzelnen Erweiterungen wurden alle Ansichten im Demofeld bei
   eigene Deckelung).
 - **Spielende.** Knöpfe als eine Spalte gleicher Breite (vorher wuchsen sie
   über das allgemeine `button { flex: 1 }` zu hohen Blöcken). „Korrektur —
-  Match wieder öffnen" ist nur noch rot umrandet. Die Satzstände stehen aus
-  Sicht des Siegers (`satzZeile`/`siegerSeite`): Gespeichert sind sie nach
-  Seiten, und nach dem letzten Satzwechsel stand der Verlierer links — unter
-  dem Siegernamen las man „16:21 · 18:21".
+  Match wieder öffnen" ist nur noch rot umrandet. Die Satzstände stehen als
+  Tabelle mit dem Sieger oben (`renderEndstand`/`siegerSeite`, siehe
+  „Endstand-Tabelle" unten): Gespeichert sind sie nach Seiten, und nach dem
+  letzten Satzwechsel stand der Verlierer links — unter dem Siegernamen las
+  man „16:21 · 18:21".
 - **Pausen.** Der Seitenwechsel steht als Band `#break-wechsel` im Overlay (in
   jeder Satzpause und bei der Punktepause im Entscheidungssatz); der Toast
   `#switch-toast` erscheint nur noch ohne Pause — er lag vorher über
@@ -771,6 +772,35 @@ Dritter Teil (ebenfalls v0.9.423):
   dafür zusätzlich `seite`. In einer Pause und nach dem Spielende steht sie
   nicht. Die Regel selbst ist unverändert (`src/io/satzpunkt.mjs`); das
   Abzeichen in der Schiri-Leiste zeigt nur noch Karten.
+
+### Endstand-Tabelle und Autovervollständigung
+
+Vierter Teil (ebenfalls v0.9.423):
+
+- **Endstand als Tabelle** (`renderEndstand`, `table.endstand#set-summary`):
+  eine Zeile je Mannschaft, die Sätze als Spalten, der Sieger oben und in
+  Gold; je Satz ist die gewonnene Zahl hell (`td.gewonnen`), die verlorene
+  gedämpft. Die Zeile „21:16 · 18:21 · 21:15" musste man im Kopf den Namen
+  zuordnen. Die Namensspalte kürzt mit „…" (der volle Siegername steht im
+  Banner darüber); ohne Aufstellung heißen die Zeilen „Links"/„Rechts", ohne
+  Satz (Kampflos) bleibt die Tabelle weg. Aufgebaut per `textContent`, nie
+  per `innerHTML` — die Namen kommen aus BTP.
+- **Autovervollständigung im Ergebnis-Dialog** (`src/io/satzErgaenzen.mjs`,
+  Inline-Kopie `satzErgaenzen`/`gegenfeldNach`, Test
+  `scripts/test-satz-ergaenzen.mjs`, Drift in
+  `scripts/test-inline-kopien.mjs`): Wer nachträgt, tippt die Punkte des
+  Verlierers — die des Siegers stehen damit fest. Unter „Ziel − 1" bekommt
+  das Gegenfeld das Ziel (11 → 21), bei „Ziel − 1" die Verlängerung
+  (20 → 22, höchstens `satzObergrenze`), ab dem Ziel **nichts** (21 kann
+  21:0 bis 21:19 sein). Der Vorschlag ist gelb hinterlegt (`.es-vorschlag`),
+  folgt der Eingabe („1" → 21, „11" → 21, „20" → 22) und verschwindet, wenn
+  sie keinen mehr hergibt. Ein von Hand gesetzter Wert wird **nie**
+  überschrieben (Merker `auto` je Feld in `makeScoreRow`). Nur in den
+  Zeilen beendeter Sätze — der laufende Satz im Weiterzählen-Modus ist ja
+  gerade nicht zu Ende — und nicht im Zeitformat (`target ≥ 99`). Die
+  Plausibilitätsprüfung beim Übernehmen bleibt unverändert und gilt auch
+  für Vorschläge. Beim Antippen wird der Feldinhalt markiert, damit die
+  vorbelegte „0" überschrieben statt ergänzt wird.
 
 ## Akkustand am Tablet (seit v0.9.293)
 
@@ -907,6 +937,9 @@ Ergebnis soll trotzdem übermittelt werden.
   beschriftet; „+ Satz" ergänzt eine Zeile (bis zur Satzanzahl des
   Formats). Der aktuelle Stand ist vorbelegt, falls doch schon gezählt
   wurde.
+- **Autovervollständigung** (seit v0.9.423): Stehen die Punkte des
+  Verlierers, füllt der Dialog das Gegenfeld selbst aus (11 → 21, 20 → 22) —
+  Regel und Grenzen unter „Endstand-Tabelle und Autovervollständigung".
 - **Plausibilität clientseitig:** Jeder Satz muss regulär zu Ende gespielt
   sein (`setWinnerSide` gegen Ziel/Cap der BTP-Zählweise; im **Zeitformat**
   `target ≥ 99` genügt ein Satz, sobald er **nicht unentschieden** ist),

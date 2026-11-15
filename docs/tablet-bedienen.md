@@ -369,7 +369,8 @@ Details: [Schiri-Modus am Zähltablett](umpire-mode.md).
 ### Regulär
 
 Nach dem letzten Punkt zeigt das Tablet das Spielende: den Sieger und darunter
-die Satzstände **aus Sicht des Siegers** („21:16 · 21:18"). Darunter steht groß
+eine kleine **Tabelle** – eine Zeile je Mannschaft, die Sätze als Spalten, der
+Sieger oben. Gewonnene Sätze sind hell, verlorene blasser. Darunter steht groß
 **„Ergebnis übermitteln"**; „Korrektur — Match wieder öffnen" ist bewusst nur
 ein rot umrandeter Knopf, damit er nicht aus Versehen getroffen wird.
 
@@ -466,6 +467,14 @@ Wurde auf Papier gezählt oder das Tablet gar nicht benutzt, lässt sich der
 **Endstand direkt eintragen**, ohne den Spielverlauf nachzuklopfen. Läuft das
 Spiel noch, bietet derselbe Dialog außerdem den **Einstieg in ein laufendes
 Spiel** an — du übernimmst dann mit dem aktuellen Stand und zählst weiter.
+
+**Du tippst nur die Punkte des Verlierers.** Das Tablet ergänzt den Sieger
+selbst: aus 11 wird 21:11, aus 20 wird 22:20. Der ergänzte Wert ist gelb
+hinterlegt – stimmt er nicht, tippst du ihn einfach über; was du selbst
+eingetragen hast, ändert das Tablet nie. Tippst du die Punkte des Siegers (21
+oder mehr), ergänzt es nichts, denn dann ist der Gegner offen.
+<!-- pruef: "es-vorschlag" in src-tauri/assets/tablet.html -->
+<!-- pruef: "if (punkte < target - 1) return target;" in src-tauri/assets/tablet.html -->
 
 ## Das Tablet wechseln
 

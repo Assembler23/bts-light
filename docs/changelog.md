@@ -28,9 +28,13 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
     statt gleich auszusehen.
   - **Spielstand größer (Querformat):** Neben dem Stand steht kein Knopf mehr;
     „📈 Verlauf" sitzt unten rechts.
-  - **Spielende:** Satzstände aus Sicht des Siegers („21:16 · 21:18" statt
-    „16:21 · 18:21"). „Ergebnis übermitteln" ist der große Knopf, „Match wieder
-    öffnen" nur noch rot umrandet statt ein riesiger roter Block.
+  - **Spielende:** Der Endstand steht als kleine Tabelle – eine Zeile je
+    Mannschaft, die Sätze als Spalten, der Sieger oben (vorher „16:21 · 18:21"
+    unter dem Siegernamen). „Ergebnis übermitteln" ist der große Knopf, „Match
+    wieder öffnen" nur noch rot umrandet statt ein riesiger roter Block.
+  - **Ergebnis eintragen ergänzt den Sieger:** Tippst du die Punkte des
+    Verlierers, füllt das Tablet das Gegenfeld selbst aus (11 → 21, 20 → 22).
+    Der Vorschlag ist gelb hinterlegt und lässt sich übertippen.
   - **Pausen:** Der Seitenwechsel steht als oranges Band in der Pause, statt
     als Hinweis über Text und Knöpfen zu liegen.
   - **Menü:** passt wieder auf den Schirm (Titel und „Schließen" waren

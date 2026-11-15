@@ -752,7 +752,27 @@
     #finished-overlay > #reopen-btn:active:not(:disabled) { background: rgba(220, 38, 38, .2); }
     #finished-overlay > #reopen-btn:disabled { opacity: .4; background: transparent; color: #fca5a5; }
     .winner-banner { font-size: 2rem; font-weight: 800; color: #fbbf24; }
-    .set-summary { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; color: #e2e8f0; }
+    /* Endstand als kleine Tabelle: eine Zeile je Mannschaft, die Sätze als
+       Spalten. Die Zeile „21:16 · 18:21 · 21:15" musste man im Kopf den
+       Namen zuordnen. Der Sieger steht oben und in Gold; je Satz ist die
+       gewonnene Zahl hell, die verlorene gedämpft. */
+    .endstand {
+      border-collapse: collapse; width: min(34rem, 100%);
+      font-variant-numeric: tabular-nums; color: #e2e8f0;
+    }
+    .endstand th { padding: 0 .7rem .15rem; font-size: .85rem; font-weight: 600; color: #94a3b8; }
+    .endstand td { padding: .2rem .7rem; font-size: 1.6rem; font-weight: 700; color: #94a3b8; text-align: center; }
+    .endstand td.gewonnen { color: #fff; font-weight: 800; }
+    /* `max-width: 0` + `width: 100%`: Die Namensspalte nimmt den Rest der
+       Breite und kürzt mit „…", statt die Tabelle aufzublasen. */
+    .endstand td.name {
+      width: 100%; max-width: 0; text-align: left; font-size: 1.15rem; color: #e2e8f0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .endstand tr.sieger td.name { color: #fbbf24; }
+    /* Vorschlag der Autovervollständigung im Ergebnis-Dialog: sichtbar
+       „nicht von dir getippt", bis man das Feld selbst anfasst. */
+    .es-vorschlag { background: #fef3c7 !important; font-style: italic; }
     .submit-status { font-size: .95rem; color: #cbd5e1; min-height: 1.2em; }
 
     /* ─── Sieger-Wahl bei Aufgabe ────────────────────────────────────── */
@@ -1348,7 +1368,7 @@
 <!-- Match-Ende-Overlay -->
 <div class="match-finished-overlay" id="finished-overlay">
   <div class="winner-banner" id="winner-banner"></div>
-  <div class="set-summary" id="set-summary"></div>
+  <table class="endstand" id="set-summary"></table>
   <!-- Schiri-Modus: Spielende-Ansage zum Vorlesen, auch hier lesbar. -->
   <div class="break-umpire" id="finished-umpire" hidden></div>
   <div class="retire-pick" id="retire-pick" style="display:none">
@@ -5694,9 +5714,32 @@ function sideTeamName(side) {
   return STATE.match[key === 'a' ? 'teamA' : 'teamB'].map(p => p.name).join(' / ');
 }
 
+// Inline-Kopie von `src/io/satzErgaenzen.mjs` (dort die Begründung; Test
+// `scripts/test-satz-ergaenzen.mjs`, Drift in `scripts/test-inline-kopien.mjs`)
+// — Änderungen hier und dort gemeinsam.
+function satzErgaenzen(punkte, target, cap) {
+  if (!Number.isInteger(punkte) || punkte < 0) return null;
+  if (!Number.isInteger(target) || target < 2 || target >= 99) return null;
+  if (punkte >= target) return null;
+  if (punkte < target - 1) return target;
+  var deckel = Number.isInteger(cap) && cap >= target ? cap : punkte + 2;
+  return Math.min(punkte + 2, deckel);
+}
+function gegenfeldNach(eingabe, gegenWert, gegenAuto, target, cap) {
+  if (!gegenAuto && gegenWert !== 0) return null;
+  var text = String(eingabe == null ? "" : eingabe).trim();
+  var vorschlag = /^\d+$/.test(text) ? satzErgaenzen(Number(text), target, cap) : null;
+  if (vorschlag === null) return gegenAuto ? 0 : null;
+  return vorschlag;
+}
+
 // Ein Satz-Eingabepaar (zwei Zahlenfelder links:rechts). `get`/`set` lesen/
 // schreiben das jeweilige Modell-Objekt; Clamp 0..99 + Anzeige-Sync.
-function makeScoreRow(labelText, get, set, ariaBase) {
+// `ergaenzen`: Bei einem BEENDETEN Satz füllt der Dialog das Gegenfeld
+// selbst aus, sobald die Punkte des Verlierers stehen (11 → 21, 20 → 22).
+// Der laufende Satz im Weiterzählen-Modus bekommt keinen Vorschlag — er
+// ist ja gerade nicht zu Ende.
+function makeScoreRow(labelText, get, set, ariaBase, ergaenzen) {
   const row = document.createElement('div');
   row.style.cssText = 'display:flex;align-items:center;gap:.5rem;justify-content:center;width:100%';
   const label = document.createElement('span');
@@ -5712,12 +5755,35 @@ function makeScoreRow(labelText, get, set, ariaBase) {
   inL.value = String(get().left); inR.value = String(get().right);
   inL.setAttribute('aria-label', `${ariaBase}, ${sideTeamName('left')}`);
   inR.setAttribute('aria-label', `${ariaBase}, ${sideTeamName('right')}`);
-  const bind = (inp, key) => inp.addEventListener('input', () => {
-    const raw = Number(inp.value);
-    const v = clampScoreInput(inp.value);
-    const cur = get(); cur[key] = v; set(cur);
-    if (!Number.isInteger(raw) || raw !== v) inp.value = String(v);
-  });
+  const felder = { left: inL, right: inR };
+  // Stammt der Wert eines Felds aus einem Vorschlag? Nur dann darf die
+  // Autovervollständigung ihn weiter anpassen oder zurücknehmen.
+  const auto = { left: false, right: false };
+  const vorschlagSetzen = (key, wert) => {
+    const cur = get(); cur[key] = wert; set(cur);
+    felder[key].value = String(wert);
+    auto[key] = wert !== 0;
+    felder[key].classList.toggle('es-vorschlag', auto[key]);
+  };
+  const bind = (inp, key) => {
+    inp.addEventListener('input', () => {
+      const raw = Number(inp.value);
+      const v = clampScoreInput(inp.value);
+      const cur = get(); cur[key] = v; set(cur);
+      if (!Number.isInteger(raw) || raw !== v) inp.value = String(v);
+      // Selbst getippt: ab jetzt kein Vorschlag mehr.
+      auto[key] = false;
+      inp.classList.remove('es-vorschlag');
+      if (!ergaenzen || !STATE.match) return;
+      const gegen = key === 'left' ? 'right' : 'left';
+      const target = STATE.match.targetScore;
+      const neu = gegenfeldNach(inp.value, get()[gegen], auto[gegen], target, satzObergrenze(target));
+      if (neu !== null) vorschlagSetzen(gegen, neu);
+    });
+    // Beim Antippen den Inhalt markieren: Die vorbelegte „0" wird so
+    // überschrieben statt ergänzt („011").
+    inp.addEventListener('focus', () => inp.select());
+  };
   bind(inL, 'left'); bind(inR, 'right');
   const colon = document.createElement('span');
   colon.textContent = ':'; colon.style.cssText = 'font-size:1.4rem;color:#cbd5e1';
@@ -5758,6 +5824,7 @@ function renderEnterScoreRows() {
       () => enterScoreSets[i],
       (v) => { enterScoreSets[i] = v; },
       `Satz ${i + 1}`,
+      true,
     ));
   });
 }
@@ -6724,7 +6791,7 @@ function render() {
       els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : 'Match beendet';
       els.retirePick.style.display = 'none';
     }
-    els.setSummary.textContent = satzZeile(STATE.setsCompleted, siegerSeite());
+    renderEndstand();
     // Schiri-Modus: Spielende-Ansage auch auf der beendet-Überlagerung zeigen
     // (sonst verdeckt sie die Ansage-Leiste darunter).
     if (STATE.umpireMode) {
@@ -6774,14 +6841,39 @@ function siegerSeite() {
   return matchWinnerSide();
 }
 
-/** Satzstände am Spielende aus Sicht des Siegers („21:16 · 21:18").
- *  Gespeichert sind sie nach Seiten, und nach dem letzten Satzwechsel stand
- *  dort der Verlierer links — unter dem Siegernamen las man „16:21 · 18:21"
- *  (Usability-Durchgang 15.11.2026). Ohne Sieger bleibt links:rechts. */
-function satzZeile(saetze, seite) {
-  return saetze
-    .map((s) => (seite === 'right' ? `${s.right}:${s.left}` : `${s.left}:${s.right}`))
-    .join(' · ');
+/** Endstand-Tabelle am Spielende: eine Zeile je Mannschaft, die Sätze als
+ *  Spalten, der Sieger oben. Gespeichert sind die Sätze nach SEITEN, und
+ *  nach dem letzten Satzwechsel stand der Verlierer oft links — eine
+ *  einzelne Zeile „16:21 · 18:21" unter dem Siegernamen las sich falsch
+ *  herum (Usability-Durchgang 15.11.2026). Die Tabelle ordnet jede Zahl
+ *  ihrem Namen zu. Ohne Satz (Kampflos) bleibt sie weg. */
+function renderEndstand() {
+  const tab = els.setSummary;
+  const saetze = STATE.setsCompleted;
+  tab.textContent = '';
+  tab.hidden = saetze.length === 0;
+  if (tab.hidden) return;
+  const sieger = siegerSeite();
+  const seiten = sieger === 'right' ? ['right', 'left'] : ['left', 'right'];
+  const zelle = (tag, text, klasse) => {
+    const el = document.createElement(tag);
+    el.textContent = text;
+    if (klasse) el.className = klasse;
+    return el;
+  };
+  const kopf = document.createElement('tr');
+  kopf.append(zelle('th', ''), ...saetze.map((_, i) => zelle('th', String(i + 1))));
+  tab.append(kopf);
+  for (const seite of seiten) {
+    const gegen = seite === 'left' ? 'right' : 'left';
+    const zeile = document.createElement('tr');
+    if (seite === sieger) zeile.className = 'sieger';
+    // Ohne Aufstellung (kein Name bekannt) spricht die Zeile in Seiten.
+    const name = sideTeamName(seite) || (seite === 'left' ? 'Links' : 'Rechts');
+    zeile.append(zelle('td', name, 'name'),
+      ...saetze.map((s) => zelle('td', String(s[seite]), s[seite] > s[gegen] ? 'gewonnen' : '')));
+    tab.append(zeile);
+  }
 }
 
 // ─────────────────────────────── Wiring ───────────────────────────────
