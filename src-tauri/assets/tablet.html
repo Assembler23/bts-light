@@ -301,14 +301,19 @@
         100% { text-shadow: 0 0 0 rgba(245, 158, 11, 0); }
       }
     }
-    /* Satzzeile: Bezeichnung des Satzes und – solange er besteht – der
-       Satz- bzw. Spielpunkt. In EINER Zeile, damit das Feld darunter nicht
-       springt, wenn die Marke erscheint. */
-    .set-zeile { display: flex; align-items: center; justify-content: center; gap: .5rem; flex-wrap: wrap; }
+    /* Satzzeile: Bezeichnung des Satzes ODER – solange er besteht – der
+       Satz- bzw. Spielpunkt. Die Marke liegt ÜBER der Bezeichnung (die
+       unsichtbar ihren Platz behält) statt daneben: Neben ihr brach die
+       Zeile im Hochformat um, die Tafel wurde höher und breiter, und das
+       Feld sprang bei jedem Satzpunkt (Review-Befund, nachgemessen an
+       800×1280 und 360×740). So ändert die Marke kein einziges Maß. */
+    .set-zeile { position: relative; display: flex; align-items: center; justify-content: center; }
     .current-set-label { font-size: 1rem; color: var(--muted); font-weight: 700; letter-spacing: .03em; }
+    .set-zeile.mit-lage .current-set-label { visibility: hidden; }
     /* Satz-/Spielpunkt am Stand, auch ohne Schiri-Modus: in der Farbe der
        Seite, die ihn hat; bei „beide" amber. */
     .punkt-lage {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
       padding: .08rem .65rem; border-radius: 999px; font-size: .95rem; font-weight: 800;
       letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
       background: #f59e0b; color: #1a1206;
@@ -7184,8 +7189,8 @@ function umpMatchEndSpoken() {
  *  Satzpunkt ist der erste des Satzes oder eine Seite hat soeben den
  *  letzten Punkt vor der Obergrenze erreicht — nur dann gehört das Wort
  *  in die Ansage (DBV Anhang 4, 7.1.1/7.1.2; Regeln in
- *  `src/io/satzpunkt.mjs`). Das Abzeichen zeigt ihn unabhängig davon,
- *  solange er besteht. */
+ *  `src/io/satzpunkt.mjs`). Die Marke am Stand (`renderPunktLage`) zeigt
+ *  ihn unabhängig davon, solange er besteht. */
 function umpPunktLage() {
   if (!STATE.match || STATE.finished) return null;
   const target = STATE.match.targetScore;
@@ -7217,6 +7222,7 @@ function umpPunktLage() {
 function renderPunktLage() {
   const lage = STATE.setup === 'playing' && !STATE.pause ? umpPunktLage() : null;
   els.punktLage.hidden = !lage;
+  els.punktLage.parentElement.classList.toggle('mit-lage', !!lage);
   if (!lage) return;
   els.punktLage.textContent = `${lage.wort} ${lage.seite ? seiteWort(lage.seite) : 'beide'}`;
   els.punktLage.classList.toggle('links', lage.seite === 'left');

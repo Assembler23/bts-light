@@ -761,7 +761,11 @@ Dritter Teil (ebenfalls v0.9.423):
   Seitenwechsel im Entscheidungssatz also gegenüber; nach einem Satzende
   (Stand wieder 0:0) gar nicht.
 - **Satz-/Spielpunkt am Stand** (`#punkt-lage`, `renderPunktLage`): eine
-  Marke neben der Satzbezeichnung, in beiden Betriebsarten. Sie spricht in
+  Marke **an der Stelle** der Satzbezeichnung („Satz 2 · best of 3 · bis
+  21"), in beiden Betriebsarten. Die Bezeichnung behält unsichtbar ihren
+  Platz (`.set-zeile.mit-lage`), die Marke liegt darüber — stünde sie
+  daneben, bräche die Zeile im Hochformat um und das Feld spränge bei jedem
+  Satzpunkt (nachgemessen, Review-Befund). Sie spricht in
   **Seiten** („Satzpunkt links", übereinander „vorne"/„hinten", sonst
   „Satzpunkt beide") und trägt die Farbe der Seite; `umpPunktLage()` liefert
   dafür zusätzlich `seite`. In einer Pause und nach dem Spielende steht sie

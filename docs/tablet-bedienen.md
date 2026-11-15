@@ -132,8 +132,9 @@ Auf dem Schirm steht dabei:
 **Dein Tipp hat gezählt, wenn die Ziffer aufleuchtet:** Die Zahl der Seite,
 die den Punkt bekommen hat, springt kurz auf und leuchtet orange nach.
 
-Steht eine Seite einen Punkt vor dem Satzgewinn, erscheint über dem Stand eine
-Marke in ihrer Farbe: **„Satzpunkt links"** oder „… rechts" (hinter dem Feld
+Steht eine Seite einen Punkt vor dem Satzgewinn, erscheint über dem Stand –
+an der Stelle der Zeile „Satz 2 · best of 3 · bis 21" – eine Marke in ihrer
+Farbe: **„Satzpunkt links"** oder „… rechts" (hinter dem Feld
 „vorne"/„hinten"), bei 29:29 „Satzpunkt beide". Entschiede der Satz zugleich
 das Spiel, heißt sie **„Spielpunkt …"**. Sie bleibt stehen, solange der
 Satzpunkt besteht — du musst dafür nichts einschalten.
