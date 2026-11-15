@@ -1207,6 +1207,51 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
 - **BTP-Prozess:** heißt `btp.exe`, Fenstertitel
   `Badminton Turnier Planer - <Dateiname ohne .TP>`. Eine Automatik zum Finden
   der Datei hätte damit einen Anhaltspunkt (nicht umgesetzt).
+- **Pfad aus dem Prozess (gemessen 15.11.2026, umgesetzt in v0.9.423 — `tp_finden/`, Spec [tp-datei-finden](features/tp-datei-finden.md), ADR 0096):**
+  `tests/btp_tp_pfad_probe.rs` liest Kommandozeile, Fenstertitel und die
+  offenen Datei-Handles von `btp.exe` und meldet, ob daraus der volle Pfad
+  der `.TP` folgt. Die zu messenden Fälle (Doppelklick-Start, „Datei →
+  Öffnen", BTP als Administrator, Netzlaufwerk, zwei BTP-Fenster,
+  Virenscanner) stehen im Kopf der Sonde; **Ergebnisse hier nachtragen.**
+  - **Fall „Doppelklick-Start" (gemessen 15.11.2026):** Die Kommandozeile
+    trägt den vollen Pfad als zweites, in Anführungszeichen gesetztes
+    Argument. Die Handles liefern **genau eine** `.tp` — denselben Pfad,
+    lesbar, mit Jet-Kopf; die Datei lag in einem OneDrive-Ordner mit
+    Leerzeichen im Pfad. Durchgang 62 ms, kein Hänger (253 Handles
+    dupliziert, davon 19 Dateien, 2 Pipes; Windows zählt 409).
+  - **Der Fenstertitel nennt den Turniernamen, nicht den Dateinamen**
+    (`Liveticker Test Turnier` bei Datei `LivetickerTestTurnier.TP`) — die
+    Angabe oben stimmte nur zufällig. Als Gegenprobe taugt er nicht; die
+    Zuordnung muss über die Turnier-GUID aus der Datei laufen.
+  - BTP hält daneben eine zweite Sperrdatei `tp.ldb` unter
+    `C:\ProgramData\Visual Reality\Badminton Turnier Planer\` (eigene
+    Programmdatenbank). Sie endet nicht auf `.tp` und stört die Suche nicht.
+  - **Fall „Datei → Öffnen" (gemessen 15.11.2026):** Die Kommandozeile
+    ist leer (nur `btp.exe`), die Handles liefern trotzdem genau die eine
+    `.tp` mit vollem Pfad, lesbar, mit Jet-Kopf (71 ms, kein Hänger).
+    **Die Handles sind damit der tragende Weg**; die Kommandozeile allein
+    reicht nicht und bringt daneben nichts Zusätzliches.
+  - **Fall „BTP als Administrator" (gemessen 15.11.2026):** Aus einem
+    normal gestarteten Prozess verweigert Windows den Handle-Zugriff sofort
+    (`OpenProcess` mit `PROCESS_DUP_HANDLE` → Fehler 5, nach 0,5 ms); auch
+    die Kommandozeile bleibt leer. Lesbar bleiben Fenstertitel und
+    Handle-Zahl. Die Automatik erkennt den Fall also eindeutig und muss auf
+    die Handauswahl verweisen — kein Hänger, kein halbes Ergebnis.
+  - **Fall „zwei BTP-Fenster" entfällt (15.11.2026):** BTP lässt sich
+    nicht ein zweites Mal starten und meldet, dass es schon aktiv ist. Je
+    Windows-Sitzung gibt es also höchstens ein `btp.exe` und damit höchstens
+    eine offene `.tp` — eine Auswahl zwischen mehreren Treffern braucht die
+    Automatik nicht. (Ungeprüft: zwei Windows-Benutzer am selben PC.)
+  - **Handle-Kopie ohne Rechte genügt (gemessen 15.11.2026):** Mit Zugriff 0
+    (kein `DUPLICATE_SAME_ACCESS`) liefern `GetFileType` und
+    `GetFinalPathNameByHandleW` dieselben 19 Dateien samt der `.tp` wie mit
+    BTPs Rechten. Mit „nur Attribute lesen" (0x80) kamen nur 7 Dateien — die
+    `.tp` war dabei, aber die Variante ist die schlechtere. Die Suche
+    kopiert deshalb ohne Rechte und hält nie BTPs Schreibrecht.
+  - Offen: USB-Stick, Virenscanner. Dateien im Netz öffnet die Suche bewusst
+    nicht (nur lokale Laufwerke).
+  Aufruf am Windows-PC mit laufendem BTP:
+  `cargo test -p bts-light --test btp_tp_pfad_probe -- --ignored --nocapture`.
 - `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst
   **leer** — ein Artefakt der bekannten Null-Bitmap-Schwäche des Parsers; der
   badhub-Extraktor mit seiner Reparatur (`tabelle_lesen`) liest aus derselben

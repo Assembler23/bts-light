@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.422"
+version = "0.9.423"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -83,6 +83,11 @@ windows = { version = "0.62", features = [
   "Media_SpeechSynthesis",
   "Media_Core",
   "Storage_Streams",
+  # TP-Datei selbst finden (ADR 0096): Prozessliste (ToolHelp), fremdes
+  # Prozess-Handle (Threading) und Pfad je Datei-Handle (FileSystem).
+  "Win32_System_Threading",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_Storage_FileSystem",
 ] }
 # Ansage-Ton aus dem Kern (ADR 0065): WASAPI-Ausgabe mit Gerät je Stück.
 # Apache-2.0 (RustAudio), hängt an derselben `windows`-Version 0.62 — keine

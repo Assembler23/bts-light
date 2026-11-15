@@ -36,6 +36,42 @@ Einstellungen → Abschnitt **„TP-Datei (Turnierdatenbank)“**, direkt hinter
 BTP-Verbindung.
 <!-- pruef: "TP-Datei (Turnierdatenbank)" in src/pages/SetupWizard.tsx -->
 
+**Im Normalfall musst du nichts wählen.** Läuft BTP auf demselben PC und ist
+dein Turnier dort geöffnet, findet bts-light die Datei beim Öffnen der
+Einstellungen selbst und trägt sie ein. Darunter steht dann **„In BTP
+gefunden: …"** mit dem Dateinamen. Wie bei jeder Änderung gilt sie erst nach
+**Speichern**.
+<!-- pruef: "In BTP gefunden: " in src/pages/SetupWizard.tsx -->
+
+- **TP-Datei automatisch finden** (Häkchen, voreingestellt an) schaltet diese
+  Suche. Wählst du die Datei von Hand, entfernst sie oder verneinst eine
+  Rückfrage der Suche, geht das Häkchen aus — deine Wahl gilt dann, bis du
+  es wieder setzt.
+  <!-- pruef: "TP-Datei automatisch finden" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: "finden_automatisch: true" in src-tauri/src/config.rs -->
+- **In BTP geöffnete Datei suchen** sucht sofort, auch bei ausgeschaltetem
+  Häkchen.
+  <!-- pruef: "In BTP geöffnete Datei suchen" in src/pages/SetupWizard.tsx -->
+
+Findet die Suche nichts, sagt sie warum:
+
+| Meldung | Was zu tun ist |
+|---|---|
+| „BTP läuft nicht auf diesem PC." | BTP starten und das Turnier öffnen, dann erneut suchen. |
+| „In BTP ist kein Turnier geöffnet." | Das Turnier in BTP öffnen. |
+| „BTP läuft als Administrator — bitte die Datei von Hand wählen." | Windows lässt bts-light dann nicht nachsehen. Datei von Hand wählen oder BTP normal starten. |
+| „BTP läuft auf einem anderen PC — bitte die Datei von Hand wählen." | Die BTP-Adresse zeigt nicht auf diesen PC (nur `127.0.0.1`/`localhost` zählt). Datei von Hand wählen. |
+| „… liegt auf einem Netzlaufwerk — bitte die Datei von Hand wählen." | Dateien im Netz öffnet die Suche aus Sicherheitsgründen nicht selbst. Datei von Hand wählen. |
+| „BTP hat nicht geantwortet — bitte die Datei von Hand wählen." | Selten; Datei von Hand wählen. |
+<!-- pruef: "BTP läuft nicht auf diesem PC." in src/io/tpWahl.mjs -->
+<!-- pruef: "In BTP ist kein Turnier geöffnet." in src/io/tpWahl.mjs -->
+<!-- pruef: "BTP läuft als Administrator" in src/io/tpWahl.mjs -->
+<!-- pruef: "BTP läuft auf einem anderen PC" in src/io/tpWahl.mjs -->
+<!-- pruef: "liegt auf einem Netzlaufwerk" in src/io/tpWahl.mjs -->
+
+Die Suche gibt es nur unter Windows und nicht im Slave-Modus. Von Hand geht es
+so:
+
 1. **TP-Datei wählen** öffnet den Dateidialog. Wähle die Datei, die in BTP
    geöffnet ist — meist unter *Dokumente* oder dort, wo du das Turnier
    angelegt hast; die Endung ist `.TP`.
@@ -55,7 +91,7 @@ des einen Turniers unter der Kennung eines anderen.
 <!-- pruef: "Datei neu wählen" in src/pages/SetupWizard.tsx -->
 
 **Die Kennung steht auch in der Datei.** BTP trägt die turnier.de-Kennung in
-die Turnierdatei ein, und bts-light liest sie beim Wählen mit:
+die Turnierdatei ein, und bts-light liest sie beim Wählen und beim Finden mit:
 
 - Ist unter „1 · Liveticker-Ziel“ noch keine Kennung eingetragen, übernimmt
   bts-light sie aus der Datei und sagt **„Turnier-Kennung aus der Datei
@@ -73,6 +109,14 @@ die Turnierdatei ein, und bts-light liest sie beim Wählen mit:
   deiner Bestätigung. Dieselbe Rückfrage kommt, wenn oben etwas steht, das
   keine Kennung ist (etwa eine halbe Adresse).
   <!-- pruef: "gehört zu Turnier" in src/pages/SetupWizard.tsx -->
+- Hat bts-light die Datei **selbst gefunden** und sie nennt gar keine Kennung
+  (Turnier noch nicht auf turnier.de veröffentlicht), fragt es ebenfalls:
+  „… nennt keine Turnier-Kennung. Trotzdem für Turnier … verwenden?" **Datei
+  verwenden** speichert die Datei, die Kennung oben bleibt.
+  <!-- pruef: "nennt keine Turnier-Kennung. Trotzdem für Turnier" in src/pages/SetupWizard.tsx -->
+- Verneinst du eine Rückfrage zu einer **gefundenen** Datei, ändert sich
+  nichts und das Häkchen „TP-Datei automatisch finden" geht aus — sonst
+  käme dieselbe Frage beim nächsten Öffnen wieder.
   <!-- pruef: "Kennung übernehmen" in src/pages/SetupWizard.tsx -->
 
 Eine Datei ohne Kennung (Turnier nicht mit turnier.de verknüpft) lässt sich

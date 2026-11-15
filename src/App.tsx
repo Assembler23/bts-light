@@ -133,6 +133,7 @@ function defaultConfig(): AppConfig {
       auto_minutes: 15,
       ereignis_enabled: true,
       ereignis_minuten: 5,
+      finden_automatisch: true,
     },
     print: {
       auto_enabled: false,

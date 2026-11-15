@@ -40,6 +40,7 @@ import type {
   TlWebInfo,
   TournamentStats,
   TpFileInfo,
+  TpSuche,
   TpUploadStatus,
   WalkoverProposal,
   WalkoverResult,
@@ -766,6 +767,11 @@ export const officialsSetCourtSwitches = (
 /** Urteil über einen im Dialog gewählten Pfad (Rust: badhub::tp_upload::tp_file_check). */
 export const tpFileCheck = (path: string): Promise<TpFileInfo> =>
   invoke("tp_file_check", { path });
+
+/** Sucht die in BTP geöffnete Turnierdatei (Rust: tp_finden::suche). `host` und
+ *  `slave` sind die Eingaben des Setup-Formulars, nicht der gespeicherte Stand. */
+export const tpDateiFinden = (host: string, slave: boolean): Promise<TpSuche> =>
+  invoke("tp_datei_finden", { host, slave });
 
 /** Knopf „TP-Datei an badhub senden": prüft die Vorbedingungen synchron (Fehler
  *  = Text), startet sonst den Upload im Rust-Kern und liefert sofort „läuft". */

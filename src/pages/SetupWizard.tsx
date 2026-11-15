@@ -41,8 +41,10 @@ import {
   tabletOverview,
   testBtp,
   tournamentDraws,
+  tpDateiFinden,
   tpFileCheck,
 } from "../api";
+import { tpInfoText, tpSucheText, tpWahl } from "../io/tpWahl.mjs";
 import { CopyBadgeButton } from "../components/CopyBadgeButton";
 import { MonitorPreview } from "../components/MonitorPreview";
 import {
@@ -421,25 +423,49 @@ export function SetupWizard({
   /** Hinweis der letzten Wahl, z. B. „Turnier-Kennung aus der Datei übernommen“. */
   const [tpHinweis, setTpHinweis] = useState("");
   /** Offene Rückfrage: Die Datei nennt eine andere Kennung als das Feld oben
-   *  (oder dort steht etwas, das keine Kennung ist). Erst nach „Kennung
-   *  übernehmen“ wird die Datei gespeichert und die Kennung oben ersetzt. */
+   *  (oder dort steht etwas, das keine Kennung ist, oder die in BTP gefundene
+   *  Datei nennt gar keine). Erst nach der Bestätigung wird die Datei
+   *  gespeichert und gegebenenfalls die Kennung oben ersetzt. */
   const [tpFrage, setTpFrage] = useState<{
     path: string;
     name: string;
     info: TpFileInfo;
+    /** Kennung aus der Datei; "" = die Datei nennt keine. */
     dateiGuid: string;
     /** Kanonische Kennung aus dem Feld oben; "" = Text ohne Kennung. */
     eingetragen: string;
+    quelle: "dialog" | "suche";
   } | null>(null);
+  // TP-Datei selbst finden (Spec tp-datei-finden, ADR 0096): Schalter, Stand
+  // der Suche und ihre Meldung. Ohne Windows gibt es weder Schalter noch Knopf.
+  const [tpFinden, setTpFinden] = useState(
+    initialConfig.tp_upload.finden_automatisch ?? true,
+  );
+  const [tpSucheMoeglich, setTpSucheMoeglich] = useState(() =>
+    navigator.userAgent.includes("Windows"),
+  );
+  const [tpSucht, setTpSucht] = useState(false);
+  /** Neutrale Meldung der letzten Suche („BTP läuft nicht …", „In BTP gefunden …"). */
+  const [tpSuchInfo, setTpSuchInfo] = useState("");
   useEffect(() => {
-    if (!tpPath) return;
-    tpFileCheck(tpPath).then(setTpInfo).catch(() => {});
-    // Nur beim Laden: Nach einer Wahl kommt das Urteil direkt aus pickTpDatei.
+    // Nacheinander: erst das Urteil über die gespeicherte Datei, dann die
+    // Suche — sonst überschriebe das späte Urteil der alten Datei den Fund.
+    void (async () => {
+      if (tpPath) {
+        try {
+          setTpInfo(await tpFileCheck(tpPath));
+        } catch {
+          // Urteil bleibt leer; der Pfad steht weiter da.
+        }
+      }
+      if (tpFinden && tpSucheMoeglich && !slaveMode) await sucheTpDatei(false);
+    })();
+    // Nur beim Öffnen des Setups.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Die Bindung an die GUID entsteht beim Wählen. Die Datei nennt ihre Kennung
   // selbst (`Settings.LinkCode`): Ist oben noch keine eingetragen, wird sie von
-  // dort übernommen; steht oben eine andere, wird die Datei abgelehnt.
+  // dort übernommen; steht oben eine andere, wird nachgefragt.
   const tpGuidJetzt = extractTournamentGuid(tournamentGuid);
   /** Feld wirklich leer — nur dann wird die Kennung aus der Datei übernommen.
    *  Steht dort eine halbe Adresse oder ein Tippfehler, wird nichts überschrieben. */
@@ -447,34 +473,84 @@ export function SetupWizard({
   /** Gebundene Kennung kanonisch — eine von Hand editierte config.json darf
    *  keinen falschen „gehört zu einem anderen Turnier“-Hinweis auslösen. */
   const tpGuidKanon = extractTournamentGuid(tpGuid);
-  function tpInfoText(info: TpFileInfo): string | null {
-    switch (info.art) {
-      case "erkannt":
-        return null;
-      case "zu_gross":
-        return "Die Datei ist größer als 32 MB — zu groß für den Upload.";
-      case "nicht_gefunden":
-        return "Datei nicht gefunden oder nicht lesbar — im Setup neu wählen.";
-      default:
-        return "Das ist keine TP-Datei (Turnierdatenbank von BTP).";
-    }
-  }
-  /** Antwort „Kennung übernehmen“ auf die Rückfrage: Datei speichern und die
-   *  Kennung oben durch die aus der Datei ersetzen — ausdrücklich, nie still. */
+  /** Stand des Kennungs-Felds für die asynchronen Wege (Dateidialog, Suche):
+   *  Sie entscheiden nach dem `await` — mit dem Feld, wie es DANN ist, nicht
+   *  wie beim Start. */
+  const tpStand = useRef({ eingetragen: tpGuidJetzt, feldLeer: tpFeldLeer });
+  tpStand.current = { eingetragen: tpGuidJetzt, feldLeer: tpFeldLeer };
+  /** Zähler der Wahl-/Suchläufe: Ein später Fund darf eine inzwischen
+   *  getroffene Handwahl oder eine neuere Suche nicht überschreiben. */
+  const tpLauf = useRef(0);
+  /** Antwort „Ja“ auf die Rückfrage: Datei speichern und — wenn die Datei eine
+   *  Kennung nennt — die Kennung oben ersetzen. Ausdrücklich, nie still. */
   function uebernehmeKennungAusDatei() {
     if (!tpFrage) return;
-    const { path, info, dateiGuid } = tpFrage;
+    const { path, info, dateiGuid, eingetragen, quelle } = tpFrage;
     setTpFrage(null);
-    setTournamentGuid(dateiGuid);
+    // Auch die bestätigte Handwahl übersteuert die Automatik (AK7).
+    if (quelle === "dialog") setTpFinden(false);
     setTpInfo(info);
     setTpPath(path);
+    if (dateiGuid === "") {
+      // Datei ohne Kennung: nur den Pfad binden, die Kennung oben bleibt.
+      setTpGuid(eingetragen);
+      return;
+    }
+    setTournamentGuid(dateiGuid);
     setTpGuid(dateiGuid);
     setTpHinweis(`Turnier-Kennung aus der Datei übernommen: ${dateiGuid}`);
+  }
+  /** Antwort „Nein“: nichts übernehmen. Kam die Datei aus der Suche, geht die
+   *  Automatik aus — sonst fragte sie beim nächsten Öffnen dasselbe wieder. */
+  function lehneFrageAb() {
+    if (tpFrage?.quelle === "suche") setTpFinden(false);
+    setTpFrage(null);
+  }
+  /** Gemeinsamer Weg für Dateidialog und Suche: Regel aus `tpWahl`. */
+  function uebernehmePfad(
+    path: string,
+    name: string,
+    info: TpFileInfo,
+    quelle: "dialog" | "suche",
+  ) {
+    const wahl = tpWahl({ info, name, ...tpStand.current, quelle });
+    if (wahl.art === "fehler") {
+      // Nicht speichern: der bisherige Pfad samt Urteil bleibt, die Meldung
+      // nennt die abgelehnte Datei. Aus der Suche ist das kein Fehler des
+      // Nutzers — neutral melden, sonst stünde es bei jedem Öffnen rot da.
+      if (quelle === "suche") setTpSuchInfo(wahl.text);
+      else setTpError(wahl.text);
+      return;
+    }
+    if (wahl.art === "frage") {
+      setTpFrage({
+        path,
+        name,
+        info,
+        dateiGuid: wahl.dateiGuid,
+        eingetragen: wahl.eingetragen,
+        quelle,
+      });
+      return;
+    }
+    if (wahl.kennungNeu !== null) {
+      setTournamentGuid(wahl.kennungNeu);
+      setTpHinweis(`Turnier-Kennung aus der Datei übernommen: ${wahl.kennungNeu}`);
+    }
+    setTpInfo(info);
+    setTpPath(path);
+    setTpGuid(wahl.bindung);
+    // Wer von Hand wählt, übersteuert die Automatik — bis er sie wieder einschaltet.
+    if (quelle === "dialog") setTpFinden(false);
   }
   async function pickTpDatei() {
     setTpError("");
     setTpHinweis("");
+    setTpSuchInfo("");
     setTpFrage(null);
+    // Eine noch laufende Suche ist damit überholt; ihr „Suche …" endet hier.
+    const lauf = ++tpLauf.current;
+    setTpSucht(false);
     try {
       const sel = await open({
         multiple: false,
@@ -485,48 +561,39 @@ export function SetupWizard({
       const path = Array.isArray(sel) ? sel[0] : sel;
       const name = path.split(/[\\/]/).pop() || path;
       const info = await tpFileCheck(path);
-      const grund = tpInfoText(info);
-      if (grund !== null) {
-        // Nicht speichern (AK 1): der bisherige Pfad samt Urteil bleibt, der
-        // Fehler nennt die abgelehnte Datei.
-        setTpError(`„${name}“: ${grund}`);
-        return;
-      }
-      // Kennung aus der Datei: fehlt oben eine, wird sie übernommen. Eine
-      // ANDERE Kennung oben ist ein Fehler, keine Übernahme — sonst lenkte
-      // die Datei vom Vorjahr still den ganzen Liveticker auf ein fremdes
-      // Turnier um. Ohne Kennung in der Datei entscheidet weiter der Server.
-      const dateiGuid = info.art === "erkannt" ? (info.guid ?? "") : "";
-      let bindung = tpGuidJetzt;
-      if (bindung === "") {
-        if (dateiGuid === "") {
-          // Leer, mehrdeutig oder ohne Anker — die Datei allein reicht nicht.
-          setTpError(
-            `„${name}“ nennt keine eindeutige Turnier-Kennung — erst unter „1 · Liveticker-Ziel“ die Turnier-Adresse eintragen, dann die Datei wählen.`,
-          );
-          return;
-        }
-        if (!tpFeldLeer) {
-          // Etwas steht im Feld, ist aber keine Kennung — nicht still
-          // ersetzen, sondern fragen.
-          setTpFrage({ path, name, info, dateiGuid, eingetragen: "" });
-          return;
-        }
-        bindung = dateiGuid;
-        setTournamentGuid(dateiGuid);
-        setTpHinweis(`Turnier-Kennung aus der Datei übernommen: ${dateiGuid}`);
-      } else if (dateiGuid !== "" && dateiGuid !== bindung) {
-        // Konflikt: Die Datei gehört zu einem anderen Turnier als die
-        // eingetragene Kennung. Nachfragen statt ablehnen — die Kennung
-        // steuert auch den Liveticker, deshalb ausdrücklich bestätigen lassen.
-        setTpFrage({ path, name, info, dateiGuid, eingetragen: bindung });
-        return;
-      }
-      setTpInfo(info);
-      setTpPath(path);
-      setTpGuid(bindung);
+      if (lauf !== tpLauf.current) return;
+      uebernehmePfad(path, name, info, "dialog");
     } catch (e) {
       setTpError(String(e));
+    }
+  }
+  /** Sucht die in BTP geöffnete Datei. `vonHand` = Knopf oder Schalter; beim
+   *  Öffnen des Setups bleibt ein technischer Fehler still. */
+  async function sucheTpDatei(vonHand: boolean) {
+    setTpError("");
+    setTpHinweis("");
+    setTpSuchInfo("");
+    setTpFrage(null);
+    setTpSucht(true);
+    const lauf = ++tpLauf.current;
+    try {
+      const suche = await tpDateiFinden(host, slaveMode);
+      // Inzwischen von Hand gewählt oder neu gesucht: dieser Fund ist überholt.
+      if (lauf !== tpLauf.current) return;
+      if (suche.art === "nicht_verfuegbar") {
+        setTpSucheMoeglich(false);
+        return;
+      }
+      if (suche.art === "gefunden") {
+        setTpSuchInfo(`In BTP gefunden: „${suche.name}“`);
+        uebernehmePfad(suche.pfad, suche.name, suche.info, "suche");
+        return;
+      }
+      setTpSuchInfo(tpSucheText(suche) ?? "");
+    } catch (e) {
+      if (vonHand && lauf === tpLauf.current) setTpError(String(e));
+    } finally {
+      if (lauf === tpLauf.current) setTpSucht(false);
     }
   }
   const tpGuidPasst = tpGuid !== "" && tpGuidJetzt === tpGuid;
@@ -844,6 +911,7 @@ export function SetupWizard({
         auto_enabled: tpAuto,
         // 1–1440: Rust klemmt unter 5; oberhalb von u16 schlüge sonst das ganze Speichern fehl.
         auto_minutes: Math.min(1440, Math.max(1, Math.round(Number(tpMinutes) || 15))),
+        finden_automatisch: tpFinden,
         ereignis_enabled: tpEreignis,
         ereignis_minuten: Math.min(
           1440,
@@ -1570,6 +1638,18 @@ export function SetupWizard({
               >
                 {tpPath ? "Datei neu wählen" : "TP-Datei wählen"}
               </button>
+              {tpSucheMoeglich && (
+                <button
+                  type="button"
+                  disabled={tpSucht}
+                  onClick={() => void sucheTpDatei(true)}
+                  className="rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                             text-slate-700 transition-colors hover:bg-slate-200
+                             disabled:opacity-50"
+                >
+                  {tpSucht ? "Suche …" : "In BTP geöffnete Datei suchen"}
+                </button>
+              )}
               {tpPath && (
                 <button
                   type="button"
@@ -1580,6 +1660,10 @@ export function SetupWizard({
                     setTpError("");
                     setTpHinweis("");
                     setTpFrage(null);
+                    setTpSuchInfo("");
+                    // Wer die Datei entfernt, will sie nicht gleich wieder
+                    // gefunden bekommen.
+                    setTpFinden(false);
                     // Ohne Datei keine Automatik — sonst hielte sie beim nächsten
                     // Schritt mit „Keine TP-Datei gewählt“ an (Spec AK 17a).
                     setTpAuto(false);
@@ -1591,6 +1675,24 @@ export function SetupWizard({
                 </button>
               )}
             </div>
+            {tpSucheMoeglich && (
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={tpFinden}
+                  onChange={(e) => {
+                    const an = e.currentTarget.checked;
+                    setTpFinden(an);
+                    if (an) void sucheTpDatei(true);
+                  }}
+                />
+                TP-Datei automatisch finden
+                <span className="text-xs text-slate-500">
+                  — bts-light übernimmt die Datei, die in BTP geöffnet ist
+                </span>
+              </label>
+            )}
+            {tpSuchInfo && <p className="text-sm text-slate-600">{tpSuchInfo}</p>}
             {tpPath && (
               <p className="break-all font-mono text-xs text-slate-600">{tpPath}</p>
             )}
@@ -1632,11 +1734,15 @@ export function SetupWizard({
             {tpFrage && (
               <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
                 <p>
-                  {tpFrage.eingetragen !== ""
-                    ? `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}, oben ist ${shortTournamentGuid(tpFrage.eingetragen)} eingetragen.`
-                    : `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}; die Eingabe unter „1 · Liveticker-Ziel“ ist keine Turnier-Kennung.`}{" "}
-                  Kennung aus der Datei übernehmen? Damit zeigen auch Liveticker, Check-In
-                  und Aushang auf dieses Turnier.
+                  {tpFrage.dateiGuid === ""
+                    ? `„${tpFrage.name}“ nennt keine Turnier-Kennung. Trotzdem für Turnier ${shortTournamentGuid(tpFrage.eingetragen)} verwenden?`
+                    : `${
+                        tpFrage.eingetragen !== ""
+                          ? `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}, oben ist ${shortTournamentGuid(tpFrage.eingetragen)} eingetragen.`
+                          : `„${tpFrage.name}“ gehört zu Turnier ${shortTournamentGuid(tpFrage.dateiGuid)}; die Eingabe unter „1 · Liveticker-Ziel“ ist keine Turnier-Kennung.`
+                      } Kennung aus der Datei übernehmen? Damit zeigen auch Liveticker, Check-In und Aushang auf dieses Turnier.`}
+                  {tpFrage.quelle === "suche" &&
+                    " Bei „Nein“ wird die automatische Suche ausgeschaltet."}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -1645,15 +1751,17 @@ export function SetupWizard({
                     className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white
                                transition-colors hover:bg-amber-700"
                   >
-                    Kennung übernehmen
+                    {tpFrage.dateiGuid === "" ? "Datei verwenden" : "Kennung übernehmen"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setTpFrage(null)}
+                    onClick={lehneFrageAb}
                     className="rounded-lg px-3 py-1.5 text-sm text-slate-600 transition-colors
                                hover:bg-slate-100"
                   >
-                    Abbrechen — Datei nicht speichern
+                    {tpFrage.quelle === "suche"
+                      ? "Nein — Datei nicht übernehmen"
+                      : "Abbrechen — Datei nicht speichern"}
                   </button>
                 </div>
               </div>
