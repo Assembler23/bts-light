@@ -1231,8 +1231,13 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
     `.tp` mit vollem Pfad, lesbar, mit Jet-Kopf (71 ms, kein Hänger).
     **Die Handles sind damit der tragende Weg**; die Kommandozeile allein
     reicht nicht und bringt daneben nichts Zusätzliches.
-  - Offen: BTP als Administrator, Netzlaufwerk, zwei BTP-Fenster,
-    Virenscanner.
+  - **Fall „BTP als Administrator" (gemessen 15.11.2026):** Aus einem
+    normal gestarteten Prozess verweigert Windows den Handle-Zugriff sofort
+    (`OpenProcess` mit `PROCESS_DUP_HANDLE` → Fehler 5, nach 0,5 ms); auch
+    die Kommandozeile bleibt leer. Lesbar bleiben Fenstertitel und
+    Handle-Zahl. Die Automatik erkennt den Fall also eindeutig und muss auf
+    die Handauswahl verweisen — kein Hänger, kein halbes Ergebnis.
+  - Offen: Netzlaufwerk, zwei BTP-Fenster, Virenscanner.
   Aufruf am Windows-PC mit laufendem BTP:
   `cargo test -p bts-light --test btp_tp_pfad_probe -- --ignored --nocapture`.
 - `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst
