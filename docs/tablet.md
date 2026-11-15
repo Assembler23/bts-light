@@ -243,8 +243,13 @@ Turnier** ausprobieren — deshalb ist er vollständig abgekapselt:
 - **Eigener Speicher.** Alle feldbezogenen `localStorage`-Schlüssel hängen an
   `SPEICHER_FELD` (`demo` statt der CourtID) — der Stand eines echten Felds
   auf demselben Gerät bleibt unberührt.
+- **Zählweise zur Wahl** (`DEMO_ZAEHLWEISEN`, seit v0.9.422): Sätze bis 21
+  (Obergrenze 30, Pause bei 11) oder bis 15 (Obergrenze 21, Pause bei 8).
+  Der **Ballzähler** ist immer an (`shuttleCounter` im Demo-Brief); die Zahl
+  verlässt das Tablet nicht.
 - **Szenarien als Daten** (`DEMO_SZENARIEN`): Titel, Text, Klasse, Namen,
-  optional `saetze` in Team-Koordinaten wie `hostSets`. Gestartet wird über
+  optional `saetze` in Team-Koordinaten wie `hostSets` — Text und `saetze`
+  als Funktion der Zählweise. Gestartet wird über
   `loadMatch` und — mit Zwischenstand — `einstiegMitSaetzen`, also denselben
   Weg wie beim Tablet-Wechsel mitten im Spiel. Ein neues Szenario ist ein
   Eintrag mehr.

@@ -32,7 +32,10 @@ weg, belegte ein Feld und schickte Stände an Monitore und Liveticker.
 ### Übungsspiele
 
 Auswahl aus `DEMO_SZENARIEN` in `tablet.html`. Alle Spiele gehen über zwei
-Gewinnsätze bis 21 (Deckel 30, Pause bei 11):
+Gewinnsätze. Die Zählweise wählt man darüber (`DEMO_ZAEHLWEISEN`, seit
+v0.9.422): **bis 21** (Deckel 30, Pause bei 11) oder **bis 15** (Deckel 21,
+Pause bei 8). Die Zwischenstände rechnen sich aus dem Ziel; die Tabelle
+zeigt sie für 21 (bei 15: 15:11/12:15, 13:13, 15:10 + 14:12):
 
 | Szenario | Start |
 |---|---|
@@ -79,7 +82,6 @@ Kennzeichnung: ein schwaches, diagonales **ÜBUNG** über allen Ansichten
 
 ## Bewusst nicht
 
-- Kein Ballzähler (hängt am Turnier-Schalter, den das Demofeld nicht kennt).
 - Keine Aufruf-Uhr (es gibt keinen Aufruf).
 - Kein Zettel/Punktverlauf beim Turnier-PC.
 - Keine Szenario-Verwaltung in der Windows-App; Szenarien leben im Code.
