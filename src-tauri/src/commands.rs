@@ -2339,6 +2339,20 @@ pub async fn tp_file_check(path: String) -> crate::badhub::tp_upload::TpFileInfo
         .unwrap_or(crate::badhub::tp_upload::TpFileInfo::NichtGefunden)
 }
 
+/// Sucht die in BTP geöffnete Turnierdatei über die Datei-Handles von
+/// `btp.exe` (Spec `tp-datei-finden`, ADR 0096). `host` und `slave` kommen
+/// aus dem Setup-Formular — dort gilt die Eingabe, nicht der gespeicherte
+/// Stand. Die Suche blockiert und liest den Fund einmal ganz, deshalb abseits
+/// des UI-Threads. Ins Log geht nur die Art und der Dateiname, nie der Pfad.
+#[tauri::command]
+pub async fn tp_datei_finden(host: String, slave: bool) -> crate::tp_finden::TpSuche {
+    let suche = tokio::task::spawn_blocking(move || crate::tp_finden::suche(&host, slave))
+        .await
+        .unwrap_or(crate::tp_finden::TpSuche::Haenger);
+    tracing::info!("TP-Datei-Suche: {}", suche.log_text());
+    suche
+}
+
 /// Knopf „TP-Datei an badhub senden“: Vorbedingungen synchron (Verletzung →
 /// `Err` mit Text, kein Status), sonst Upload im eigenen Rust-Task und sofort
 /// „läuft“ zurück. Zweiter Klick während `laeuft` ist ein No-op (R1: alle

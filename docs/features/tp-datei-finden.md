@@ -1,6 +1,7 @@
 # TP-Datei selbst finden — Spezifikation
 
-> Status: **Entwurf 15.11.2026, wartet auf Freigabe** (via /idee: Brief → Grill → How-To → Review).
+> Status: **Freigegeben 15.11.2026** („Na dann setze um“; via /idee: Brief → Grill → How-To → Review).
+> **PR 1 umgesetzt in v0.9.423** (Suche im Setup); PR 2 (Automatik außerhalb des Setups) offen.
 > Quelle: Idee vom 15.11.2026. Betroffene Crates: `src-tauri`, `src`. Nur bts-light, kein Relay, kein badhub.
 > Baut auf [tp-datei-upload.md](tp-datei-upload.md) und [tp-takt-upload.md](tp-takt-upload.md) auf.
 > ADR: [0096](../adr/0096-tp-pfad-aus-den-handles-von-btp.md) (Handles),
@@ -121,6 +122,7 @@ Eine Kennung wird nie geleert.
 | BTP als Administrator | „BTP läuft als Administrator — bitte die Datei von Hand wählen." |
 | Abfrage blockiert (Frist) | „BTP hat nicht geantwortet — bitte die Datei von Hand wählen." |
 | mehr als eine `.tp` offen | „Mehrere Turnierdateien offen — bitte die Datei von Hand wählen." |
+| Datei liegt nicht auf einem lokalen Laufwerk (`X:\…`) | „‚<Dateiname>' liegt auf einem Netzlaufwerk — bitte die Datei von Hand wählen." Die Suche öffnet die Datei nicht (Security-Review 15.11.2026: sonst könnte ein Prozess, der sich nur `btp.exe` nennt, eine Anmeldung an einem fremden Server auslösen). |
 | Fund fällt in der Prüfung durch | das bestehende Urteil („Das ist keine TP-Datei", „Größer als 32 MB", nicht lesbar) mit Dateiname |
 | BTP auf anderem PC / Slave | „BTP läuft auf einem anderen PC — bitte die Datei von Hand wählen." |
 | kein Windows | Schalter und Knopf sind ausgeblendet |
@@ -256,9 +258,17 @@ Liveticker-Testturnier.
 
 ## Offene Fragen / Annahmen
 
-- **Ungemessen:** Datei auf Netzlaufwerk oder USB-Stick, Defender, zwei
-  Windows-Benutzer am selben PC. Annahme: Die Dateiprüfung fängt unlesbare
-  Funde ab; sonst bleibt die Handwahl.
+- **Netzlaufwerk:** nicht mehr offen — die Suche übernimmt nur Dateien auf
+  lokalen Laufwerken, im Netz bleibt die Handwahl.
+- **Ungemessen:** USB-Stick, Defender, zwei Windows-Benutzer am selben PC.
+  Annahme: Die Dateiprüfung fängt unlesbare Funde ab; sonst bleibt die
+  Handwahl.
+- **Für PR 2 aus dem Security-Review (15.11.2026):** Prozess nicht nur am
+  Namen erkennen (Pfad der `btp.exe` oder Besitzer des BTP-Ports prüfen);
+  `host`/`slave` aus der gespeicherten Config statt vom Frontend; die Datei
+  nicht jede Minute ganz lesen; den Hänger-Deckel als sichtbaren Zustand
+  loggen. Die Regel „leere Kennung wird still gefüllt" außerhalb des Setups
+  noch einmal gegen diesen Review prüfen.
 - **Annahme:** Eine LAN-IP oder der Rechnername des eigenen PCs als
   BTP-Adresse gilt als „nicht lokal" (nur Loopback zählt).
 - **In PR 1 nachzumessen:** ob für `GetFileType` und

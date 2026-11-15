@@ -1,6 +1,6 @@
 # 0096 — TP-Pfad aus den Datei-Handles von `btp.exe`
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-11-15
 
 ## Kontext

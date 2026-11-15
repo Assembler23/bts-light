@@ -77,6 +77,11 @@ jobs:
       - name: Besetzung im Aufruf (JS)
         run: node scripts/test-vorbereitung-besetzung.mjs
 
+      # TP-Datei im Setup (Spec tp-datei-finden, ADR 0097): Entscheidung über
+      # eine gewählte oder in BTP gefundene Datei, Meldungen der Suche.
+      - name: TP-Datei-Wahl (JS)
+        run: node scripts/test-tp-wahl.mjs
+
       # BWF-Aufschlag-Positionierung des Tablets (Plan 12b) — reiner
       # Node-Test der sicherheitskritischen Positionslogik.
       - name: Tablet-Aufschlagpositionen (JS)

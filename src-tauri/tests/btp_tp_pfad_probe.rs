@@ -36,6 +36,11 @@
 //! | Zwei BTP-Fenster mit zwei Turnieren | Ordnet der Fenstertitel richtig zu? |
 //! | Virenscanner (Defender) aktiv | Meldung oder Blockade? |
 //!
+//! Die Zeilen `MINIMAL …` am Ende zeigen, ob die Suche auch mit einer
+//! rechteärmeren Handle-Kopie gelingt (offene Messung der Spec
+//! `tp-datei-finden`): Steht dort „1 .tp gefunden", kann die Automatik auf
+//! `DUPLICATE_SAME_ACCESS` verzichten.
+//!
 //! Dazu die Zeilen „Hänger" und „Dauer" der Ausgabe notieren: Ein Hänger
 //! heißt, dass `GetFileType` an einem Handle (typisch: Pipe) blockiert hat —
 //! die Automatik bräuchte dann dieselbe Frist wie die Sonde.
@@ -61,6 +66,8 @@ const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 /// würde BTP das Handle wegnehmen.
 const DUPLICATE_SAME_ACCESS: u32 = 0x2;
 const FILE_TYPE_DISK: u32 = 0x1;
+/// Kleinstes Zugriffsrecht auf eine Datei: nur Attribute lesen.
+const FILE_READ_ATTRIBUTES: u32 = 0x80;
 const ERROR_ACCESS_DENIED: u32 = 5;
 
 /// Handle-Werte sind Vielfache von 4. Statt der undokumentierten
@@ -237,9 +244,15 @@ enum Meldung {
 /// Geht die Handle-Werte ab `ab` durch. `lauf` ist die Generation: Ein
 /// Arbeiter, der nach einem Hänger doch noch aufwacht, sieht die höhere
 /// Zahl in `aktuell` und hört auf, statt doppelt zu melden.
+///
+/// `zugriff`: `None` = die Kopie erbt BTPs Rechte (`DUPLICATE_SAME_ACCESS`,
+/// so misst der Hauptdurchgang); `Some(maske)` = die Kopie bekommt nur diese
+/// Rechte. Damit prüft die Sonde, ob die Automatik ohne BTPs Schreibrecht
+/// auskommt (Spec `tp-datei-finden`, offene Messung).
 fn arbeiter(
     pid: u32,
     ab: usize,
+    zugriff: Option<u32>,
     lauf: u32,
     aktuell: Arc<AtomicU32>,
     tx: mpsc::Sender<(u32, Meldung)>,
@@ -266,9 +279,13 @@ fn arbeiter(
                 h as Handle,
                 ich,
                 &mut kopie,
+                zugriff.unwrap_or(0),
                 0,
-                0,
-                DUPLICATE_SAME_ACCESS,
+                if zugriff.is_none() {
+                    DUPLICATE_SAME_ACCESS
+                } else {
+                    0
+                },
             );
             if ok != 0 {
                 melde(Meldung::Geoeffnet(h));
@@ -302,13 +319,13 @@ struct Befund {
 
 /// Lässt Arbeiter laufen und startet nach einem Hänger hinter dem
 /// blockierenden Handle einen neuen.
-fn handles_lesen(pid: u32) -> Befund {
+fn handles_lesen(pid: u32, zugriff: Option<u32>) -> Befund {
     let mut befund = Befund::default();
     let aktuell = Arc::new(AtomicU32::new(0));
     let (tx, rx) = mpsc::channel();
     let starte = |ab: usize, lauf: u32| {
         let (aktuell, tx) = (aktuell.clone(), tx.clone());
-        std::thread::spawn(move || arbeiter(pid, ab, lauf, aktuell, tx));
+        std::thread::spawn(move || arbeiter(pid, ab, zugriff, lauf, aktuell, tx));
     };
     let mut lauf = 0u32;
     let mut stand = 4usize;
@@ -402,7 +419,7 @@ fn tp_pfad_aus_dem_btp_prozess() {
         }
 
         let start = Instant::now();
-        let befund = handles_lesen(pid);
+        let befund = handles_lesen(pid, None);
         println!("Dauer des Durchgangs: {:?}", start.elapsed());
 
         if let Some(code) = befund.kein_zugriff {
@@ -450,5 +467,21 @@ fn tp_pfad_aus_dem_btp_prozess() {
             }
         }
         println!("ERGEBNIS: {treffer} offene .tp-Datei(en) gefunden");
+
+        // Gegenmessung: Reicht eine Kopie mit weniger Rechten? Die Automatik
+        // soll BTPs Schreibrecht auf die Datenbank nicht einmal kurz halten.
+        for (name, maske) in [
+            ("ohne Rechte (0)", 0u32),
+            ("nur Attribute lesen (0x80)", FILE_READ_ATTRIBUTES),
+        ] {
+            let b = handles_lesen(pid, Some(maske));
+            let tp = b.dateien.iter().filter(|d| endung(d) == "tp").count();
+            println!(
+                "MINIMAL {name}: {tp} .tp gefunden, {} Dateien, Hänger {:x?}, Arten {:?}",
+                b.dateien.len(),
+                b.haenger,
+                b.arten
+            );
+        }
     }
 }

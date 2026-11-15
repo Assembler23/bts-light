@@ -1207,7 +1207,7 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
 - **BTP-Prozess:** heißt `btp.exe`, Fenstertitel
   `Badminton Turnier Planer - <Dateiname ohne .TP>`. Eine Automatik zum Finden
   der Datei hätte damit einen Anhaltspunkt (nicht umgesetzt).
-- **Pfad aus dem Prozess (Messung offen, Sonde seit 15.11.2026):**
+- **Pfad aus dem Prozess (gemessen 15.11.2026, umgesetzt in v0.9.423 — `tp_finden/`, Spec [tp-datei-finden](features/tp-datei-finden.md), ADR 0096):**
   `tests/btp_tp_pfad_probe.rs` liest Kommandozeile, Fenstertitel und die
   offenen Datei-Handles von `btp.exe` und meldet, ob daraus der volle Pfad
   der `.TP` folgt. Die zu messenden Fälle (Doppelklick-Start, „Datei →
@@ -1242,7 +1242,10 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
     Windows-Sitzung gibt es also höchstens ein `btp.exe` und damit höchstens
     eine offene `.tp` — eine Auswahl zwischen mehreren Treffern braucht die
     Automatik nicht. (Ungeprüft: zwei Windows-Benutzer am selben PC.)
-  - Offen: Netzlaufwerk, Virenscanner.
+  - Offen: Netzlaufwerk, Virenscanner — und ob eine Handle-Kopie mit
+    weniger Rechten genügt (Zeilen `MINIMAL …` der Sonde). Bis dahin kopiert
+    die Suche mit `DUPLICATE_SAME_ACCESS`, also für Mikrosekunden samt BTPs
+    Schreibrecht.
   Aufruf am Windows-PC mit laufendem BTP:
   `cargo test -p bts-light --test btp_tp_pfad_probe -- --ignored --nocapture`.
 - `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst

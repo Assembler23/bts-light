@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.423
+
+- **TP-Datei: bts-light findet sie selbst.** Im Setup-Abschnitt „TP-Datei
+  (Turnierdatenbank)" sucht bts-light beim Öffnen die Datei, die in BTP
+  gerade geöffnet ist, und trägt sie ein — ohne Dateidialog. Ist noch keine
+  Turnier-Kennung eingetragen, kommt sie gleich mit. Gehört die Datei zu
+  einem anderen Turnier als die eingetragene Kennung, fragt bts-light nach;
+  bei „Nein" schaltet sich die Suche ab. Neu sind der Schalter **TP-Datei
+  automatisch finden** (Standard an) und der Knopf **In BTP geöffnete Datei
+  suchen**. Wer die Datei von Hand wählt, schaltet die Suche aus.
+  Voraussetzung: BTP läuft auf demselben PC und nicht als Administrator —
+  sonst sagt das Setup, warum, und die Handwahl bleibt.
+
 ## v0.9.422
 
 - **Demofeld: Zählweise wählbar, Ballzähler an.** Über den Übungsspielen

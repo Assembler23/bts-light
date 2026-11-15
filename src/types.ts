@@ -194,7 +194,24 @@ export interface TpUploadConfig {
   ereignis_enabled: boolean;
   /** Drossel: Mindestabstand in Minuten; Rust klemmt unter 5, Standard 5. */
   ereignis_minuten: number;
+  /** Die in BTP geöffnete Datei selbst finden (Spec tp-datei-finden). Standard an;
+   *  Handwahl oder ein Nein auf die Rückfrage schaltet es aus. */
+  finden_automatisch: boolean;
 }
+
+/** Ergebnis der Suche nach der in BTP geöffneten Datei (Rust: `tp_finden::TpSuche`). */
+export type TpSuche =
+  | { art: "gefunden"; pfad: string; name: string; info: TpFileInfo }
+  | { art: "vorpruefung"; name: string; info: TpFileInfo }
+  | { art: "btp_nicht_gestartet" }
+  | { art: "kein_turnier_offen" }
+  | { art: "kein_zugriff" }
+  | { art: "haenger" }
+  | { art: "mehrere" }
+  | { art: "netzlaufwerk"; name: string }
+  | { art: "nicht_lokal" }
+  | { art: "nicht_verfuegbar" }
+  | { art: "laeuft_schon" };
 
 /** Urteil über einen gewählten Pfad (Rust: `badhub::tp_upload::TpFileInfo`). */
 export type TpFileInfo =
