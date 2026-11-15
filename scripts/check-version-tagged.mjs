@@ -151,8 +151,8 @@ export function bewerte({
       `Release faellig: ${grund}. ${offen.length} auslieferbare(r) Commit(s) seit ` +
       `${letzterTag ?? "dem Anfang"} erreichen keinen Turnier-PC.\n` +
       `  aelteste offene:\n${liste}\n` +
-      `  Wenn es raus soll:\n` +
-      `    git tag -a v${cargo} origin/main -m "BTS Light v${cargo}" && git push origin v${cargo}`,
+      `  Wenn es raus soll (Workflow "Release ausloesen", siehe docs/release.md):\n` +
+      `    gh workflow run release-ausloesen.yml --ref main -f version=${cargo}`,
   };
 }
 

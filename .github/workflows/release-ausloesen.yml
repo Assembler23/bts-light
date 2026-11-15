@@ -1,0 +1,121 @@
+# Setzt den Versions-Tag auf main — per Knopf, ohne Admin-Recht.
+#
+# Warum es das gibt: Das Ruleset „Release-Tags nur durch Admins" sperrt
+# `refs/tags/v*`. Bisher hieß das: Tilo meldet, der Admin taggt. An genau
+# dieser Übergabe blieben Versionen liegen (siehe release-faellig.yml). Hier
+# taggt stattdessen ein Workflow mit einem eigenen Deploy-Key, der im Ruleset
+# als Ausnahme eingetragen ist. Der Schlüssel liegt im Environment
+# `release-tag`, das nur Läufe von main bedient: Getaggt wird also nur nach
+# der Regel, die auf main steht. Der Schutz ist damit genau so stark wie der
+# Schutz von main selbst (siehe docs/release.md, „Worauf der Schutz beruht").
+#
+# Weiterhin KEIN Auto-Tag: Der Tag löst ein Auto-Update auf allen laufenden
+# Turnier-PCs aus. Ob das gerade passt, weiß nur ein Mensch — der startet
+# diesen Lauf und tippt die Version zur Bestätigung.
+#
+# Warum ein Deploy-Key und nicht der GITHUB_TOKEN: Ein mit dem GITHUB_TOKEN
+# gesetzter Tag löst release.yml NICHT aus (GitHub verhindert Workflow-Ketten),
+# und am Ruleset scheitert er ohnehin.
+#
+# Einmalige Einrichtung (Admin): docs/release.md, „Release per Knopf auslösen".
+#
+# @see scripts/check-release-freigabe.mjs   (die Regel)
+# @see scripts/test-release-freigabe.mjs    (Regel-Tests, laufen in ci.yml)
+name: Release auslösen
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version zur Bestätigung, z. B. 0.9.422 – muss der Version auf main entsprechen"
+        required: true
+        type: string
+
+# Nie zwei Läufe gleichzeitig; ein laufender wird nicht abgebrochen.
+concurrency:
+  group: release-ausloesen
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read # CI-Ergebnis von main lesen
+
+jobs:
+  # Erst prüfen, OHNE Environment: Ist dort eine Freigabe durch den Admin
+  # eingestellt (Required reviewers), wird er nur für Läufe gefragt, die
+  # überhaupt taggen dürften.
+  pruefen:
+    name: Freigabe prüfen
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.freigabe.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Volle Historie: Die Regel misst den Abstand zwischen dem zuletzt
+          # von der CI geprüften Commit und diesem.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Darf getaggt werden?
+        id: freigabe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Über die Umgebung, nie direkt ins Skript interpoliert.
+          EINGABE: ${{ inputs.version }}
+        run: node scripts/check-release-freigabe.mjs
+
+  taggen:
+    name: Tag setzen
+    needs: pruefen
+    runs-on: ubuntu-latest
+    # Das Environment hält den Schlüssel und lässt nur main zu. Es MUSS vom
+    # Admin angelegt sein: GitHub legt ein fehlendes Environment sonst still
+    # und ohne jede Beschränkung an — dann fehlt aber auch das Secret, und der
+    # erste Schritt bricht ab.
+    environment: release-tag
+    steps:
+      - name: Schlüssel vorhanden?
+        env:
+          KEY: ${{ secrets.RELEASE_TAG_KEY }}
+        run: |
+          if [ -z "${KEY}" ]; then
+            echo "::error::Secret RELEASE_TAG_KEY fehlt im Environment release-tag — Einrichtung siehe docs/release.md (Release per Knopf auslösen)."
+            exit 1
+          fi
+
+      # Checkt genau den geprüften Commit aus (github.sha) und richtet den
+      # Deploy-Key für den Push ein.
+      - uses: actions/checkout@v7
+        with:
+          ssh-key: ${{ secrets.RELEASE_TAG_KEY }}
+
+      - name: Tag setzen und pushen
+        env:
+          TAG: ${{ needs.pruefen.outputs.tag }}
+          WER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          # Gürtel zum Hosenträger: nur die schlichte Form vX.Y.Z.
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unerwarteter Tag-Name: ${TAG}"; exit 1
+          fi
+          # Zwischen Prüfung und diesem Job kann Zeit liegen (Freigabe durch
+          # einen Reviewer am Environment). Ist main inzwischen weiter, wäre
+          # der Tag auf dem alten Commit eine Überraschung — dann lieber neu.
+          SPITZE=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "${SPITZE}" != "${GITHUB_SHA}" ]; then
+            echo "::error::main hat sich seit der Prüfung bewegt (${SPITZE:-unlesbar}) — bitte neu auslösen."
+            exit 1
+          fi
+          git config user.name "bts-light Release"
+          git config user.email "release@bts-light.invalid"
+          git tag -a "${TAG}" -m "BTS Light ${TAG}" -m "Ausgelöst von ${WER} über den Workflow „Release auslösen“."
+          # Existiert der Tag inzwischen doch, lehnt der Server den Push ab —
+          # ein bestehender Tag wird nie verschoben (kein --force).
+          git push origin "refs/tags/${TAG}"
+          echo "### ${TAG} gesetzt" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Der Workflow „Release bauen & veröffentlichen“ läuft jetzt an." >> "${GITHUB_STEP_SUMMARY}"
