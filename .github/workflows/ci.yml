@@ -416,6 +416,12 @@ jobs:
       - name: Release-Faellig-Regel (JS)
         run: node scripts/test-version-tagged.mjs
 
+      # Tuersteher des Workflows "Release ausloesen": Er taggt mit einem
+      # Schluessel, der das Tag-Ruleset umgehen darf — jeder Hinderungsgrund
+      # und jeder Lesefehler muss sperren.
+      - name: Release-Freigabe-Regel (JS)
+        run: node scripts/test-release-freigabe.mjs
+
       # Haelt fest, dass die Update-Notes die ganze Strecke seit dem letzten
       # Tag abdecken — vorher sah der Nutzer nur den getaggten Eintrag, und
       # bei neun gebuendelten Versionen fehlten acht.
