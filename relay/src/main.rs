@@ -7679,6 +7679,7 @@ mod tests {
             teams_correction: false,
             feld_check: false,
             shuttle_counter: false,
+            injury_guide_secs: 0,
             seed_a: None,
             seed_b: None,
         }

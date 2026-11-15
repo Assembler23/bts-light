@@ -1965,6 +1965,20 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
   `shuttle_counter`, `TlCourt.shuttles` und `TlFinished.shuttles`. **Deploy-Reihenfolge: Relay vor App** — ein alter Relay
   wirft die Zahl still weg und lehnt eine `EnterResult`-Aktion mit dem
   unbekannten Feld nicht ab, reicht sie aber ohne Zahl weiter.
+- **Richtzeit der Behandlungspause (Spec
+  [verletzungsunterbrechung](features/verletzungsunterbrechung.md), ADR 0095):**
+  `MatchBrief.injuryGuideSecs` (`u32`, `serde(default)`) trägt die Richtzeit in
+  Sekunden (60–1800, vom Host geklemmt) — LAN und Cloud setzen sie über
+  dieselbe Stelle `server::brief_aus_config`. Das Feld ist **zugleich
+  Fähigkeitsmeldung**: `> 0` heißt „dieser Host kennt die Behandlungs-Darstellung
+  auf dem Zettel". Nur dann erzeugt das Tablet automatische
+  Behandlungsereignisse; ein alter Host druckte sie sonst bei Spieler „A1".
+  Fehlt das Feld (alter Host oder alter Relay, der es beim Umbau verwirft), läuft
+  am Tablet nur die Uhr mit 300 s. Die Richtzeit gehört bewusst **nicht** zum
+  Cloud-Push-Schlüssel (`CourtPushKey`): Eine Änderung im Setup wirkt ab der
+  nächsten Zuweisung, statt ein laufendes Spiel neu zuzuweisen. Im TL-Zustand
+  (opak für den Relay) reist `injury_guide_seconds`. Der Relay hat keine eigene
+  Logik dafür.
 - Neu: `TlAction::MeetingpointSet`, `MatchBrief.feldCheck` (`serde(default)`).
   Neue Enums `MpPlatz`/`MpOrt` haben einen `serde(other)`-Auffang.
   **Deploy-Reihenfolge: Relay vor App** (der Relay parst `TlAction`; ein alter

@@ -155,6 +155,18 @@ pub struct MatchBrief {
     /// `#[serde(default)]`: ein alter Host bietet den Zähler nicht an.
     #[serde(rename = "shuttleCounter", default)]
     pub shuttle_counter: bool,
+    /// Richtzeit der Behandlungspause in Sekunden (Spec
+    /// `verletzungsunterbrechung`, ADR 0095) — eine Turnier-Konvention, keine
+    /// Regel: Die Uhr am Tablet wird danach rot und zählt weiter.
+    ///
+    /// **Zugleich Fähigkeitsmeldung** (wie `shuttle_counter`): `> 0` heißt
+    /// „dieser Host kennt die Behandlungs-Darstellung auf dem Zettel"
+    /// (Paarung, leere Spieler-Spalte). Nur dann erzeugt das Tablet
+    /// automatische Behandlungsereignisse — ein alter Host druckte sie sonst
+    /// bei Spieler „A1". `#[serde(default)]`: fehlt → 0 → Uhr mit 300 s,
+    /// keine automatischen Ereignisse.
+    #[serde(rename = "injuryGuideSecs", default)]
+    pub injury_guide_secs: u32,
 }
 
 // ─────────────────────────── Court-Monitor ────────────────────────────────
@@ -4321,6 +4333,27 @@ mod tests {
         assert!(brief["match"].get("shuttleCounter").is_some());
     }
 
+    /// Ein alter Host sendet `injuryGuideSecs` nicht: 0 heißt „keine
+    /// Fähigkeit" (ADR 0095) — das Tablet erzeugt dann keine automatischen
+    /// Behandlungsereignisse.
+    #[test]
+    fn match_brief_ohne_richtzeit_liest_null() {
+        let brief = serde_json::to_value(beispiel_match_assigned()).unwrap();
+        let mut kurz = brief["match"].clone();
+        kurz.as_object_mut().unwrap().remove("injuryGuideSecs");
+        let gelesen: MatchBrief = serde_json::from_value(kurz).unwrap();
+        assert_eq!(gelesen.injury_guide_secs, 0);
+    }
+
+    #[test]
+    fn match_brief_richtzeit_roundtrip() {
+        let brief = serde_json::to_value(beispiel_match_assigned()).unwrap();
+        // camelCase ist der Vertrag mit `tablet.html`.
+        assert_eq!(brief["match"]["injuryGuideSecs"], 300);
+        let gelesen: MatchBrief = serde_json::from_value(brief["match"].clone()).unwrap();
+        assert_eq!(gelesen.injury_guide_secs, 300);
+    }
+
     #[test]
     fn schlanker_anzeige_stand_streicht_events() {
         // Keine Anzeige liest Undo-Verlauf, Ballwechsel-Protokoll oder
@@ -4472,6 +4505,7 @@ mod tests {
                 teams_correction: false,
                 feld_check: false,
                 shuttle_counter: false,
+                injury_guide_secs: 300,
                 seed_a: None,
                 seed_b: None,
             },
@@ -4526,6 +4560,7 @@ mod tests {
             teams_correction: true,
             feld_check: false,
             shuttle_counter: false,
+            injury_guide_secs: 0,
             seed_a: None,
             seed_b: None,
         };

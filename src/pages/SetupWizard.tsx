@@ -322,6 +322,16 @@ function adSchriftfarbe(bg: string): string {
   return luminanz > 0.179 ? "#111111" : "#ffffff";
 }
 
+
+/** Richtzeit-Feld (Minuten, Text) → Sekunden fürs Speichern: leer oder keine
+ *  Zahl → Standard 5 min, sonst auf 1–30 min geklemmt — wie der Hinweis am
+ *  Feld es ankündigt (eine 0 wird also 1 min, nicht 5). */
+function richtzeitSekunden(feld: string): number {
+  const n = Number(feld);
+  const min = feld.trim() === "" || !Number.isFinite(n) ? 5 : Math.round(n);
+  return Math.min(30, Math.max(1, min)) * 60;
+}
+
 export function SetupWizard({
   initialConfig,
   onDone,
@@ -677,6 +687,11 @@ export function SetupWizard({
   const [shuttleCounter, setShuttleCounter] = useState(
     initialConfig.shuttle_counter ?? false,
   );
+  // Richtzeit der Behandlungspause (Spec verletzungsunterbrechung): im Feld
+  // in Minuten, gespeichert in Sekunden. Der Rust-Kern klemmt auf 1–30 min.
+  const [richtzeitMin, setRichtzeitMin] = useState(
+    String(Math.max(1, Math.round((initialConfig.injury_guide_seconds ?? 300) / 60))),
+  );
   const [ads, setAds] = useState<CourtAd[]>([]);
   const [adError, setAdError] = useState("");
   const [test, setTest] = useState<TestState>({ kind: "idle" });
@@ -979,6 +994,8 @@ export function SetupWizard({
       // Muss hier stehen: Was im gesendeten JSON fehlt, fällt beim Speichern
       // auf den Rust-Default zurück — der Zähler ginge still wieder aus.
       shuttle_counter: shuttleCounter,
+      // Ebenso: fehlte sie, fiele die Richtzeit beim Speichern auf 5 min.
+      injury_guide_seconds: richtzeitSekunden(richtzeitMin),
     };
   }
 
@@ -2965,6 +2982,40 @@ export function SetupWizard({
               onChange={(e) => setShuttleCounter(e.currentTarget.checked)}
             />
             Bälle am Tablet zählen
+          </label>
+        </section>
+
+        {/* Behandlungspause (Spec verletzungsunterbrechung, ADR 0095) */}
+        <section
+          id="section-behandlungspause"
+          className="flex flex-col gap-2 scroll-mt-24"
+        >
+          <SectionHeader icon={Stethoscope}>Behandlungspause</SectionHeader>
+          <p className="text-xs text-slate-500">
+            Nach ✚ am <strong>Zähl-Tablet</strong> zählt eine Uhr die
+            Behandlung hoch. Nach der <strong>Richtzeit</strong> wird sie rot
+            und zeigt „Richtzeit überschritten", ebenso das Badge in der
+            Turnierleitungssicht. Die Richtzeit ist eine Turnier-Vorgabe, keine
+            Regel: Die Uhr zählt weiter, die Pause endet nur mit
+            „Weiterspielen". Die Tablets übernehmen die Änderung mit der
+            nächsten Spielzuweisung.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            Richtzeit
+            <input
+              type="number"
+              min={1}
+              max={30}
+              step={1}
+              value={richtzeitMin}
+              onChange={(e) => setRichtzeitMin(e.currentTarget.value)}
+              className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+            />
+            Minuten
+            {richtzeitMin.trim() !== "" &&
+              (Number(richtzeitMin) < 1 || Number(richtzeitMin) > 30) && (
+                <span className="text-xs text-amber-700">1 bis 30 — wird angepasst</span>
+              )}
           </label>
         </section>
 
