@@ -1226,8 +1226,13 @@ Repo-Werkzeug (Jet 4, 76 Tabellen, 3,6 MB, Turnier mit 13 Konkurrenzen).
   - BTP hält daneben eine zweite Sperrdatei `tp.ldb` unter
     `C:\ProgramData\Visual Reality\Badminton Turnier Planer\` (eigene
     Programmdatenbank). Sie endet nicht auf `.tp` und stört die Suche nicht.
-  - Offen: „Datei → Öffnen", BTP als Administrator, Netzlaufwerk, zwei
-    BTP-Fenster, Virenscanner.
+  - **Fall „Datei → Öffnen" (gemessen 15.11.2026):** Die Kommandozeile
+    ist leer (nur `btp.exe`), die Handles liefern trotzdem genau die eine
+    `.tp` mit vollem Pfad, lesbar, mit Jet-Kopf (71 ms, kein Hänger).
+    **Die Handles sind damit der tragende Weg**; die Kommandozeile allein
+    reicht nicht und bringt daneben nichts Zusätzliches.
+  - Offen: BTP als Administrator, Netzlaufwerk, zwei BTP-Fenster,
+    Virenscanner.
   Aufruf am Windows-PC mit laufendem BTP:
   `cargo test -p bts-light --test btp_tp_pfad_probe -- --ignored --nocapture`.
 - `stage`/`stageentry` erschienen mit `access-parser.parse_table()` zunächst
