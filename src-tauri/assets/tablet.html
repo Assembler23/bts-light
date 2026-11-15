@@ -62,7 +62,11 @@
       background: #fff; border-radius: .3rem; padding: .15rem;
     }
     @media (max-width: 640px) { .sponsor-bar { display: none; } }
-    /* Verletzungs- und Megafon-Button rechts in der Kopfzeile. */
+    /* Knöpfe der Kopfzeile: „📣 Turnierleitung" und „⋯ Mehr", dazu − / +
+       des Ballzählers. Seltenes (Ergebnis eintragen, Spiel beenden, ⇄, ✚,
+       Schiri-Modus, Gerät) liegt seit dem Usability-Durchgang 15.11.2026 im
+       Mehr-Menü: Vier nackte Symbole nebeneinander erklärten sich nicht,
+       und ✚ löste direkt neben ⇄ ohne Rückfrage aus. */
     .header-btn {
       flex: 0 0 auto;
       width: 2.8rem; height: 2.8rem;
@@ -72,17 +76,26 @@
       border: 0; border-radius: .5rem; cursor: pointer;
       touch-action: manipulation;
     }
-    /* Neutrale Knöpfe (⇄, ⚙) brauchen einen eigenen dunklen Grund: Die
-       allgemeine button-Regel färbt sie sonst hellgrau, und das weiße Symbol
-       verschwand darauf (Rückmeldung 31.10.2026). Zweistufiger Selektor, damit
-       auch button:disabled den Grund nicht überschreibt. */
+    .header-btn[hidden] { display: none; }
+    /* Beschriftete Kopfknöpfe: Symbol + Wort. Auf Handy-Breite bleibt nur
+       das Symbol, damit die Kopfzeile nicht umbricht. */
+    .header-btn.mit-text { width: auto; padding: 0 .8rem; gap: .4rem; font-size: 1rem; font-weight: 700; }
+    .header-btn.mit-text .ico { font-size: 1.3rem; line-height: 1; }
+    /* Schmal (Tablet hochkant, Handy): nur das Zeichen — der Feldname links
+       geht vor. */
+    @media (max-width: 760px) {
+      .header-btn.mit-text { width: 2.8rem; padding: 0; }
+      .header-btn.mit-text .txt { display: none; }
+    }
+    /* Alle Kopfknöpfe sind neutral (dunkler Grund): Farbe bleibt den
+       Mannschaften und Zuständen vorbehalten. Der eigene Grund ist nötig,
+       weil die allgemeine button-Regel sie sonst hellgrau färbt und das
+       weiße Symbol darauf verschwand (Rückmeldung 31.10.2026). Zweistufiger
+       Selektor, damit auch button:disabled den Grund nicht überschreibt. */
     .header-btn.neutral { background: #334155; }
     .header-btn.neutral:active { background: #1e293b; }
-    .header-btn.injury { background: #b91c1c; }
-    .header-btn.injury:active { background: #991b1b; }
-    .header-btn.injury.on { background: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,.4); }
-    .header-btn.megaphone { background: #b45309; }
-    .header-btn.megaphone:active { background: #92400e; }
+    /* Einzige Farbe in der Kopfzeile: „Turnierleitung ist gerufen" — ein
+       Zustand, den man sehen muss, um ihn zurückzunehmen. */
     .header-btn.megaphone.on { background: #f59e0b; color: #1f2937; box-shadow: 0 0 0 3px rgba(245,158,11,.4); }
     .header-btn:disabled { opacity: .35; cursor: not-allowed; color: #fff; }
     /* Ballzähler (Spec tablet-ballzaehler): − Zahl + als eine Gruppe, damit
@@ -112,7 +125,7 @@
        1. Feld-Aufruf und weicht der Spieldauer, sobald die Aufstellung
        bestätigt ist. Leer = ausgeblendet (Timer in den Einstellungen aus,
        kein Stempel, Tablet im Spiel). Feste Breite: Die Kopfzeile bricht
-       nicht um, und das Zahnrad rechts muss erreichbar bleiben — deshalb
+       nicht um, und „⋯ Mehr" rechts muss erreichbar bleiben — deshalb
        fällt auf schmalen Geräten der Text weg (unten), nicht die Zeit. */
     .call-timer {
       flex: 0 0 auto;
@@ -122,7 +135,7 @@
     }
     .call-timer:empty { display: none; }
     /* Auf schmalen Geräten (Handy) nur die Zeit, ohne „· 2. Aufruf" — die
-       Farbe trägt die Stufe. Sonst schöbe die Marke das Zahnrad aus dem Bild. */
+       Farbe trägt die Stufe. Sonst schöbe die Marke „⋯ Mehr" aus dem Bild. */
     @media (max-width: 640px) { .call-timer .lbl { display: none; } }
     .call-timer.ok   { background: #d1fae5; color: #065f46; }
     .call-timer.warn { background: #fef3c7; color: #92400e; }
@@ -200,8 +213,13 @@
     }
     .empty .idle-court-cap { font-size: 1.1rem; font-weight: 700; color: var(--muted);
       letter-spacing: .12em; text-transform: uppercase; }
-    .empty .idle-wait { font-size: 1.15rem; color: var(--muted); max-width: 26rem; }
-    .empty .idle-hint { font-size: .95rem; color: var(--muted); max-width: 24rem; }
+    .empty .idle-wait { font-size: 1.25rem; font-weight: 700; color: var(--text); max-width: 28rem; }
+    .empty .idle-hint { font-size: 1rem; color: var(--muted); max-width: 26rem; line-height: 1.4; }
+    /* Hält „verbinde…" an, sagt die Warte-Ansicht es selbst — der graue
+       Punkt oben rechts fiel niemandem auf, und das Tablet sah aus, als
+       warte es nur auf ein Spiel. Amber statt Rot: ein Hinweis, kein
+       Fehler am Spiel. */
+    .empty.offline .idle-wait { color: #b45309; }
 
     /* ─── Hauptbereich: Score + Court + Plus-Buttons ──────────────────── */
     .main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -245,30 +263,10 @@
       border-radius: .6rem; border: 1px solid var(--line); flex-shrink: 0;
       box-shadow: 0 1px 3px rgba(15,23,42,.08);
     }
+    /* Im Score-Board steht nur noch der Stand: ↩ und „Verlauf" sitzen in
+       der Fußleiste (Usability-Durchgang 15.11.2026, ein Rückgängig-Knopf
+       statt zwei). */
     .score-stack { display: flex; flex-direction: column; align-items: center; gap: .1rem; flex: 1; min-width: 0; }
-    /* Undo-Button im Score-Board: groß und kontrastreich, sitzt mittig auf
-       dem Bildschirm und kann nicht von Safari-Bottom-Bars oder dem Home-
-       Indicator abgeschnitten werden. Heller Amber-Ton + Glow für klare
-       Sichtbarkeit auf dem dunklen Score-Board. */
-    .board-undo {
-      flex: 0 0 auto;
-      width: 4.5rem; height: 4.5rem;
-      padding: 0; min-height: 0;
-      display: inline-flex; align-items: center; justify-content: center;
-      font-size: 2.8rem; font-weight: 800; line-height: 1;
-      background: #f59e0b; color: #1f2937;
-      border: 2px solid #fbbf24;
-      border-radius: .75rem; cursor: pointer;
-      touch-action: manipulation;
-      box-shadow: 0 0 0 3px rgba(245, 158, 11, .25), 0 4px 12px rgba(15,23,42,.15);
-    }
-    .board-undo:disabled {
-      opacity: 1; cursor: not-allowed;
-      background: var(--surface-2); color: var(--muted);
-      border-color: var(--line);
-      box-shadow: none;
-    }
-    .board-undo:active:not(:disabled) { background: #f59e0b; transform: scale(.96); }
     /* Der laufende Satzstand deutlich größer als vorher (war fixe 2.2rem –
        ohne Brille zu klein, Tilo 20.07.), aber bewusst gedeckelt: das
        Score-Board darf das Spielfeld darunter NICHT verdrängen (der Court
@@ -398,6 +396,19 @@
       background: var(--surface); flex-shrink: 0;
       border-top: 1px solid var(--line);
     }
+    /* Ohne Spiel gibt es nichts zurückzunehmen: Die Fußleiste verschwindet,
+       statt ausgegraute Knöpfe zu zeigen. */
+    footer[hidden] { display: none; }
+    /* Der EINE Rückgängig-Knopf: breit, amber getönt und mit dem Text, was
+       er zurücknimmt („↩ Punkt für Links zurück"). Vorher gab es ihn
+       zweimal — als Symbol am Stand und als Text hier. */
+    #undo-btn-bottom {
+      background: #fef3c7; color: #78350f; border: 2px solid #f59e0b; font-weight: 800;
+    }
+    #undo-btn-bottom:active:not(:disabled) { background: #fde68a; }
+    #undo-btn-bottom:disabled {
+      background: var(--surface-2); color: var(--muted); border: 1px solid var(--line);
+    }
     button {
       flex: 1; padding: 1rem .8rem; font-size: 1.1rem; font-weight: 700;
       background: var(--surface-2); color: var(--text); border: 1px solid var(--line);
@@ -412,8 +423,9 @@
     /* Gesperrte Korrektur (Ergebnis in BTP fest): blass statt halb-rot, damit
        der Knopf nicht mehr nach „drück mich" aussieht. */
     button.danger:disabled { background: #e8b4b4; color: #fff5f5; border-color: #e8b4b4; }
-    /* „Match beenden": ab 0:0 verfügbar, aber bewusst dezent (gedämpft, klein,
-       nicht raumgreifend) – die Punktzählung bleibt die Haupthandlung. */
+    /* Nebenknöpfe (z. B. „📈 Verlauf" in der Fußleiste): bewusst dezent
+       (gedämpft, klein, nicht raumgreifend) – die Punktzählung bleibt die
+       Haupthandlung. */
     button.subtle {
       flex: 0 0 auto; min-height: 2.6rem; padding: .5rem 1rem;
       font-size: .9rem; font-weight: 600;
@@ -432,7 +444,7 @@
        Hintergrund ab). Titel/Optionen erben --text. */
     .modal.visible { display: flex; color: var(--text); }
     /* Das Setup-Modal (Seitenwahl, Aufschläger, Annehmer) beginnt erst
-       UNTER der Kopfzeile: Feldname, Aufruf-Uhr und Zahnrad bleiben während
+       UNTER der Kopfzeile: Feldname, Aufruf-Uhr und „⋯ Mehr" bleiben während
        der Seitenwahl sichtbar und antippbar (Wunsch 05.09.2026). Die Höhe
        der Kopfzeile misst ein ResizeObserver (`--kopf-hoehe`); der
        Rückfallwert entspricht Kopfzeilen-Knopf + Innenabstand. Alle anderen
@@ -532,7 +544,7 @@
     .modal .anwesend button.da { background: #14532d; border-color: #22c55e; color: #fff; }
     .modal .sk-hint .sk-names { font-weight: 700; color: #fff; }
     .modal .sk-hint .sk-label { opacity: .85; }
-    /* Einstellungen (PIN + Feldwechsel). */
+    /* Mehr-Menü (freie Einträge) samt PIN-Abfrage und Geräte-Ansicht. */
     .modal .settings-view {
       display: flex; flex-direction: column; align-items: center;
       gap: 1.25rem; width: 100%;
@@ -555,7 +567,7 @@
     /* Über den Lock-/Belegt-Overlays (z-index 25), damit das PIN-Menü auch
        dann oben liegt und bedienbar bleibt (Feldwechsel als Recovery). */
     #settings-modal { z-index: 28; }
-    /* Zahnrad- und Ereignis-Menü: Passt der Inhalt nicht, scrollt er. Vorher
+    /* Mehr- und Ereignis-Menü: Passt der Inhalt nicht, scrollt er. Vorher
        lagen Titel und „Schließen" bei 800 px Höhe außerhalb des Schirms und
        waren nicht erreichbar (Usability-Durchgang 15.11.2026). Zentriert
        über automatische Ränder statt `safe center` — wie beim Pausen-Overlay
@@ -563,24 +575,38 @@
     #settings-modal, #card-modal { overflow-y: auto; justify-content: flex-start; }
     #settings-modal .settings-view, #card-modal .settings-view { margin: auto 0; flex: 0 0 auto; gap: .8rem; }
     #settings-modal .opt.settings-wide { width: min(22rem, 100%); padding: .95rem 1rem; }
-    #settings-main-view .settings-section {
+    /* `.settings-liste` = die beiden Listen-Ansichten (Mehr-Menü und
+       „Gerät"); die PIN-Ansicht dazwischen bleibt eine schlichte Spalte. */
+    #settings-modal .settings-liste .settings-section {
       margin-top: .4rem; font-size: .85rem; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8;
     }
-    #settings-main-view .options { max-width: 44rem; }
+    #settings-modal .settings-section[hidden] { display: none; }
+    #settings-modal .settings-liste .options { max-width: 44rem; }
     /* Im Querformat zwei Spalten: Abschnittstitel und Feldliste über die
-       ganze Breite, die Schalter paarweise nebeneinander. */
+       ganze Breite, die Schalter paarweise nebeneinander. `.allein` ist ein
+       Eintrag, der in seinem Abschnitt keinen Nachbarn hat — er steht
+       mittig statt links in einer halbleeren Zeile. */
     @media (min-width: 700px) {
-      #settings-main-view {
+      #settings-modal .settings-liste {
         display: grid; grid-template-columns: repeat(2, minmax(0, 21rem));
-        justify-content: center; gap: .7rem .8rem;
+        justify-content: center; align-items: stretch; gap: .7rem .8rem;
       }
-      #settings-main-view[hidden] { display: none; }
-      #settings-main-view > .title, #settings-main-view > .subtitle,
-      #settings-main-view > .settings-section, #settings-main-view > .options,
-      #settings-main-view > .abbrechen { grid-column: 1 / -1; justify-self: center; }
-      #settings-main-view > .subtitle { margin-top: -.4rem; }
-      #settings-main-view .opt.settings-wide { width: 100%; min-width: 0; }
-      #settings-main-view > .opt.abbrechen { width: min(22rem, 100%); margin-top: .4rem; }
+      #settings-modal .settings-liste[hidden] { display: none; }
+      /* Nachbarn einer Zeile gleich hoch, der Text mittig — sonst hängt
+         neben einem zweizeiligen Eintrag ein niedrigerer schief. */
+      #settings-modal .settings-liste .opt.settings-wide {
+        display: flex; align-items: center; justify-content: center; text-align: center;
+      }
+      #settings-modal .settings-liste .opt.settings-wide[hidden] { display: none; }
+      #settings-modal .settings-liste > .title, #settings-modal .settings-liste > .subtitle,
+      #settings-modal .settings-liste > .settings-section, #settings-modal .settings-liste > .options,
+      #settings-modal .settings-liste > .abbrechen,
+      #settings-modal .settings-liste > .allein { grid-column: 1 / -1; justify-self: center; }
+      #settings-modal .settings-liste > .subtitle { margin-top: -.4rem; }
+      #settings-modal .settings-liste .opt.settings-wide { width: 100%; min-width: 0; }
+      #settings-modal .settings-liste > .opt.abbrechen,
+      #settings-modal .settings-liste > .opt.allein { width: min(22rem, 100%); }
+      #settings-modal .settings-liste > .opt.abbrechen { margin-top: .4rem; }
     }
     /* Abbrechen / Schließen / Zurück: ein ruhiger Rahmen-Knopf auf eigener
        Zeile, nicht als gleichwertige weiße Karte neben den echten Wahlen
@@ -818,27 +844,9 @@
     .megaphone-text { max-width: 30rem; color: #cbd5e1; font-size: 1rem; line-height: 1.45; }
 
     /* ── Punktverlauf-Graph (Spec punktverlauf-graph) ──────────────────
-       Kleiner Abruf-Knopf am Score-Board + Overlay mit je Satz einem
-       SVG-Liniendiagramm aus den lokalen Verlaufsdaten. */
-    /* Gleich groß wie das ↩ links, damit der Satzstand genau mittig steht.
-       Ohne Verlauf bleibt der Platz frei (unsichtbar statt weg) — sonst
-       spränge der Stand beim ersten Punkt zur Seite. */
-    .rally-btn {
-      flex: 0 0 auto; width: 4.5rem; height: 4.5rem; min-height: 0; padding: .2rem;
-      display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem;
-      font-size: .78rem; font-weight: 700;
-      background: var(--surface-2); color: var(--muted);
-      border: 1px solid var(--line); border-radius: .75rem;
-      cursor: pointer; touch-action: manipulation;
-    }
-    .rally-btn .rally-ico { font-size: 1.5rem; line-height: 1; }
-    .rally-btn[hidden] { display: inline-flex; visibility: hidden; }
-    .rally-btn:active { background: var(--surface-3); }
-    /* Neben dem hochkanten Court steht die Tafel als Spalte: dort kein
-       Platzhalter, und der Knopf wird eine schmale Zeile. */
-    .play.uebereinander .rally-btn { width: auto; height: auto; flex-direction: row; padding: .3rem .7rem; }
-    .play.uebereinander .rally-btn .rally-ico { font-size: 1rem; }
-    .play.uebereinander .rally-btn[hidden] { display: none; }
+       Abruf-Knopf „📈 Verlauf" in der Fußleiste (ein `button.subtle`, ohne
+       eigene Regeln) + Overlay mit je Satz einem SVG-Liniendiagramm aus den
+       lokalen Verlaufsdaten. */
     .rally-overlay {
       position: fixed; inset: 0; z-index: 60;
       display: flex; align-items: center; justify-content: center;
@@ -944,7 +952,7 @@
        Feld): Der hochkante Court ist höhenbegrenzt, links und rechts von
        ihm blieb zwei Drittel der Breite leer, während der Satzstand oben
        Höhe wegnahm. Darum steht der Satzstand jetzt RECHTS neben dem
-       Court (Rückgängig-Knopf über den Ziffern), darunter ggf. die
+       Court, darunter ggf. die
        Schiri-Leiste; der Court bekommt die ganze Höhe der Mittelzeile.
        Ab 480 px Breite (Tablets): Auf Handys ist die Mittelzeile niedriger
        als Satzstand + Schiri-Leiste — die `auto`-Zeilen liefen über den
@@ -982,21 +990,20 @@
 <body>
 <div class="app">
   <header>
-    <!-- Kein ↩ mehr in der Kopfzeile (Usability-Durchgang 15.11.2026): Der
-         große Knopf am Satzstand und der in der Fußleiste reichen; der
-         dritte verdrängte nur die Kopfzeilen-Knöpfe. -->
+    <!-- Kein ↩ in der Kopfzeile: Rückgängig gibt es genau einmal, in der
+         Fußleiste (Usability-Durchgang 15.11.2026). -->
     <div class="header-info">
       <div class="court-label">__COURT_LABEL__</div>
-      <div class="event-label" id="event-label">— kein Match —</div>
+      <div class="event-label" id="event-label">— kein Spiel —</div>
     </div>
     <div class="call-timer" id="call-timer"></div>
     <div class="match-clock" id="match-clock"></div>
     <div class="sponsor-bar" id="sponsor-bar"></div>
     <!-- Ballzähler (Spec tablet-ballzaehler): verbrauchte Bälle, gehen mit
          dem Ergebnis an die Turnierleitung. Ohne PIN; nur sichtbar, wenn der
-         Turnier-PC den Zähler anbietet. Bewusst LINKS von ⇄: „+" wird bei
-         jedem Ball getippt und darf nicht neben ✚ liegen — die
-         Verletzungstaste löst ohne Rückfrage aus, ⇄ fragt nach. -->
+         Turnier-PC den Zähler anbietet. „+" wird bei jedem Ball getippt;
+         daneben liegt nur noch „Turnierleitung", das nachfragt — ✚ (löst
+         ohne Rückfrage aus) steht seit 15.11.2026 im Mehr-Menü. -->
     <div class="ball-zaehler" id="ball-zaehler" hidden>
       <button
         type="button"
@@ -1014,39 +1021,27 @@
         title="Ein Ball mehr"
       >+</button>
     </div>
-    <!-- Seiten oder Mannschaften korrigieren (Spec tablet-seiten-korrigieren):
-         ohne PIN, mit Rückfrage. -->
-    <button
-      type="button"
-      id="korrektur-btn"
-      class="header-btn neutral"
-      disabled
-      aria-label="Seiten oder Mannschaften korrigieren"
-      title="Seiten oder Mannschaften korrigieren"
-    >⇄</button>
-    <button
-      type="button"
-      id="injury-btn"
-      class="header-btn injury"
-      disabled
-      aria-label="Verletzung / Behandlung"
-      title="Verletzung / Behandlung — Spiel unterbrechen"
-    >✚</button>
+    <!-- Turnierleitung rufen: das Einzige, was neben dem Zählen jederzeit
+         mit einem Tipp erreichbar sein muss. Ohne laufendes Spiel
+         ausgeblendet statt ausgegraut. -->
     <button
       type="button"
       id="megaphone-btn"
-      class="header-btn megaphone"
-      disabled
+      class="header-btn neutral megaphone mit-text"
+      hidden
       aria-label="Turnierleitung rufen"
       title="Turnierleitung ans Feld rufen"
-    >📣</button>
+    ><span class="ico" aria-hidden="true">📣</span><span class="txt">Turnierleitung</span></button>
+    <!-- Mehr-Menü: alles Seltene (Ergebnis eintragen, Spiel beenden, Seiten
+         korrigieren, Behandlung, Schiri-Modus) ohne PIN; nur „Gerät"
+         (Feld wechseln, Anzeige) fragt dahinter nach der PIN. -->
     <button
       type="button"
-      id="settings-btn"
-      class="header-btn neutral"
-      aria-label="Einstellungen"
-      title="Einstellungen (PIN)"
-    >⚙</button>
+      id="mehr-btn"
+      class="header-btn neutral mit-text"
+      aria-label="Mehr"
+      title="Mehr: Ergebnis eintragen, Spiel beenden, Korrektur, Gerät"
+    ><span class="ico" aria-hidden="true">⋯</span><span class="txt">Mehr</span></button>
     <span class="akku" id="akku" hidden title="Akkustand des Tablets"></span>
     <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">verbinde…</span></div>
   </header>
@@ -1058,8 +1053,12 @@
            wird serverseitig ersetzt (wie in der Kopfzeile). -->
       <div class="idle-court-cap">Feld · Court</div>
       <div class="idle-court">__COURT_LABEL__</div>
-      <div class="idle-wait">Warte auf Match-Zuweisung durch die Turnierleitung…</div>
-      <div class="idle-hint">Tablet bleibt aktiv; sobald ein Match zugewiesen wird, startet die Zähltafel automatisch.</div>
+      <!-- Beide Zeilen setzt `renderWarten`: im Normalfall „Warte auf das
+           nächste Spiel", bei anhaltend fehlender Verbindung der Hinweis
+           darauf — sonst sähe ein Tablet ohne WLAN aus wie eines, das nur
+           auf ein Spiel wartet. -->
+      <div class="idle-wait" id="idle-wait">Warte auf das nächste Spiel</div>
+      <div class="idle-hint" id="idle-hint">Die Zähltafel startet von selbst, sobald die Turnierleitung ein Spiel zuweist.</div>
       <!-- Demofeld (Spec tablet-demofeld): Auswahl des Übungsspiels. Die
            Knöpfe baut `demoAuswahlBauen` aus DEMO_SZENARIEN. -->
       <div class="demo-wahl" id="demo-wahl" hidden>
@@ -1077,14 +1076,6 @@
 
       <div class="center">
         <div class="score-board">
-          <button
-            type="button"
-            id="undo-btn-board"
-            class="board-undo"
-            disabled
-            aria-label="Letzten Punkt zurück"
-            title="Letzten Punkt zurück"
-          >↩</button>
           <div class="score-stack">
             <div class="current-set-label" id="current-set-label">Satz 1</div>
             <div class="current-score">
@@ -1094,13 +1085,6 @@
             </div>
             <div class="set-history" id="set-history"></div>
           </div>
-          <!-- Punktverlauf-Graph: erscheint, sobald Ballwechsel
-               aufgezeichnet sind — rein lokal, funktioniert offline. Rechts
-               neben dem Satzstand als Gegenstück zum ↩ links: Der Stand
-               bleibt mittig, und die Tafel wird nicht höher. -->
-          <button type="button" id="rally-btn" class="rally-btn" hidden
-            aria-label="Punktverlauf anzeigen" title="Punktverlauf anzeigen"
-          ><span class="rally-ico" aria-hidden="true">📈</span><span class="rally-txt">Verlauf</span></button>
         </div>
 
         <!-- Schiri-Modus: immer sichtbare Ansage zum Vorlesen (hidden, bis aktiviert). -->
@@ -1169,10 +1153,15 @@
     </div>
   </div>
 
-  <footer>
-    <button id="undo-btn-bottom" disabled>↩ Letzten Punkt zurück</button>
-    <button id="enter-score-btn" class="subtle" disabled>Ergebnis eintragen …</button>
-    <button id="finish-btn" class="subtle" disabled>Match beenden …</button>
+  <!-- Fußleiste: der eine Rückgängig-Knopf (sein Text sagt, was er
+       zurücknimmt) und der Punktverlauf. „Ergebnis eintragen" und „Spiel
+       beenden" liegen im Mehr-Menü. Ohne Spiel ausgeblendet. -->
+  <footer id="fussleiste" hidden>
+    <button type="button" id="undo-btn-bottom" disabled>↩ Letzten Punkt zurück</button>
+    <!-- Punktverlauf-Graph: erscheint, sobald Ballwechsel aufgezeichnet
+         sind — rein lokal, funktioniert offline. -->
+    <button type="button" id="rally-btn" class="subtle" hidden
+      aria-label="Punktverlauf anzeigen" title="Punktverlauf anzeigen">📈 Verlauf</button>
   </footer>
   <!-- Geparktes Ergebnis (Spec `tablet-stand-robust`, Regel C): Ein Ergebnis,
        das der Turnier-PC nicht angenommen hat, bleibt sichtbar — auf Warte-,
@@ -1331,7 +1320,7 @@
        bewusst NICHT am Ende: Das letzte Kind trägt `margin-bottom: auto`
        zum Zentrieren und muss immer sichtbar sein (`#reopen-btn`). -->
   <button class="primary" id="demo-neu-fertig" hidden>Neues Übungsspiel</button>
-  <!-- Die Ansicht verdeckt die Kopfzeile — deshalb hier ein eigener Knopf. -->
+  <!-- Die Ansicht verdeckt die Kopfzeile samt „⋯ Mehr" — deshalb hier ein eigener Knopf. -->
   <button id="finished-korrektur">⇄ Seiten / Mannschaften korrigieren</button>
   <button class="danger" id="reopen-btn">Korrektur — Match wieder öffnen</button>
 </div>
@@ -1358,10 +1347,10 @@
     ↩ Korrektur — letzter Punkt zurück
   </button>
   <!-- Gerade in der Satzpause fällt auf, wenn die Spieler die Seiten nicht
-       gewechselt haben — der Overlay verdeckt aber die Kopfzeile. -->
+       gewechselt haben — der Overlay verdeckt aber die Kopfzeile samt „⋯ Mehr". -->
   <button id="break-korrektur" style="display:none">⇄ Seiten / Mannschaften korrigieren</button>
-  <!-- ✚ aus der Punkte-/Satzpause: das Overlay verdeckt die Kopfzeile mit
-       dem ✚-Knopf (Spec verletzungsunterbrechung). -->
+  <!-- ✚ aus der Punkte-/Satzpause: das Overlay verdeckt die Kopfzeile und
+       damit den Eintrag im Mehr-Menü (Spec verletzungsunterbrechung). -->
   <button id="break-injury" style="display:none">✚ Verletzung · Behandlung</button>
   <button class="danger" id="break-abort" style="display:none">
     Spiel abbrechen · Aufgabe
@@ -1415,11 +1404,33 @@
   </div>
 </div>
 
-<!-- Einstellungen: PIN-geschützt. Erst PIN, dann Feldwechsel (ohne QR). -->
+<!-- Mehr-Menü (Usability-Durchgang 15.11.2026). Drei Ansichten in einem
+     Modal: 1) das freie Menü, 2) die PIN-Abfrage, 3) „Gerät" dahinter.
+     Die PIN schützt nur noch, was das Tablet vom Feld löst (Feld wechseln,
+     Anzeige) — alles, was zum Spiel gehört, ist ohne PIN erreichbar, auch
+     der Schiri-Modus. -->
 <div class="modal" id="settings-modal">
-  <!-- 1) PIN-Eingabe -->
-  <div class="settings-view" id="settings-pin-view">
-    <div class="title">Einstellungen</div>
+  <!-- 1) Mehr-Menü, ohne PIN. Was gerade nicht geht, blendet `renderMenue`
+       aus — ausgegraute Einträge erklärten nie, warum sie nicht gehen. -->
+  <div class="settings-view settings-liste" id="settings-menu-view">
+    <div class="title">Mehr</div>
+    <div class="settings-section" id="menu-spiel-cap">Spiel</div>
+    <div class="opt settings-wide" id="menu-ergebnis">Ergebnis eintragen …</div>
+    <div class="opt settings-wide" id="menu-beenden">Spiel beenden …</div>
+    <div class="opt settings-wide" id="menu-korrektur">⇄ Seiten / Mannschaften korrigieren</div>
+    <div class="opt settings-wide" id="menu-behandlung">✚ Verletzung · Behandlung</div>
+    <!-- Demofeld: Übungsspiel neu wählen (nur im Demo-Modus sichtbar). -->
+    <div class="settings-section" id="settings-demo-cap" hidden>Übungsspiel</div>
+    <div class="opt settings-wide allein" id="settings-demo-neu" hidden>Neues Übungsspiel wählen</div>
+    <div class="settings-section">Schiedsrichter</div>
+    <div class="opt settings-wide allein" id="settings-umpire">Schiri-Modus: aus</div>
+    <div class="settings-section">Gerät</div>
+    <div class="opt settings-wide allein" id="menu-geraet">🔒 Feld wechseln · Anzeige …</div>
+    <div class="opt settings-wide abbrechen" id="menu-close">Schließen</div>
+  </div>
+  <!-- 2) PIN-Eingabe vor „Gerät" -->
+  <div class="settings-view" id="settings-pin-view" hidden>
+    <div class="title">Gerät</div>
     <div class="subtitle">PIN eingeben</div>
     <div class="pin-display" id="settings-pin-display"></div>
     <div class="pin-pad" id="settings-pin-pad">
@@ -1437,14 +1448,11 @@
       <button type="button" data-k="cancel" class="pin-aux">✕</button>
     </div>
   </div>
-  <!-- 2) Einstellungen (nach korrekter PIN) -->
-  <div class="settings-view" id="settings-main-view" hidden>
-    <div class="title">Einstellungen</div>
+  <!-- 3) Gerät (nach korrekter PIN) -->
+  <div class="settings-view settings-liste" id="settings-main-view" hidden>
+    <div class="title">Gerät</div>
     <!-- __COURT_LABEL__ wird serverseitig ersetzt (str::replace, alle Vorkommen). -->
     <div class="subtitle">Aktuelles Feld: <b>__COURT_LABEL__</b></div>
-    <!-- Demofeld: Übungsspiel neu wählen (nur im Demo-Modus sichtbar). -->
-    <div class="settings-section" id="settings-demo-cap" hidden>Übungsspiel</div>
-    <div class="opt settings-wide" id="settings-demo-neu" hidden>Neues Übungsspiel wählen</div>
     <div class="settings-section">Feld wechseln</div>
     <div class="options" id="settings-court-list"></div>
     <div class="settings-section">Anzeige</div>
@@ -1458,8 +1466,6 @@
          „Schiedsrichter": Beides gilt für jeden am Tablet. -->
     <div class="opt settings-wide" id="settings-lesbar">Große Schrift: aus</div>
     <div class="opt settings-wide" id="settings-fullscreen">Vollbild ein/aus</div>
-    <div class="settings-section">Schiedsrichter</div>
-    <div class="opt settings-wide" id="settings-umpire">Schiri-Modus: aus</div>
     <div class="opt settings-wide abbrechen" id="settings-close">Schließen</div>
   </div>
 </div>
@@ -1581,7 +1587,7 @@ if (DEMO) demoNetzSperren();
 /** Eine Sperre für ALLE Netzwege der Seite statt einer Prüfung an jeder
  *  Sendestelle — so bleibt der Demo-Modus dicht, auch wenn später neue
  *  Abrufe dazukommen. Durch dürfen nur reine Lesewege, die das Demofeld
- *  braucht: die Feldliste (Feldwechsel im Zahnrad-Menü) und die
+ *  braucht: die Feldliste (Feldwechsel unter „Mehr → Gerät") und die
  *  Sponsor-Leiste. `/result` antwortet lokal mit „angenommen", damit der
  *  Abschluss wie im echten Spiel durchläuft. Alles andere scheitert, wie
  *  ohne Netz — jede Sendestelle kommt damit ohnehin zurecht. */
@@ -2136,13 +2142,11 @@ const els = {
   cellRightBottom: document.getElementById('cell-rightBottom'),
   teamLabelLeft: document.getElementById('team-label-left'),
   teamLabelRight: document.getElementById('team-label-right'),
-  undoBtns: /** @type {HTMLButtonElement[]} */ ([
-    document.getElementById('undo-btn-board'),
-    document.getElementById('undo-btn-bottom'),
-  ].filter(Boolean)),
-  undoBtnBottom: document.getElementById('undo-btn-bottom'),
-  finishBtn: document.getElementById('finish-btn'),
-  enterScoreBtn: document.getElementById('enter-score-btn'),
+  // Der eine Rückgängig-Knopf (Fußleiste) samt Fußleiste selbst.
+  undoBtn: /** @type {HTMLButtonElement} */ (document.getElementById('undo-btn-bottom')),
+  fussleiste: document.getElementById('fussleiste'),
+  idleWait: document.getElementById('idle-wait'),
+  idleHint: document.getElementById('idle-hint'),
   enterScoreModal: document.getElementById('enter-score-modal'),
   enterScoreSubtitle: document.getElementById('enter-score-subtitle'),
   enterScoreRows: document.getElementById('enter-score-rows'),
@@ -2180,8 +2184,6 @@ const els = {
   breakCorrect: document.getElementById('break-correct'),
   matchClock: document.getElementById('match-clock'),
   callTimer: document.getElementById('call-timer'),
-  injuryBtn: document.getElementById('injury-btn'),
-  korrekturBtn: document.getElementById('korrektur-btn'),
   ballZaehler: document.getElementById('ball-zaehler'),
   ballZahl: document.getElementById('ball-zahl-wert'),
   ballMinus: document.getElementById('ball-minus'),
@@ -2218,7 +2220,16 @@ const els = {
   megaphoneText: document.getElementById('megaphone-text'),
   megaphoneConfirm: document.getElementById('megaphone-confirm'),
   megaphoneCancel: document.getElementById('megaphone-cancel'),
-  settingsBtn: document.getElementById('settings-btn'),
+  // Mehr-Menü: Kopfknopf, freie Menü-Ansicht und ihre Einträge.
+  mehrBtn: document.getElementById('mehr-btn'),
+  settingsMenuView: document.getElementById('settings-menu-view'),
+  menuSpielCap: document.getElementById('menu-spiel-cap'),
+  menuErgebnis: document.getElementById('menu-ergebnis'),
+  menuBeenden: document.getElementById('menu-beenden'),
+  menuKorrektur: document.getElementById('menu-korrektur'),
+  menuBehandlung: document.getElementById('menu-behandlung'),
+  menuGeraet: document.getElementById('menu-geraet'),
+  menuClose: document.getElementById('menu-close'),
   settingsModal: document.getElementById('settings-modal'),
   settingsPinView: document.getElementById('settings-pin-view'),
   settingsMainView: document.getElementById('settings-main-view'),
@@ -2286,6 +2297,13 @@ let ws = null;
 // Zeitpunkt des letzten Server-Lebenszeichens (jede WS-Nachricht, inkl.
 // Pong). Der Watchdog erkennt darüber eine tote (stale) Verbindung.
 let lastServerContact = 0;
+// Seit wann es keine offene Verbindung gibt (ms) — `null`, solange sie
+// steht. Startwert „jetzt": Auch der allererste Verbindungsversuch kann
+// hängen. Speist nur den Hinweis der Warte-Ansicht (`renderWarten`).
+let offlineSeit = Date.now();
+// Ab dieser Dauer ohne Verbindung sagt die Warte-Ansicht es ausdrücklich.
+// Zwei Watchdog-Takte: Ein kurzer WLAN-Wackler soll nicht aufschrecken.
+const OFFLINE_HINWEIS_MS = 10_000;
 
 function connect() {
   // Demofeld: nie verbinden — sonst meldete sich das Tablet beim Turnier-PC
@@ -2303,6 +2321,7 @@ function connect() {
 
   ws.onopen = () => {
     lastServerContact = Date.now();
+    offlineSeit = null;
     els.connDot.classList.add('ok');
     els.connText.textContent = 'verbunden';
     tlog('info', 'ws_open');
@@ -2405,6 +2424,7 @@ function connect() {
     els.connDot.classList.remove('ok');
     els.connDot.classList.add('bad');
     els.connText.textContent = 'getrennt — neuer Versuch…';
+    if (offlineSeit === null) offlineSeit = Date.now();
     // Retry läuft über den frischen Socket weiter (onopen meldet sich neu an).
     clearReidentify();
     tlog('warn', 'ws_close', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
@@ -2423,6 +2443,9 @@ function connect() {
 //    sonst doppelte Sockets).
 function startConnectionWatchdog() {
   setInterval(() => {
+    // Der Hinweis „Keine Verbindung" hängt an der Zeit, nicht an einem
+    // Ereignis — also hier im Takt nachziehen.
+    renderWarten();
     if (!ws || ws.readyState === WebSocket.CLOSED) {
       connect();
       return;
@@ -3010,7 +3033,7 @@ function renderAufrufUhr() {
   aufrufUhrGezeigt = schluessel;
   if (!u) { el.textContent = ''; el.className = 'call-timer'; return; }
   // Zwei Spans: Auf schmalen Geräten blendet CSS den Text aus, die Zeit
-  // bleibt — sonst schöbe die Marke das Zahnrad aus dem Bild.
+  // bleibt — sonst schöbe die Marke „⋯ Mehr" aus dem Bild.
   el.textContent = '';
   const zeit = document.createElement('span');
   zeit.className = 'zeit';
@@ -3023,7 +3046,7 @@ function renderAufrufUhr() {
   el.className = 'call-timer ' + u.stufe;
 }
 // Höhe der Kopfzeile als CSS-Variable, damit das Setup-Modal darunter
-// beginnt (Feldname, Aufruf-Uhr und Zahnrad bleiben sichtbar). Ohne
+// beginnt (Feldname, Aufruf-Uhr und „⋯ Mehr" bleiben sichtbar). Ohne
 // ResizeObserver (sehr alte WebViews) greift der CSS-Rückfallwert.
 (function beobachteKopfzeile() {
   const kopf = document.querySelector('header');
@@ -5785,7 +5808,7 @@ function submitEnterScore() {
     return;
   }
 
-  // ── Endstand (Toggle aus): Match beenden ─────────────────────────────
+  // ── Endstand (Toggle aus): Spiel beenden ─────────────────────────────
   const sets = validateCompletedSets(completed, target, true);
   if (!sets) return;
   closeEnterScore();
@@ -6549,21 +6572,22 @@ function render() {
   els.occupiedOverlay.classList.toggle('visible', STATE.occupied && !STATE.locked);
   els.lockedOverlay.classList.toggle('visible', STATE.locked);
 
-  // Verletzungs-/Megafon-Button: nur bei laufendem Match, nicht gesperrt.
+  // „Turnierleitung": nur bei laufendem Spiel, nicht gesperrt — sonst
+  // ausgeblendet statt ausgegraut. Bleibt auch nach Spielende.
   const canSignal = !!STATE.match && STATE.setup === 'playing'
     && !STATE.locked && !STATE.occupied;
-  // ✚ nach Spielende gesperrt; das Megafon bleibt.
-  els.injuryBtn.disabled = !canSignal || !verletzungMoeglich();
-  els.megaphoneBtn.disabled = !canSignal;
+  els.megaphoneBtn.hidden = !canSignal;
   renderBallzaehler();
   const kannKorrigieren = korrekturMoeglich();
-  els.korrekturBtn.disabled = !kannKorrigieren || STATE.finished;
   els.finishedKorrektur.style.display = kannKorrigieren && STATE.finished ? '' : 'none';
   if (els.korrekturModal.classList.contains('visible') && !kannKorrigieren) {
     schliesseKorrektur();
   }
-  els.injuryBtn.classList.toggle('on', STATE.alertInjury);
   els.megaphoneBtn.classList.toggle('on', STATE.alertOfficial);
+  renderMenue();
+  renderWarten();
+  // Ohne Spiel gibt es nichts zurückzunehmen → Fußleiste weg.
+  els.fussleiste.hidden = !STATE.match;
 
   // Endstand-Dialog schließen, sobald er nicht mehr gültig ist (Match weg/
   // gewechselt durch einen Server-Push, gesperrt, übernommen, schon beendet)
@@ -6575,14 +6599,12 @@ function render() {
   }
 
   if (!STATE.match) {
-    els.eventLabel.textContent = DEMO ? 'Übungsspiel' : '— kein Match —';
+    els.eventLabel.textContent = DEMO ? 'Übungsspiel' : '— kein Spiel —';
     els.demoWahl.hidden = !DEMO;
     els.emptyView.style.display = '';
     els.playView.style.display = 'none';
     els.finishedOverlay.classList.remove('visible');
-    els.undoBtns.forEach(b => b.disabled = true);
-    els.finishBtn.disabled = true;
-    els.enterScoreBtn.disabled = true;
+    els.undoBtn.disabled = true;
     return;
   }
   els.eventLabel.textContent = STATE.match.eventLabel;
@@ -6600,25 +6622,16 @@ function render() {
 
   renderCourt();
 
-  // Der ↩-Button ist aktiv, wenn es einen Punkt zum Zurücknehmen gibt
+  // Der ↩-Knopf ist aktiv, wenn es einen Punkt zum Zurücknehmen gibt
   // ODER das Setup gerade frisch abgeschlossen wurde (dann führt er zur
-  // Aufstellung zurück). Das Label des unteren Buttons passt sich an.
+  // Aufstellung zurück). Sein Text sagt, was er zurücknimmt.
   const fresh = isFreshAfterSetup();
   const korrekturOben = oberKorrektur();
   const undoDisabled = !(korrekturOben && STATE.berichtigtAbfrage)
     && (STATE.finished || STATE.setup !== 'playing'
       || (STATE.history.length === 0 && !fresh));
-  els.undoBtns.forEach(b => b.disabled = undoDisabled);
-  if (els.undoBtnBottom) {
-    els.undoBtnBottom.textContent = korrekturOben ? '↩ Korrektur zurücknehmen'
-      : fresh ? '↩ Aufstellung ändern' : '↩ Letzten Punkt zurück';
-  }
-  // „Match beenden" ist ab 0:0 verfügbar (dezent) – der Dialog bietet dann
-  // Aufgabe/Kampflos; „Regulär beenden" erst, wenn schon gespielt wurde.
-  els.finishBtn.disabled = STATE.finished || STATE.setup !== 'playing';
-  // Endstand-Eintragen: nur im laufenden Spiel, nicht gesperrt/passiv.
-  els.enterScoreBtn.disabled =
-    STATE.finished || STATE.setup !== 'playing' || STATE.locked || STATE.occupied;
+  els.undoBtn.disabled = undoDisabled;
+  els.undoBtn.textContent = undoText(korrekturOben, fresh);
 
   if (STATE.finished) {
     const teamName = (key) => STATE.match
@@ -6709,14 +6722,16 @@ function satzZeile(saetze, seite) {
 
 // ─────────────────────────────── Wiring ───────────────────────────────
 
-// ───────────────────────── Einstellungen (PIN + Feldwechsel) ───────────
-// PIN-geschütztes Menü, um das Tablet OHNE QR-Scan auf ein anderes Feld
-// umzuschalten (lädt einfach die Seite des Zielfelds). Reiner Bedien-Schutz
-// gegen versehentliche Änderungen durch Helfer – die echte Kiosk-Sperre
-// (kein Internet, Android-Buttons aus) liegt im Kiosk-Browser, separater PIN.
+// ───────────────────────── Mehr-Menü (frei) + Gerät (PIN) ──────────────
+// „⋯ Mehr" öffnet ein freies Menü mit allem Seltenen, das zum Spiel gehört.
+// Dahinter liegt „Gerät" hinter der PIN: das Tablet OHNE QR-Scan auf ein
+// anderes Feld umschalten (lädt einfach die Seite des Zielfelds) und die
+// Anzeige-Schalter. Reiner Bedien-Schutz gegen versehentliche Änderungen
+// durch Helfer – die echte Kiosk-Sperre (kein Internet, Android-Buttons
+// aus) liegt im Kiosk-Browser, separater PIN.
 let settingsPinEntry = '';
 
-// Fünf-Minuten-Freigabe: Nach richtiger PIN öffnet das Zahnrad fünf Minuten
+// Fünf-Minuten-Freigabe: Nach richtiger PIN öffnet „Gerät" fünf Minuten
 // lang ohne erneute Eingabe — auch über Feldwechsel/Neuladen hinweg (Wert im
 // localStorage). Inline-Kopie von `src/io/pinFreigabe.mjs`
 // (Test `scripts/test-pin-freigabe.mjs`); Änderungen hier und dort gemeinsam.
@@ -6748,15 +6763,19 @@ function renderPinDisplay() {
     '•'.repeat(len) + '–'.repeat(Math.max(0, total - len));
 }
 
+/** Genau eine der drei Ansichten des Modals zeigen. */
+function zeigeMenueAnsicht(welche) {
+  els.settingsMenuView.hidden = welche !== 'menue';
+  els.settingsPinView.hidden = welche !== 'pin';
+  els.settingsMainView.hidden = welche !== 'geraet';
+}
+
+/** „⋯ Mehr": das freie Menü öffnen. */
 function openSettings() {
   settingsPinEntry = '';
-  renderPinDisplay();
-  els.settingsPinView.hidden = false;
-  els.settingsMainView.hidden = true;
+  renderMenue();
+  zeigeMenueAnsicht('menue');
   els.settingsModal.classList.add('visible');
-  // Demofeld: ohne PIN — dort lässt sich nichts verstellen, was das Turnier
-  // betrifft, und Schiri-Modus/Große Schrift sollen frei ausprobierbar sein.
-  if (DEMO || pinFreigabeAktiv()) showSettingsMain();
 }
 
 function closeSettings() {
@@ -6764,19 +6783,106 @@ function closeSettings() {
   settingsPinEntry = '';
 }
 
-function showSettingsMain() {
-  els.settingsPinView.hidden = true;
-  els.settingsMainView.hidden = false;
+/** Welche Einträge das Mehr-Menü gerade anbietet. Was nicht geht, ist
+ *  ausgeblendet — die Bedingungen sind dieselben, die die Dialoge selbst
+ *  beim Öffnen prüfen (`openEnterScore`, `openFinishModal`,
+ *  `oeffneKorrektur`, `startInjury`). Läuft bei jedem `render()` mit, damit
+ *  ein offenes Menü einem Server-Push folgt (Spiel weg, Tablet gesperrt). */
+function renderMenue() {
+  const frei = !!STATE.match && STATE.setup === 'playing' && !STATE.finished
+    && !STATE.locked && !STATE.occupied;
+  const ergebnis = frei && !!STATE.teamOnSide;
+  const korrektur = korrekturMoeglich() && !STATE.finished;
+  const behandlung = verletzungMoeglich();
+  els.menuErgebnis.hidden = !ergebnis;
+  els.menuBeenden.hidden = !frei;
+  els.menuKorrektur.hidden = !korrektur;
+  els.menuBehandlung.hidden = !behandlung;
+  els.menuSpielCap.hidden = !(ergebnis || frei || korrektur || behandlung);
   els.settingsDemoCap.hidden = !DEMO;
   els.settingsDemoNeu.hidden = !DEMO;
+  // Das Schloss nur, solange wirklich nach der PIN gefragt wird.
+  els.menuGeraet.textContent = (DEMO || pinFreigabeAktiv() ? '' : '🔒 ')
+    + 'Feld wechseln · Anzeige …';
+}
+
+/** Menü-Eintrag, der einen Dialog öffnet: ERST das Menü schließen. Es
+ *  liegt über allen Dialogen (z-index 28) und verdeckte sie sonst. */
+function ausMenue(aktion) {
+  return () => { closeSettings(); aktion(); };
+}
+
+/** „Gerät" hinter der PIN. Demofeld: ohne PIN — dort lässt sich nichts
+ *  verstellen, was das Turnier betrifft. */
+function oeffneGeraet() {
+  settingsPinEntry = '';
+  renderPinDisplay();
+  if (DEMO || pinFreigabeAktiv()) showSettingsMain();
+  else zeigeMenueAnsicht('pin');
+}
+
+function showSettingsMain() {
+  zeigeMenueAnsicht('geraet');
   // Die Anzeige-Hülle zeigt den Stand vom Turnier-PC — das Übungsspiel
   // kennt er nicht.
   els.settingsAnzeige.hidden = DEMO;
   loadCourtList();
 }
 
+/** Warte-Ansicht: normalerweise „Warte auf das nächste Spiel". Steht die
+ *  Verbindung seit `OFFLINE_HINWEIS_MS` nicht, sagt die Ansicht das selbst
+ *  — der Punkt oben rechts fiel niemandem auf. Demofeld: verbindet nie,
+ *  die Zeilen sind dort ohnehin ausgeblendet. */
+function renderWarten() {
+  const offline = !DEMO && offlineSeit !== null
+    && Date.now() - offlineSeit >= OFFLINE_HINWEIS_MS;
+  els.emptyView.classList.toggle('offline', offline);
+  els.idleWait.textContent = offline
+    ? 'Keine Verbindung zum Turnier-PC'
+    : 'Warte auf das nächste Spiel';
+  els.idleHint.textContent = offline
+    ? 'Das Tablet versucht es von selbst weiter. Dauert es länger: WLAN prüfen oder der Turnierleitung Bescheid geben.'
+    : 'Die Zähltafel startet von selbst, sobald die Turnierleitung ein Spiel zuweist.';
+}
+
+/** Auf welcher Seite der letzte Punkt gezählt wurde — für den Text des
+ *  Rückgängig-Knopfs. Vergleicht den obersten Undo-Stand mit dem jetzigen
+ *  Stand in MANNSCHAFTS-Koordinaten (ein Seitenwechsel dazwischen dreht
+ *  links/rechts) und nennt die Seite, auf der die Mannschaft JETZT steht:
+ *  Dort sieht der Bediener die Zahl, die gleich sinkt. `null`, wenn der
+ *  letzte Schritt kein einzelner Punkt im laufenden Satz war (Satzende,
+ *  eingetragener Zwischenstand, Korrektur) — dann bleibt der Text
+ *  allgemein. Bewusst ein Vergleich statt eines neuen Felds im Undo-Stand:
+ *  Dessen Format (ADR 0084) bleibt unberührt. */
+function seiteDesLetztenPunkts() {
+  const oben = STATE.history[STATE.history.length - 1];
+  if (!oben || oben.korrektur || !oben.teamOnSide || !oben.currentSet
+      || !STATE.teamOnSide) return null;
+  if (!Array.isArray(oben.setsCompleted)
+      || oben.setsCompleted.length !== STATE.setsCompleted.length) return null;
+  const plus = (team) =>
+    STATE.currentSet[STATE.teamOnSide[team]] - oben.currentSet[oben.teamOnSide[team]];
+  const a = plus('a');
+  const b = plus('b');
+  if (a === 1 && b === 0) return STATE.teamOnSide.a;
+  if (a === 0 && b === 1) return STATE.teamOnSide.b;
+  return null;
+}
+
+/** Text des Rückgängig-Knopfs: sagt, was der Tipp zurücknimmt. In Seiten,
+ *  nicht in Namen — die Bediener kennen die Spieler oft nicht. */
+function undoText(korrekturOben, fresh) {
+  if (korrekturOben) return '↩ Korrektur zurücknehmen';
+  if (fresh) return '↩ Aufstellung ändern';
+  const seite = seiteDesLetztenPunkts();
+  if (!seite) return '↩ Letzten Punkt zurück';
+  const wort = seiteWort(seite);
+  return `↩ Punkt für ${wort.charAt(0).toUpperCase()}${wort.slice(1)} zurück`;
+}
+
 function pinKey(k) {
-  if (k === 'cancel') { closeSettings(); return; }
+  // ✕ führt zurück ins Menü, nicht ganz hinaus.
+  if (k === 'cancel') { settingsPinEntry = ''; zeigeMenueAnsicht('menue'); return; }
   if (k === 'del') { settingsPinEntry = settingsPinEntry.slice(0, -1); renderPinDisplay(); return; }
   if (settingsPinEntry.length >= Math.max(SETTINGS_PIN.length, 8)) return;
   settingsPinEntry += k;
@@ -7736,7 +7842,13 @@ function toggleGrosseSchrift() {
 }
 els.settingsLesbar.addEventListener('click', toggleGrosseSchrift);
 lesbarAnwenden();
-els.settingsBtn.addEventListener('click', openSettings);
+els.mehrBtn.addEventListener('click', openSettings);
+els.menuClose.addEventListener('click', closeSettings);
+els.menuGeraet.addEventListener('click', oeffneGeraet);
+els.menuErgebnis.addEventListener('click', ausMenue(openEnterScore));
+els.menuBeenden.addEventListener('click', ausMenue(openFinishModal));
+els.menuKorrektur.addEventListener('click', ausMenue(oeffneKorrektur));
+els.menuBehandlung.addEventListener('click', ausMenue(startInjury));
 els.settingsClose.addEventListener('click', closeSettings);
 els.settingsFullscreen.addEventListener('click', toggleFullscreen);
 els.settingsAnzeige.addEventListener('click', zurAnzeige);
@@ -7786,9 +7898,7 @@ function onScoreTap(el, fn) {
 }
 onScoreTap(els.plusLeft, () => addPointOnSide('left'));
 onScoreTap(els.plusRight, () => addPointOnSide('right'));
-els.undoBtns.forEach(b => onScoreTap(b, undo));
-els.finishBtn.addEventListener('click', openFinishModal);
-els.enterScoreBtn.addEventListener('click', openEnterScore);
+onScoreTap(els.undoBtn, undo);
 els.enterScoreAdd.addEventListener('click', addEnterScoreRow);
 els.enterScoreCancel.addEventListener('click', closeEnterScore);
 els.enterScoreOk.addEventListener('click', submitEnterScore);
@@ -7840,7 +7950,6 @@ els.breakCorrect.addEventListener('click', () => {
   undo();
   endBreak();
 });
-els.korrekturBtn.addEventListener('click', oeffneKorrektur);
 els.ballMinus.addEventListener('click', () => ballTippen(false));
 els.ballPlus.addEventListener('click', () => ballTippen(true));
 els.finishedKorrektur.addEventListener('click', oeffneKorrektur);
@@ -7855,7 +7964,6 @@ els.korrekturOk.addEventListener('click', () => {
   if (art) fuehreKorrekturAus(art);
 });
 els.setupBack.addEventListener('click', setupBack);
-els.injuryBtn.addEventListener('click', startInjury);
 els.megaphoneBtn.addEventListener('click', openMegaphoneModal);
 els.megaphoneConfirm.addEventListener('click', confirmMegaphone);
 els.megaphoneCancel.addEventListener('click', () => els.megaphoneModal.classList.remove('visible'));
@@ -8034,7 +8142,7 @@ function demoStarten(sz) {
   }
 }
 
-/** Zurück zur Szenario-Auswahl (Zahnrad-Menü bzw. nach dem Abschluss). */
+/** Zurück zur Szenario-Auswahl (Mehr-Menü bzw. nach dem Abschluss). */
 function demoNeu() {
   if (!DEMO) return;
   closeSettings();

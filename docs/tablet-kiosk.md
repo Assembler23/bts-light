@@ -18,7 +18,10 @@ Zwei getrennte Ebenen sorgen dafür, dass die Verleih-Tablets im Turnierbetrieb
 
 ## 1) In-App-Einstellungs-PIN (Feldwechsel ohne QR)
 
-Im Tablet-Header gibt es ein **Zahnrad ⚙**. Tippen → **PIN-Eingabe** → Menü:
+Im Tablet-Header sitzt **⋯ Mehr** (bis v0.9.422 ein Zahnrad ⚙). Das Menü
+selbst öffnet ohne PIN — Ergebnis eintragen, Spiel beenden, Korrektur,
+Behandlung und Schiri-Modus sind frei. Hinter der PIN liegt nur der Eintrag
+**Feld wechseln · Anzeige …**. Tippen → **PIN-Eingabe** → „Gerät":
 
 - **Feld wechseln:** lädt die Feld-Liste vom Server (`GET /courts`, BTP-Feldname
   inkl. Halle bei Mehr-Hallen-Turnieren), Tippen schaltet das Tablet auf das
@@ -32,7 +35,8 @@ Im Tablet-Header gibt es ein **Zahnrad ⚙**. Tippen → **PIN-Eingabe** → Men
 Reiner Bedien-Schutz gegen versehentliche Änderungen – **keine Sicherheitsgrenze**.
 
 **Fünf-Minuten-Freigabe (seit v0.9.284):** Nach einer richtigen Eingabe
-öffnet das Zahnrad **fünf Minuten lang ohne PIN** — auch nach Feldwechsel
+öffnet „Feld wechseln · Anzeige …" **fünf Minuten lang ohne PIN** — auch
+nach Feldwechsel
 oder „Neu laden", denn der Ablauf-Zeitpunkt liegt im `localStorage` des
 Geräts (`badhub.tablet.pinFreigabeBis`). Die Frist läuft ab der Eingabe und
 verlängert sich durch weitere Bedienung nicht. Zählseite und Anzeige-Hülle
@@ -83,7 +87,7 @@ daher **PLUS pro Gerät** (Volumen-Rabatt für ~10 Tablets) einplanen.
    ⚠️ `<PC-IP>` = die **aktuelle** LAN-IP des Turnier-PCs (nicht fest 192.168.16.101);
    am einfachsten den QR aus dem „QR-Codes"-Tab nutzen. Bei einem Turnier läuft
    ohnehin nur **ein** System. Feld später wechseln: über die Lobby bzw. das
-   ⚙-PIN-Menü — kein QR.
+   Mehr-Menü („Feld wechseln · Anzeige …", PIN) — kein QR.
 3. **Gratis-Robustheit:** *Device Management* → **Keep Screen On** + **Start on
    Boot**; *Web Auto Reload* → **Reload on Network Reconnect** + **on Error** (NICHT
    „on Idle" — würde mitten im Spiel neu laden).

@@ -94,7 +94,7 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 |---|---|---|
 | **Felder-Lobby** `/felder` | Zähl-Tablet | Die Startseite eines Tablets: eine Kachel je Feld mit Paarung und Zustand. Antippen führt zum Feld. Ist der Meetingpoint an, steht darunter die Kachel **Meetingpoint** (mit PIN), die das Tablet zur Meetingpoint-Anzeige macht. |
 | **Spielzettel** `/court/<Feld>` | Zähl-Tablet | Der eigentliche Zählbildschirm. Siehe [Das Zähltablett bedienen](tablet-bedienen.md). |
-| **Demofeld** `/court/demo` | jedes Zähl-Tablet | Übungsspiel mit ausgedachten Namen (seit v0.9.416). Belegt kein Feld und überträgt nichts — gefahrlos mitten im Turnier. Erreichbar über die Kachel in der Felder-Lobby und den Feldwechsel im Zahnrad-Menü. Siehe [Üben am Demofeld](tablet-bedienen.md#üben-am-demofeld). |
+| **Demofeld** `/court/demo` | jedes Zähl-Tablet | Übungsspiel mit ausgedachten Namen (seit v0.9.416). Belegt kein Feld und überträgt nichts — gefahrlos mitten im Turnier. Erreichbar über die Kachel in der Felder-Lobby und den Feldwechsel im Mehr-Menü. Siehe [Üben am Demofeld](tablet-bedienen.md#üben-am-demofeld). |
 | **Zähltafel** `/court/<Feld>/tafel` | Tablet am Netz oder TV | Nur zwei große Punktzahlen und der Satzstand — wie eine klassische Tafel, ohne Namen. |
 | **Anzeige-Hülle** `/anzeige` | Tablet, das nur anzeigen soll | Zeigt eine der Anzeigen bildschirmfüllend, mit Zahnrad zum Umschalten. Praktisch, wenn ein Tablet nicht zählt, sondern nur zeigen soll. |
 
@@ -106,10 +106,12 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 > Fest einstellen lässt sich die **Ansicht** (Seiten und Anordnung in einem
 > Zug, seit v0.9.292): in der Anzeige-Hülle genügt ein **Tipp auf die
 > Punktzahlen**, ohne PIN — der Zyklus läuft automatisch → links/rechts →
-> rechts/links → oben/unten → unten/oben. Beim Spielzettel sitzt derselbe
-> Eintrag „Ansicht: …" im Zahnrad-Menü. Ein fest zugewiesener Fernseher
-> richtet sich **immer** nach seiner Ausrichtung — dort gibt es keine feste
-> Einstellung.
+> rechts/links → oben/unten → unten/oben. Dieselbe Wahl steht als Eintrag
+> „Ansicht: …" im Zahnrad-Menü der Hülle. Am Zähl-Tablet heißt der Eintrag
+> „Anordnung: …" (nur die Anordnung; die Seiten stellt dort „⇄" um) und
+> liegt unter „⋯ Mehr → Feld wechseln · Anzeige …". Ein fest zugewiesener
+> Fernseher richtet sich **immer** nach seiner Ausrichtung — dort gibt es
+> keine feste Einstellung.
 
 ### Zum Anzeigen
 
@@ -234,7 +236,7 @@ Aus der App heraus:
   Adressen und QR-Links. Steht in keinem Menü, ist aber beim Aufbau der
   schnellste Weg.
 - **Die Felder-Lobby** `/felder` — wer nur QR-Codes kennt, übersieht sie.
-- **Die Anzeige-Hülle** `/anzeige` — erreichbar über das Zahnrad-Menü des
+- **Die Anzeige-Hülle** `/anzeige` — erreichbar über das Mehr-Menü des
   Zähl-Tabletts und über „Nur Spielstand anzeigen", wenn ein Feld schon
   besetzt ist.
 - **Die Android-Kiosk-App** — sie sucht den Turnier-PC selbst und öffnet die

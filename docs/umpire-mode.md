@@ -20,8 +20,10 @@ geprüfte Zähl-Logik ein.
 > erst beim Drucken aus dem BTP-Snapshot.
 
 ## Aktivieren
-Tablet → **⚙ (Header) → PIN** (Standard `0000`, einstellbar; innerhalb der
-Fünf-Minuten-Freigabe nach einer Eingabe entfällt sie) → **„Schiri-Modus: an"**.
+Tablet → **⋯ Mehr** (Kopfzeile) → **„Schiri-Modus: an"** — seit v0.9.423
+**ohne PIN** (vorher hinter dem Zahnrad und der Einstellungs-PIN). Der Modus
+verstellt nichts am Gerät und überträgt nichts; die PIN hielt nur
+Schiedsrichter auf, die sie nicht kannten.
 Opt-in pro Tablet, lokal gespeichert (`localStorage`). Es erscheint eine **immer
 sichtbare Ansage-Leiste**.
 
@@ -52,8 +54,8 @@ und wie groß das Tablet war.
   kleinste Stufe nicht, **scrollt die Leiste**, statt sich über Kopfzeile oder
   Plus-Knöpfe zu legen (das tat die Eröffnungsansage in der Anordnung
   „übereinander" vorher).
-- **„Große Schrift: an"** im Zahnrad-Menü, Abschnitt „Anzeige" (bis v0.9.422
-  „Schiedsrichter"). Gilt
+- **„Große Schrift: an"** unter „⋯ Mehr → Feld wechseln · Anzeige …"
+  (hinter der PIN), Abschnitt „Anzeige" (bis v0.9.422 „Schiedsrichter"). Gilt
   **je Gerät** (`localStorage`, Schlüssel `badhub.tablet.grosseSchrift`), nicht
   je Feld, und wirkt auch ohne Schiri-Modus. Setzt die Klasse `lesbar` am
   `<body>`: Ansage Schwarz auf Weiß mit kräftigem Rahmen, Marke und

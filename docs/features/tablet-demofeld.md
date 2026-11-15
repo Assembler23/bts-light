@@ -21,7 +21,8 @@ weg, belegte ein Feld und schickte Stände an Monitore und Liveticker.
 
 - **Feldwahl** (`/felder`, auch die Startseite der Kiosk-App): Die Kachel
   **Demofeld** steht unter den Feldern, ohne PIN.
-- **Zahnrad-Menü → Feld wechseln:** Der letzte Eintrag heißt
+- **⋯ Mehr → Feld wechseln · Anzeige … → Feld wechseln** (bis v0.9.422
+  das Zahnrad-Menü)**:** Der letzte Eintrag heißt
   **Demofeld · Übungsspiel**. Das funktioniert auch im Cloud-Modus, wo es
   keine Feldwahl-Seite gibt.
 - **Slave-Brücke (ferne Halle):** Die Feld-Auswahlseite der Brücke zeigt den
@@ -49,10 +50,10 @@ der Tablet-Wechsel mitten im Spiel: Seitenwahl und Aufstellung werden
 abgefragt. **Erweitern** heißt: einen Eintrag ergänzen (`titel`, `text`,
 `klasse`, `a`, `b`, optional `saetze` in Team-Koordinaten).
 
-Seitenwahl, Aufschlag, Pausen, Karten, Korrektur, „Match beenden",
+Seitenwahl, Aufschlag, Pausen, Karten, Korrektur, „Spiel beenden",
 „Ergebnis eintragen", Schiri-Modus und Große Schrift verhalten sich wie im
-echten Spiel. Das Zahnrad öffnet **ohne PIN** und zeigt zusätzlich **Neues
-Übungsspiel wählen**. „Anzeige (nur Spielstand)" ist ausgeblendet. Nach dem
+echten Spiel. Das Mehr-Menü zeigt zusätzlich **Neues Übungsspiel wählen**,
+und „Feld wechseln · Anzeige …" öffnet **ohne PIN**. „Anzeige (nur Spielstand)" ist ausgeblendet. Nach dem
 Übermitteln steht dort „✓ Übung beendet — im echten Spiel ginge das Ergebnis
 jetzt an die Turnierleitung." mit dem Knopf **Neues Übungsspiel**.
 

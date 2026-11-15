@@ -8,18 +8,32 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
 - **Zähl-Tablet aufgeräumt.** Alle Ansichten wurden im Zusammenhang
   durchgesehen; vieles war nach und nach dazugekommen.
-  - **Kopfzeile:** Der dritte ↩-Knopf oben links ist weg (es bleiben der große
-    ↩ am Spielstand und „Letzten Punkt zurück" unten). Feld und Spiel stehen
-    je in einer Zeile; auf kleineren Tablets zeigt die Verbindung bei
-    bestehender Verbindung nur den grünen Punkt.
-  - **Spielstand größer (Querformat):** „📈 Verlauf" sitzt jetzt rechts neben
-    dem Stand.
+  - **Ein Menü für alles Seltene:** Oben rechts steht „⋯ Mehr". Dort liegen
+    „Ergebnis eintragen …", „Spiel beenden …" (bisher „Match beenden …"),
+    „⇄ Seiten / Mannschaften korrigieren" und „✚ Verletzung · Behandlung" —
+    alles **ohne PIN**, und nur, was gerade geht. Das Zahnrad gibt es nicht
+    mehr.
+  - **Schiri-Modus ohne PIN:** Er steht im selben Menü und lässt sich frei
+    ein- und ausschalten. Die PIN schützt nur noch „Feld wechseln ·
+    Anzeige …".
+  - **Ein Zurück-Knopf statt drei:** Er sitzt unten links und sagt, was er
+    zurücknimmt — „↩ Punkt für Links zurück", „↩ Korrektur zurücknehmen",
+    direkt nach der Aufstellung „↩ Aufstellung ändern".
+  - **Kopfzeile:** rechts nur noch „📣 Turnierleitung" (beschriftet, erscheint
+    erst im Spiel) und „⋯ Mehr". Feld und Spiel stehen je in einer Zeile; auf
+    kleineren Tablets zeigt die Verbindung bei bestehender Verbindung nur den
+    grünen Punkt.
+  - **Warten auf das Spiel:** Die Ansicht sagt „Warte auf das nächste Spiel" —
+    und nach zehn Sekunden ohne Verbindung „Keine Verbindung zum Turnier-PC",
+    statt gleich auszusehen.
+  - **Spielstand größer (Querformat):** Neben dem Stand steht kein Knopf mehr;
+    „📈 Verlauf" sitzt unten rechts.
   - **Spielende:** Satzstände aus Sicht des Siegers („21:16 · 21:18" statt
     „16:21 · 18:21"). „Ergebnis übermitteln" ist der große Knopf, „Match wieder
     öffnen" nur noch rot umrandet statt ein riesiger roter Block.
   - **Pausen:** Der Seitenwechsel steht als oranges Band in der Pause, statt
     als Hinweis über Text und Knöpfen zu liegen.
-  - **Zahnrad-Menü:** passt wieder auf den Schirm (Titel und „Schließen" waren
+  - **Menü:** passt wieder auf den Schirm (Titel und „Schließen" waren
     abgeschnitten), zweispaltig, „Große Schrift" und „Vollbild" jetzt unter
     „Anzeige".
   - **Dialoge:** „Abbrechen" ist überall ein ruhiger Rahmen-Knopf und sieht
