@@ -108,6 +108,7 @@ an – dabei erscheinen jetzt **zwei** UAC-Abfragen (je eine Regel pro Port).
 |---|---|
 | `GET /` | Landing-Page mit allen Court-Adressen |
 | `GET /court/{name}` | Tablet-Spielzettel-UI für einen Court |
+| `GET /court/demo` | Demofeld: Spielzettel im abgekapselten Übungsmodus (siehe unten) |
 | `GET /qr/{name}` | QR-Code (SVG) zur Court-URL |
 | `GET /ws` | WebSocket (Match-Zuweisung, Live-Score) |
 | `POST /result` | Endergebnis vom Tablet → `SENDUPDATE` nach BTP |
@@ -221,6 +222,36 @@ aus.
 **Keine versionierten Dateinamen nötig:** Alle Seiten sind selbstenthaltend —
 kein einziges `<script src>` oder `<link href>`. Es gibt nichts, was getrennt
 veralten könnte.
+
+## Demofeld: Übungsspiel ohne Turnierbezug (seit v0.9.416)
+
+`/court/demo` (LAN, Relay `/{ns}/court/demo`, Slave-Brücke) liefert dieselbe
+`tablet.html` mit `__DEMO__` = `1`, CourtID `0` und dem Namen „Demofeld"
+(`relay_proto::demo_tablet_seite`, eine Funktion für alle drei Wege). Der
+Modus ist für Schiedsrichter und Helfer gedacht, die das Tablet **mitten im
+Turnier** ausprobieren — deshalb ist er vollständig abgekapselt:
+
+- **Kein WebSocket.** `connect()` kehrt sofort zurück; das Tablet meldet sich
+  nie als Feld an, belegt also nichts, und Live-Stand, Spiegel, Verlauf,
+  Zettel-Ereignisse, Akku und die Meldungen ✚/📣 gehen nirgendwohin.
+- **Eine Netzsperre statt vieler Einzelprüfungen** (`demoNetzSperren`):
+  `fetch` lässt nur `GET /courts` (Feldwechsel) und `GET /info/ad/state`
+  (Sponsor-Leiste) durch. `POST /result` antwortet lokal mit `{ok:true}`,
+  damit der Abschluss wie echt durchläuft; alles andere scheitert wie ohne
+  Netz. `WebSocket` und `sendBeacon` sind zusätzlich gesperrt. So bleibt der
+  Modus dicht, auch wenn später neue Sendestellen dazukommen.
+- **Eigener Speicher.** Alle feldbezogenen `localStorage`-Schlüssel hängen an
+  `SPEICHER_FELD` (`demo` statt der CourtID) — der Stand eines echten Felds
+  auf demselben Gerät bleibt unberührt.
+- **Szenarien als Daten** (`DEMO_SZENARIEN`): Titel, Text, Klasse, Namen,
+  optional `saetze` in Team-Koordinaten wie `hostSets`. Gestartet wird über
+  `loadMatch` und — mit Zwischenstand — `einstiegMitSaetzen`, also denselben
+  Weg wie beim Tablet-Wechsel mitten im Spiel. Ein neues Szenario ist ein
+  Eintrag mehr.
+- Das Zahnrad öffnet ohne PIN (Schiri-Modus, Große Schrift frei
+  ausprobierbar); „Anzeige (nur Spielstand)" ist ausgeblendet.
+
+Spec: [`features/tablet-demofeld.md`](features/tablet-demofeld.md).
 
 ## Ergebnis-Übermittlung verlustsicher (Hebel B, ADR 0018)
 

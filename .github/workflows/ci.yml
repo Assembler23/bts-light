@@ -472,6 +472,11 @@ jobs:
       - name: Tablet-Aufwachen (JS)
         run: node scripts/test-tablet-aufwachen.mjs
 
+      # Demofeld: Die Netzsperre ist die Zusage, dass ein Uebungsspiel mitten
+      # im Turnier nichts an Turnier-PC, BTP oder Liveticker schickt.
+      - name: Demofeld-Netzsperre (JS)
+        run: node scripts/test-demo-netzsperre.mjs
+
       # Cargo-Workspace: src-tauri (App) + relay + relay-proto.
       - name: Rust format check
         run: cargo fmt --check

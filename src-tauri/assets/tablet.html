@@ -160,6 +160,35 @@
     .dot { width: .7rem; height: .7rem; border-radius: 50%; background: #94a3b8; }
     .dot.ok { background: #16a34a; }
     .dot.bad { background: #dc2626; }
+    /* Demofeld (Spec tablet-demofeld): violett — weder „verbunden" noch
+       „Fehler", sondern bewusst ohne Verbindung. */
+    .dot.demo { background: #7c3aed; }
+    .demo-wahl { display: flex; flex-direction: column; align-items: center; gap: .6rem;
+      width: 100%; max-width: 46rem; margin-top: .4rem; }
+    .demo-wahl[hidden] { display: none; }
+    .demo-titel { font-size: 1.35rem; font-weight: 800; }
+    .demo-unter { font-size: .95rem; color: var(--muted); }
+    .demo-liste { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+      gap: .7rem; width: 100%; margin-top: .3rem; }
+    .demo-szenario { text-align: left; padding: .9rem 1rem; border-radius: .8rem;
+      border: 2px solid #7c3aed; background: #f5f3ff; color: var(--text);
+      font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: .25rem; }
+    .demo-szenario:active { transform: scale(.98); }
+    .demo-szenario b { font-size: 1.15rem; }
+    .demo-szenario span { font-size: .85rem; color: var(--muted); line-height: 1.25; }
+    /* Wasserzeichen: auf jeder Ansicht (auch über Pause und Abschluss)
+       erkennbar, dass hier nur geübt wird. Fängt keine Tipps ab. */
+    body.demo::after {
+      content: 'ÜBUNG'; position: fixed; left: 50%; top: 50%;
+      transform: translate(-50%, -50%) rotate(-24deg);
+      font-size: clamp(4rem, 22vmin, 14rem); font-weight: 900; letter-spacing: .1em;
+      color: rgba(124, 58, 237, .09); pointer-events: none; z-index: 30;
+      white-space: nowrap;
+    }
+    body.demo .idle-wait, body.demo .idle-hint, body.demo .idle-court-cap { display: none; }
+    /* Platz für die Szenario-Auswahl, auch im Hochformat. */
+    body.demo .empty .idle-court { font-size: clamp(2.2rem, 9vmin, 4.5rem); color: #7c3aed; }
+    body.demo .empty { overflow-y: auto; justify-content: safe center; }
     /* Leerlauf-Ansicht (kein Match): die Feldnummer GROSS und zentral —
        so erkennt die Turnierleitung beim Verteilen der Tablets auf einen
        Blick, welches Gerät an welchem Feld steht (Plan 20, Tilo 20.07.). */
@@ -432,6 +461,7 @@
 #finished-korrektur, #break-korrektur {
   flex: 0 0 auto; padding: .7rem 1.4rem; font-size: 1rem; font-weight: 600;
 }
+#demo-neu-fertig { flex: 0 0 auto; padding: .9rem 2rem; }
 #korrektur-modal .opt .erklaerung { display: block; font-size: .85rem; font-weight: 400; color: var(--muted); margin-top: .35rem; }
 #korrektur-modal .korrektur-vorschau {
   flex: 0 0 auto; max-width: 40rem; padding: .8rem 1.1rem;
@@ -952,6 +982,13 @@
       <div class="idle-court">__COURT_LABEL__</div>
       <div class="idle-wait">Warte auf Match-Zuweisung durch die Turnierleitung…</div>
       <div class="idle-hint">Tablet bleibt aktiv; sobald ein Match zugewiesen wird, startet die Zähltafel automatisch.</div>
+      <!-- Demofeld (Spec tablet-demofeld): Auswahl des Übungsspiels. Die
+           Knöpfe baut `demoAuswahlBauen` aus DEMO_SZENARIEN. -->
+      <div class="demo-wahl" id="demo-wahl" hidden>
+        <div class="demo-titel">Übungsspiel wählen</div>
+        <div class="demo-unter">Beispielnamen · nichts geht an Turnierleitung, BTP, Monitore oder Liveticker</div>
+        <div class="demo-liste" id="demo-liste"></div>
+      </div>
     </div>
 
     <div id="play-view" class="play" style="display:none">
@@ -1211,6 +1248,8 @@
   <!-- Die Ansicht verdeckt die Kopfzeile — deshalb hier ein eigener Knopf. -->
   <button id="finished-korrektur">⇄ Seiten / Mannschaften korrigieren</button>
   <button class="danger" id="reopen-btn">Korrektur — Match wieder öffnen</button>
+  <!-- Demofeld: nach dem Abschluss gleich das nächste Übungsspiel. -->
+  <button class="primary" id="demo-neu-fertig" hidden>Neues Übungsspiel</button>
 </div>
 
 <!-- Pausen-Overlay: offizielle BWF-Intervalle mit Countdown -->
@@ -1312,6 +1351,9 @@
     <div class="title">Einstellungen</div>
     <!-- __COURT_LABEL__ wird serverseitig ersetzt (str::replace, alle Vorkommen). -->
     <div class="subtitle">Aktuelles Feld: <b>__COURT_LABEL__</b></div>
+    <!-- Demofeld: Übungsspiel neu wählen (nur im Demo-Modus sichtbar). -->
+    <div class="settings-section" id="settings-demo-cap" hidden>Übungsspiel</div>
+    <div class="opt settings-wide" id="settings-demo-neu" hidden>Neues Übungsspiel wählen</div>
     <div class="settings-section">Feld wechseln</div>
     <div class="options" id="settings-court-list"></div>
     <div class="settings-section">Anzeige</div>
@@ -1430,6 +1472,47 @@
 // Mehr-Hallen-Turnieren, die CourtID nicht.
 const COURT_ID = Number('__COURT_ID__') || 0;
 const COURT_LABEL = '__COURT_LABEL__';
+// Demofeld (Spec tablet-demofeld): `/court/demo` liefert diese Seite mit
+// `__DEMO__` = 1 aus. Ein Übungsspiel mit Beispielnamen — gedacht für
+// Schiedsrichter und Helfer, die das Tablet MITTEN im Turnier ausprobieren.
+// Deshalb ist der Modus vollständig abgekapselt: kein WebSocket (belegt kein
+// Feld, keine Meldung an die Turnierleitung), kein Ergebnis an BTP, kein
+// Live-Stand an Monitore oder Liveticker, und eigene localStorage-Schlüssel,
+// damit der Stand eines echten Felds auf demselben Gerät unberührt bleibt.
+// Auf den normalen Feld-Routen bleibt der Platzhalter stehen → `false`.
+const DEMO = '__DEMO__' === '1';
+// Schlüssel-Anhang aller feldbezogenen localStorage-Einträge.
+const SPEICHER_FELD = DEMO ? 'demo' : String(COURT_ID);
+if (DEMO) demoNetzSperren();
+
+/** Eine Sperre für ALLE Netzwege der Seite statt einer Prüfung an jeder
+ *  Sendestelle — so bleibt der Demo-Modus dicht, auch wenn später neue
+ *  Abrufe dazukommen. Durch dürfen nur reine Lesewege, die das Demofeld
+ *  braucht: die Feldliste (Feldwechsel im Zahnrad-Menü) und die
+ *  Sponsor-Leiste. `/result` antwortet lokal mit „angenommen", damit der
+ *  Abschluss wie im echten Spiel durchläuft. Alles andere scheitert, wie
+ *  ohne Netz — jede Sendestelle kommt damit ohnehin zurecht. */
+function demoNetzSperren() {
+  const echtesFetch = window.fetch.bind(window);
+  window.fetch = function (eingabe, opt) {
+    const url = typeof eingabe === 'string' ? eingabe : (eingabe && eingabe.url) || '';
+    const methode = String((opt && opt.method) || (eingabe && eingabe.method) || 'GET').toUpperCase();
+    const pfad = url.split('?')[0];
+    if (methode === 'GET' && /\/(courts|info\/ad\/state)$/.test(pfad)) return echtesFetch(eingabe, opt);
+    if (methode === 'POST' && /\/result$/.test(pfad)) {
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    return Promise.reject(new TypeError('Demofeld: kein Netzzugriff'));
+  };
+  if (navigator.sendBeacon) navigator.sendBeacon = function () { return false; };
+  // Der WebSocket wird in `connect()` gar nicht erst geöffnet; die Sperre
+  // hier fängt einen späteren Aufrufer ab. Die Zustands-Konstanten bleiben,
+  // weil die Seite überall `ws.readyState === WebSocket.OPEN` vergleicht.
+  const gesperrt = function () { throw new Error('Demofeld: kein WebSocket'); };
+  gesperrt.CONNECTING = 0; gesperrt.OPEN = 1; gesperrt.CLOSING = 2; gesperrt.CLOSED = 3;
+  window.WebSocket = gesperrt;
+}
 // Persistente Geräte-Kennung (einmalig erzeugt, überlebt Reloads): damit
 // erkennt der Server einen Reconnect DESSELBEN Geräts und unterscheidet
 // ihn von einer echten Übernahme durch ein fremdes Tablet. Gerätweit
@@ -1595,7 +1678,7 @@ function wahlBeiZuweisung(e) {
 // Daran erkennt das Tablet, dass die Sätze des Servers nur das Echo eines
 // eigenen, inzwischen zurückgenommenen Stands sind. Eigener Schlüssel je
 // Feld; reist nicht im Spiegel.
-const RING_KEY = `badhub.tablet.ring.${COURT_ID}`;
+const RING_KEY = `badhub.tablet.ring.${SPEICHER_FELD}`;
 let MELDE_RING = (() => {
   try {
     const r = JSON.parse(localStorage.getItem(RING_KEY));
@@ -1680,7 +1763,7 @@ function neuLaden(marke) {
 const LOG_MAX = 500;
 // localStorage-Schlüssel je Feld – per CourtID, damit gleichnamige Felder
 // eines Mehr-Hallen-Turniers nicht denselben Log teilen.
-const LOG_KEY = `badhub.tablet.log.${COURT_ID}`;
+const LOG_KEY = `badhub.tablet.log.${SPEICHER_FELD}`;
 const LOG = [];
 try {
   const raw = localStorage.getItem(LOG_KEY);
@@ -1861,7 +1944,7 @@ const STATE = {
 };
 
 // Schiri-Modus ist eine Tablet-Operator-Einstellung – pro Feld lokal gespeichert.
-const UMPIRE_KEY = `badhub.tablet.umpire.${COURT_ID}`;
+const UMPIRE_KEY = `badhub.tablet.umpire.${SPEICHER_FELD}`;
 try { STATE.umpireMode = localStorage.getItem(UMPIRE_KEY) === '1'; } catch { /* ignore */ }
 
 // ── Große Schrift & hoher Kontrast ──────────────────────────────────────
@@ -1937,7 +2020,7 @@ function seiteWort(side) {
 }
 // Karten/Verwarnungen werden NUR lokal protokolliert (pro Feld, an die matchId
 // gebunden → bei neuem Match leer). Kein Versand an Server/badhub.
-const CARDS_KEY = `badhub.tablet.cards.${COURT_ID}`;
+const CARDS_KEY = `badhub.tablet.cards.${SPEICHER_FELD}`;
 let cardsMatchId = null;
 
 const els = {
@@ -2054,6 +2137,11 @@ const els = {
   settingsClose: document.getElementById('settings-close'),
   settingsUmpire: document.getElementById('settings-umpire'),
   settingsLesbar: document.getElementById('settings-lesbar'),
+  settingsDemoCap: document.getElementById('settings-demo-cap'),
+  settingsDemoNeu: document.getElementById('settings-demo-neu'),
+  demoWahl: document.getElementById('demo-wahl'),
+  demoListe: document.getElementById('demo-liste'),
+  demoNeuFertig: document.getElementById('demo-neu-fertig'),
   settingsAnordnung: document.getElementById('settings-anordnung'),
   plusLeftLabel: document.getElementById('plus-left-label'),
   plusRightLabel: document.getElementById('plus-right-label'),
@@ -2104,6 +2192,14 @@ let ws = null;
 let lastServerContact = 0;
 
 function connect() {
+  // Demofeld: nie verbinden — sonst meldete sich das Tablet beim Turnier-PC
+  // als Feld an (Spec tablet-demofeld).
+  if (DEMO) {
+    els.connDot.classList.remove('ok', 'bad');
+    els.connDot.classList.add('demo');
+    els.connText.textContent = 'Übung · nichts wird übertragen';
+    return;
+  }
   const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + BASE_PATH + '/ws';
   ws = new WebSocket(wsUrl);
   els.connDot.classList.remove('ok', 'bad');
@@ -2695,6 +2791,9 @@ function healthNachfragen() {
   healthNachfrage = setTimeout(() => { healthNachfrage = null; syncServerClock(); }, 3000);
 }
 function syncServerClock() {
+  // Demofeld: keine Server-Uhr, kein Aufruf-Stempel — das Übungsspiel hat
+  // keinen Aufruf (die Netzsperre würde den Abruf ohnehin abweisen).
+  if (DEMO) return;
   const lauf = ++healthLauf;
   // `src=check`: Dies ist keine Anzeige-Aktualisierung, sondern die
   // Uhr-Synchronisation. Ohne die Kennzeichnung landeten bei zwanzig
@@ -3119,7 +3218,7 @@ function renderEinspielzeit() {
 // Hallen-Turniers teilen ihn nicht. submittedOk + submitting werden NICHT
 // persistiert (Browser-spezifisch); pendingServer wird auch ignoriert weil
 // der User-Tap auf den Setup-Modal eh interaktiv läuft.
-const PERSIST_KEY = `badhub.tablet.state.${COURT_ID}`;
+const PERSIST_KEY = `badhub.tablet.state.${SPEICHER_FELD}`;
 
 // ── Geparkte Ergebnisse (Spec tablet-stand-robust, Regel C; ADR 0085) ──
 // Inline-Kopie von `src/io/geparkt.mjs` (dort die Begründung; Verhalten
@@ -3234,7 +3333,7 @@ function verwerfenText(e) {
 
 // Eigener Schlüssel je Feld: Die Liste überlebt das Leeren des Spielstands
 // (`clearPersistedState`) und reist NICHT im gespiegelten Zustand.
-const GEPARKT_KEY = `badhub.tablet.geparkt.${COURT_ID}`;
+const GEPARKT_KEY = `badhub.tablet.geparkt.${SPEICHER_FELD}`;
 let GEPARKT = geparktLesen();
 let geparktTimer = null;
 let geparktGeprueft = false;
@@ -6267,7 +6366,8 @@ function render() {
   }
 
   if (!STATE.match) {
-    els.eventLabel.textContent = '— kein Match —';
+    els.eventLabel.textContent = DEMO ? 'Übungsspiel' : '— kein Match —';
+    els.demoWahl.hidden = !DEMO;
     els.emptyView.style.display = '';
     els.playView.style.display = 'none';
     els.finishedOverlay.classList.remove('visible');
@@ -6365,6 +6465,12 @@ function render() {
     els.reopenBtn.textContent = korrekturOben
       ? '↩ Korrektur zurücknehmen' : 'Korrektur — Match wieder öffnen';
     els.submitStatus.textContent = lage.status;
+    // Demofeld: Die lokale `/result`-Antwort ist immer „angenommen" — der
+    // Text sagt ehrlich, dass nichts angekommen ist.
+    if (DEMO && STATE.submittedOk) {
+      els.submitStatus.textContent = '✓ Übung beendet — im echten Spiel ginge das Ergebnis jetzt an die Turnierleitung.';
+    }
+    els.demoNeuFertig.hidden = !DEMO;
   } else {
     els.finishedOverlay.classList.remove('visible');
     els.retirePick.style.display = 'none';
@@ -6418,7 +6524,9 @@ function openSettings() {
   els.settingsPinView.hidden = false;
   els.settingsMainView.hidden = true;
   els.settingsModal.classList.add('visible');
-  if (pinFreigabeAktiv()) showSettingsMain();
+  // Demofeld: ohne PIN — dort lässt sich nichts verstellen, was das Turnier
+  // betrifft, und Schiri-Modus/Große Schrift sollen frei ausprobierbar sein.
+  if (DEMO || pinFreigabeAktiv()) showSettingsMain();
 }
 
 function closeSettings() {
@@ -6429,6 +6537,11 @@ function closeSettings() {
 function showSettingsMain() {
   els.settingsPinView.hidden = true;
   els.settingsMainView.hidden = false;
+  els.settingsDemoCap.hidden = !DEMO;
+  els.settingsDemoNeu.hidden = !DEMO;
+  // Die Anzeige-Hülle zeigt den Stand vom Turnier-PC — das Übungsspiel
+  // kennt er nicht.
+  els.settingsAnzeige.hidden = DEMO;
   loadCourtList();
 }
 
@@ -6458,6 +6571,7 @@ function loadCourtList() {
       els.settingsCourtList.textContent = '';
       if (!Array.isArray(list) || list.length === 0) {
         els.settingsCourtList.textContent = 'Keine Felder gefunden.';
+        demoEintragAnhaengen();
         return;
       }
       list.forEach(c => {
@@ -6473,8 +6587,24 @@ function loadCourtList() {
         }
         els.settingsCourtList.appendChild(b);
       });
+      demoEintragAnhaengen();
     })
-    .catch(() => { els.settingsCourtList.textContent = 'Feldliste nicht erreichbar.'; });
+    .catch(() => {
+      els.settingsCourtList.textContent = 'Feldliste nicht erreichbar.';
+      demoEintragAnhaengen();
+    });
+}
+
+/** „Demofeld" als letzter Eintrag der Feldliste — so erreicht jedes
+ *  Turnier-Tablet das Übungsspiel, auch im Cloud-Modus ohne Feldwahl-Seite. */
+function demoEintragAnhaengen() {
+  const b = document.createElement('div');
+  b.className = 'opt' + (DEMO ? ' court-current' : '');
+  b.textContent = DEMO ? 'Demofeld (aktuell)' : 'Demofeld · Übungsspiel';
+  if (!DEMO) {
+    b.addEventListener('click', () => { location.href = BASE_PATH + '/court/demo'; });
+  }
+  els.settingsCourtList.appendChild(b);
 }
 
 function toggleFullscreen() {
@@ -7593,6 +7723,103 @@ document.getElementById('diag-clear').addEventListener('click', () => {
 // Vor dem WS-Connect: ggf. gespeicherten State aus dem letzten Browser-Run
 // wiederherstellen (Reload, App-Switch, etc). Wir geben das DOM einmal sofort
 // damit der User keinen leeren Bildschirm sieht.
+// ───────────────────────── Demofeld (Übungsspiel) ──────────────────────
+// Spec tablet-demofeld. Szenarien als Daten: Ein neues Szenario ist ein
+// Eintrag mehr. `saetze` (Team-Koordinaten, wie `hostSets` vom Turnier-PC)
+// setzt einen Zwischenstand; der letzte, noch offene Satz läuft weiter.
+// Der Einstieg nutzt denselben Weg wie ein Tablet-Wechsel mitten im Spiel
+// (`einstiegMitSaetzen`): Seitenwahl und Aufstellung werden abgefragt.
+// Namen frei erfunden — keine echten Daten des Turniers.
+const DEMO_SZENARIEN = [
+  { titel: 'Einzel', text: 'Damen-Einzel ab 0:0 — zwei Gewinnsätze bis 21',
+    klasse: 'Damen-Einzel', a: ['Anna Beispiel'], b: ['Berta Muster'] },
+  { titel: 'Doppel', text: 'Herren-Doppel ab 0:0 — Aufschlagfelder und Positionen üben',
+    klasse: 'Herren-Doppel', a: ['Carl Probe', 'David Test'], b: ['Emil Muster', 'Felix Beispiel'] },
+  { titel: 'Mixed', text: 'Mixed ab 0:0 — Aufschlag und Annahme im gemischten Doppel',
+    klasse: 'Mixed', a: ['Greta Probe', 'Hans Beispiel'], b: ['Ida Muster', 'Jonas Test'] },
+  { titel: 'Einzel · Entscheidungssatz', text: 'Sätze 21:17 und 18:21 — dritter Satz mit Seitenwechsel bei 11',
+    klasse: 'Herren-Einzel', a: ['Karl Beispiel'], b: ['Lukas Muster'],
+    saetze: [{ a: 21, b: 17 }, { a: 18, b: 21 }] },
+  { titel: 'Doppel · Verlängerung', text: 'Erster Satz steht 19:19 — Satzpunkt, 29 beide und Satzende',
+    klasse: 'Damen-Doppel', a: ['Maria Probe', 'Nina Test'], b: ['Olga Muster', 'Paula Beispiel'],
+    saetze: [{ a: 19, b: 19 }] },
+  { titel: 'Mixed · Spielpunkt', text: 'Erster Satz 21:16, zweiter steht 20:18 — Spielende und Ergebnis übermitteln',
+    klasse: 'Mixed', a: ['Rita Beispiel', 'Sven Probe'], b: ['Tina Muster', 'Uwe Test'],
+    saetze: [{ a: 21, b: 16 }, { a: 20, b: 18 }] },
+];
+
+/** MatchBrief wie vom Turnier-PC (Feldnamen siehe relay-proto `MatchBrief`). */
+function demoBrief(sz) {
+  let nr = 0;
+  const spieler = (namen) => namen.map((name) => ({ id: 990000 + (++nr), name, nationality: null, club: null }));
+  return {
+    // Je Start neu: `loadMatch` behielte sonst bei gleicher Nummer den Stand.
+    matchId: 900000000 + (Date.now() % 100000000),
+    teamA: spieler(sz.a),
+    teamB: spieler(sz.b),
+    eventLabel: 'Übung · ' + sz.klasse,
+    bestOfSets: 3,
+    targetScore: 21,
+    capScore: 30,
+    intervalAt: 11,
+    discipline: '',
+    scorekeeper: [],
+    scorekeeperAssigned: false,
+    showClubNames: false,
+    showClubLogos: false,
+    teamsCorrection: true,
+    shuttleCounter: false,
+    finalized: false,
+  };
+}
+
+function demoStarten(sz) {
+  if (!DEMO) return;
+  tlog('info', 'demo_start', { szenario: sz.titel });
+  closeSettings();
+  if (STATE.match || STATE.pendingResult) clearMatch();
+  const brief = demoBrief(sz);
+  loadMatch(brief);
+  STATE.hostKannBerichtigung = true;
+  STATE.hostZaehlt = false;
+  STATE.finalized = false;
+  if (sz.saetze) {
+    einstiegMitSaetzen(hostSaetzeTeilen(sz.saetze, brief.targetScore, brief.capScore, brief.bestOfSets));
+  }
+}
+
+/** Zurück zur Szenario-Auswahl (Zahnrad-Menü bzw. nach dem Abschluss). */
+function demoNeu() {
+  if (!DEMO) return;
+  closeSettings();
+  clearMatch();
+  render();
+}
+
+function demoAuswahlBauen() {
+  els.demoListe.textContent = '';
+  DEMO_SZENARIEN.forEach((sz) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'demo-szenario';
+    const t = document.createElement('b');
+    t.textContent = sz.titel;
+    const u = document.createElement('span');
+    u.textContent = sz.text;
+    b.append(t, u);
+    b.addEventListener('click', () => demoStarten(sz));
+    els.demoListe.appendChild(b);
+  });
+}
+
+if (DEMO) {
+  document.body.classList.add('demo');
+  document.title = 'Demofeld – Übungsspiel';
+  demoAuswahlBauen();
+  els.settingsDemoNeu.addEventListener('click', demoNeu);
+  els.demoNeuFertig.addEventListener('click', demoNeu);
+}
+
 restorePersistedState();
 render();
 connect();
