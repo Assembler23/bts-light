@@ -12,6 +12,8 @@ import {
   sortiere,
   vereinigen,
   undoSchnitt,
+  undoNeuverankern,
+  ZEIT_TATSACHEN,
   aufschlagJenseitsSatz,
   istZurueckgenommen,
   ankerNachBuchung,
@@ -186,6 +188,57 @@ const ev = (id, set, afterN, seq, kind = "card_yellow") => ({
   // Zwei Aufrufe kollidieren praktisch nie — schützt vor einem
   // versehentlich konstanten Generator.
   assert.notEqual(neueKennung(), neueKennung());
+}
+
+// ── Zeit-Tatsachen beim Undo (ADR 0095) ───────────────────────────────
+{
+  const beh = (id, set, afterN, kind, tsMs, phase = "play") => ({
+    id, set, afterN, seq: afterN, kind, tsMs, phase,
+  });
+  const bestand = [
+    ev("k1", 1, 5, 1),
+    beh("b1", 1, 5, "injury_start", 1000),
+    beh("e1", 1, 5, "injury_end", 4000, "break_injury"),
+    beh("b0", 1, 2, "injury_start", 500), // vor dem Schnitt
+    beh("b2", 2, 5, "injury_start", 9000), // anderer Satz
+  ];
+  assert.deepEqual(ZEIT_TATSACHEN, ["injury_start", "injury_end"]);
+  // Ohne Ausnahme: ADR 0038 unverändert (alter Host).
+  assert.deepEqual(undoSchnitt(bestand, 1, 4).sort(), ["b1", "e1", "k1"]);
+  // Mit Ausnahme: nur die Karte fällt.
+  assert.deepEqual(undoSchnitt(bestand, 1, 4, ZEIT_TATSACHEN), ["k1"]);
+
+  // Neuverankerung: Beginn vor Ende, gleicher tsMs und Phase.
+  assert.deepEqual(undoNeuverankern(bestand, 1, 4), [
+    { retracts: "b1", kind: "injury_start", tsMs: 1000, phase: "play" },
+    { retracts: "e1", kind: "injury_end", tsMs: 4000, phase: "break_injury" },
+  ]);
+  // afterN ≤ Schnitt und andere Sätze bleiben unberührt.
+  assert.deepEqual(undoNeuverankern(bestand, 1, 5), []);
+  assert.deepEqual(undoNeuverankern(bestand, 3, 0), []);
+  // Gleicher Zeitstempel: Beginn trotzdem vor Ende.
+  const gleich = [beh("e", 1, 3, "injury_end", 7), beh("b", 1, 3, "injury_start", 7)];
+  assert.deepEqual(undoNeuverankern(gleich, 1, 2).map((v) => v.retracts), ["b", "e"]);
+  // Schon Zurückgenommenes wird nicht noch einmal verschoben.
+  const mitRuecknahme = [...bestand, { id: "r1", set: 1, afterN: 5, seq: 9, kind: "retract", retracts: "b1" }];
+  assert.deepEqual(undoNeuverankern(mitRuecknahme, 1, 4).map((v) => v.retracts), ["e1"]);
+
+  // Deckel: passt die Verschiebung nicht, unterbleibt sie ganz.
+  const voll = [...bestand];
+  while (voll.length < MAX_EVENTS - 3) voll.push(ev("f" + voll.length, 3, voll.length, voll.length));
+  assert.equal(voll.length, 61);
+  assert.deepEqual(undoNeuverankern(voll, 1, 4), [], "61 + 4 > 64");
+  assert.equal(undoNeuverankern(voll.slice(1), 1, 4).length, 2, "60 + 4 = 64 passt");
+
+  // Mehrere Undo-Schritte: Die Kopie wird beim nächsten Schritt erneut
+  // verschoben, das zurückgenommene Original nicht.
+  const kopie = beh("b1k", 1, 4, "injury_start", 1000);
+  const nachErstem = [
+    ...bestand,
+    { id: "r2", set: 1, afterN: 4, seq: 10, kind: "retract", retracts: "b1" },
+    kopie,
+  ];
+  assert.deepEqual(undoNeuverankern(nachErstem, 1, 3).map((v) => v.retracts), ["b1k", "e1"]);
 }
 
 console.log("test-match-events: alle Fälle grün");

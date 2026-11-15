@@ -575,6 +575,10 @@ Erweiterung 06.09.2026):
   Der Pausen-Beginn (`startedAt`, Server-Zeit) reist im gespiegelten
   Spielzustand mit; die Behandlungspause erscheint in TL-Web als
   „Behandlung seit …".
+  Auch die **Zettel-Ereignisse** (Karten, Behandlung, Rücknahmen) tragen
+  seit der Verletzungsunterbrechung (ADR 0095) diese Server-Zeit statt der
+  Tablet-Uhr; ein Undo verschiebt Behandlungen, statt sie zurückzunehmen
+  (Details in [schiedsrichterzettel.md](schiedsrichterzettel.md)).
   Damit die Server-Zeiten gegen die richtige Uhr laufen, gleicht das Tablet
   seine eigene alle 30 s über `…/health` ab. **Seit v0.9.243 mit dem
   Basis-Pfad** — vorher war der Abruf absolut geschrieben und landete im

@@ -90,6 +90,12 @@ jobs:
       - name: Zettel-Ereignisse (JS)
         run: node scripts/test-match-events.mjs
 
+      # Behandlungsuhr am Tablet (Spec verletzungsunterbrechung, ADR 0095):
+      # Uhrtext, Richtzeit-Schwelle und die Fähigkeitsmeldung, die
+      # entscheidet, ob das Tablet Behandlungsereignisse erzeugt.
+      - name: Behandlungsuhr (JS)
+        run: node scripts/test-behandlungs-uhr.mjs
+
       # Seiten/Mannschaften am Tablet korrigieren (Spec
       # tablet-seiten-korrigieren, ADR 0067) — ein falscher Tausch fiele
       # sonst erst am gemeldeten Ergebnis auf.

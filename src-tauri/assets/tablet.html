@@ -5227,8 +5227,23 @@ function undo() {
   // zeigte danach auf einen anderen Ballwechsel. Also ausdrücklich
   // zurücknehmen statt stillschweigend verschieben lassen.
   const schnitt = eventAnker();
-  for (const id of meUndoSchnitt(STATE.events, schnitt.set, schnitt.afterN)) {
+  // Behandlungen sind Zeit-Tatsachen (ADR 0095): Kennt der Host ihre
+  // Darstellung, nimmt der Schnitt sie nicht mit, sondern verankert sie am
+  // neuen Schnitt neu — sonst säße „B" am Ballwechsel nach der Behandlung.
+  // Ein alter Host kennt die Entdopplung nicht → dort gilt ADR 0038.
+  const zeitTatsachen = hostKenntBehandlung(STATE.match) ? ME_ZEIT_TATSACHEN : [];
+  for (const id of meUndoSchnitt(STATE.events, schnitt.set, schnitt.afterN, zeitTatsachen)) {
     nimmZurueck(id);
+  }
+  if (zeitTatsachen.length) {
+    // Platz für die Aufschlag-Rücknahmen unten freihalten: Eine Aufschlagfolge
+    // für einen Satz, den es nicht mehr gibt, wiegt schwerer als eine leicht
+    // versetzte „B"-Marke (Review-Befund PR 3).
+    const reserve = meAufschlagJenseitsSatz(STATE.events, schnitt.set).length;
+    for (const v of meUndoNeuverankern(STATE.events, schnitt.set, schnitt.afterN, ME_MAX_EVENTS - reserve)) {
+      nimmZurueck(v.retracts, schnitt);
+      erfasseEreignis(v.kind, { anker: schnitt, phase: v.phase, tsMs: v.tsMs });
+    }
   }
   // Aufschlagfolge eines Satzes, den es nach dem Undo nicht mehr gibt
   // (in der Satzpause gewählt, dann den Satzpunkt zurückgenommen).
@@ -6895,11 +6910,26 @@ function meVereinigen(vorhanden, neu) {
   return meSortiere([...(vorhanden || []), ...meSortiere(frisch).slice(0, platz)]);
 }
 
-function meUndoSchnitt(events, set, afterN) {
+function meUndoSchnitt(events, set, afterN, ausgenommen = []) {
   const zurueck = new Set((events || []).filter(e => e.kind === 'retract').map(e => e.retracts));
   return (events || [])
-    .filter(e => e.kind !== 'retract' && !zurueck.has(e.id) && (e.set || 0) === set && (e.afterN || 0) > afterN)
+    .filter(e => e.kind !== 'retract' && !ausgenommen.includes(e.kind) && !zurueck.has(e.id)
+      && (e.set || 0) === set && (e.afterN || 0) > afterN)
     .map(e => e.id);
+}
+
+const ME_ZEIT_TATSACHEN = ['injury_start', 'injury_end'];
+
+function meUndoNeuverankern(events, set, afterN, max = ME_MAX_EVENTS) {
+  const liste = events || [];
+  const zurueck = new Set(liste.filter(e => e.kind === 'retract').map(e => e.retracts));
+  const betroffen = liste
+    .filter(e => ME_ZEIT_TATSACHEN.includes(e.kind) && !zurueck.has(e.id)
+      && (e.set || 0) === set && (e.afterN || 0) > afterN)
+    .sort((a, b) => (a.tsMs || 0) - (b.tsMs || 0)
+      || (a.kind === 'injury_start' ? 0 : 1) - (b.kind === 'injury_start' ? 0 : 1));
+  if (liste.length + 2 * betroffen.length > max) return [];
+  return betroffen.map(e => ({ retracts: e.id, kind: e.kind, tsMs: e.tsMs, phase: e.phase }));
 }
 
 function meAufschlagJenseitsSatz(events, set) {
@@ -6924,6 +6954,37 @@ function meNeueKennung() {
   return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 }
 /* Ende der Inline-Kopie. */
+
+// ─── Behandlungsuhr (Spec verletzungsunterbrechung, ADR 0095) ─────────
+/** INLINE-KOPIE von `src/io/behandlungsUhr.mjs` (Test
+ *  `scripts/test-behandlungs-uhr.mjs`, Drift `scripts/test-inline-kopien.mjs`).
+ *  Änderungen hier und dort gemeinsam. */
+const RICHTZEIT_STANDARD_S = 300;
+const RICHTZEIT_MIN_S = 60;
+const RICHTZEIT_MAX_S = 1800;
+
+function hostKenntBehandlung(brief) {
+  const s = brief ? brief.injuryGuideSecs : undefined;
+  return typeof s === 'number' && Number.isFinite(s) && s > 0;
+}
+
+function richtzeitAusBrief(brief) {
+  if (!hostKenntBehandlung(brief)) return RICHTZEIT_STANDARD_S;
+  const s = Math.round(brief.injuryGuideSecs);
+  return Math.min(RICHTZEIT_MAX_S, Math.max(RICHTZEIT_MIN_S, s));
+}
+
+function uhrText(sekunden) {
+  const s = Math.max(0, Math.floor(Number(sekunden) || 0));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+function behandlungsUhr(jetzt, startedAt, richtSek) {
+  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || startedAt <= 0) return null;
+  const sekunden = Math.max(0, Math.floor((jetzt - startedAt) / 1000));
+  return { sekunden, text: uhrText(sekunden), ueberschritten: sekunden >= richtSek };
+}
+/* Ende der Inline-Kopie (Behandlungsuhr). */
 
 /** Aktueller Satz (1-basiert) und Zahl der aufgezeichneten Ballwechsel.
  *  `afterN` ist der Anker des Ereignisses — eine Schnittposition, keine
@@ -6974,7 +7035,10 @@ function erfasseEreignis(kind, opts) {
     afterN: anker.afterN,
     scoreA: 0,
     scoreB: 0,
-    tsMs: Date.now(),
+    // Server-Zeit (ADR 0095): dieselbe Uhr wie die Pausen-Uhr, über einen
+    // Tablet-Wechsel hinweg vergleichbar. Eine Neuverankerung übernimmt den
+    // Zeitstempel des Originals.
+    tsMs: typeof o.tsMs === 'number' ? o.tsMs : Math.round(serverNow()),
     kind,
     team: o.team || 0,
     player: o.player || 0,
@@ -7056,7 +7120,7 @@ function uebernehmeAlteKarten() {
     afterN: 0,
     scoreA: 0,
     scoreB: 0,
-    tsMs: c.ts || Date.now(),
+    tsMs: c.ts || Math.round(serverNow()),
     kind: c.color === 'yellow' ? 'card_yellow' : c.color === 'red' ? 'card_red' : 'card_black',
     team: c.team === 'a' ? 0 : 1,
     player: c.index || 0,
