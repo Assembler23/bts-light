@@ -91,3 +91,16 @@ export function tpSucheText(suche) {
       return null;
   }
 }
+
+/**
+ * Text der Rückfrage im Banner außerhalb des Setups (Spec tp-datei-finden,
+ * PR 2). `kurz` kürzt eine Kennung für die Anzeige. Läuft die Übertragung
+ * und wechselt die Kennung, kündigt der Text den Neustart an.
+ */
+export function tpFrageText(frage, kurz) {
+  if (frage.datei_guid === null) {
+    return `In BTP ist „${frage.name}“ geöffnet. Die Datei nennt keine Turnier-Kennung. Trotzdem für Turnier ${kurz(frage.eingetragen)} verwenden?`;
+  }
+  const neustart = frage.laeuft ? " Die Übertragung startet dabei kurz neu." : "";
+  return `In BTP ist „${frage.name}“ geöffnet. Die Datei gehört zu Turnier ${kurz(frage.datei_guid)}, eingetragen ist ${kurz(frage.eingetragen)}. Datei und Kennung übernehmen? Damit zeigen auch Liveticker, Check-In und Aushang auf dieses Turnier.${neustart}`;
+}

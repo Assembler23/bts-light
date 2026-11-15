@@ -538,6 +538,12 @@ pub struct TpUploadConfig {
     /// Config das Feld nicht kennt. Wer die Datei von Hand wählt oder eine
     /// Rückfrage verneint, schaltet es aus; es ist zugleich der Notschalter.
     pub finden_automatisch: bool,
+    /// Schreibzähler (ADR 0098): erhöht sich bei jedem Schreibvorgang der
+    /// Automatik **außerhalb** des Setups. Ein Setup-Formular, das einen
+    /// älteren Zähler zurückschickt, ist veraltet — dann gelten Pfad,
+    /// Bindung, Schalter und Turnier-Kennung aus dem gespeicherten Stand
+    /// (`keep_host_managed_fields`).
+    pub stand: u64,
 }
 
 /// Voreinstellung des Ereignis-Mindestabstands (Handbuch-Anker).
@@ -562,6 +568,7 @@ impl Default for TpUploadConfig {
             ereignis_enabled: true,
             ereignis_minuten: TP_EREIGNIS_STANDARD_MINUTEN,
             finden_automatisch: true,
+            stand: 0,
         }
     }
 }
@@ -2934,6 +2941,7 @@ mod tests {
                 ereignis_enabled: false,
                 ereignis_minuten: 12,
                 finden_automatisch: false,
+                stand: 7,
             },
             tournament_logo: LogoConfig {
                 data: "aGVsbG8=".to_string(),

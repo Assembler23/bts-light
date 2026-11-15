@@ -83,6 +83,14 @@ wieder freie Felder belegen — wie „Automatik läuft" im Browser.
 <!-- pruef: "Automatik pausiert" in src/components/AutoAssignPauseBanner.tsx -->
 <!-- pruef: "Fortsetzen" in src/components/AutoAssignPauseBanner.tsx -->
 
+Ist in BTP eine **andere Turnierdatei** geöffnet als die eingetragene, steht
+dort ein orangefarbener Balken mit der Frage, ob Datei und Turnier-Kennung
+übernommen werden sollen — mit den Knöpfen **Ja, übernehmen** und **Nein**
+(seit v0.9.424). bts-light ändert das Turnier nie von allein; was die
+Antworten bewirken, steht unter
+[Die Suche läuft mit](tp-datei-upload.md#die-suche-läuft-mit--auch-außerhalb-der-einstellungen).
+<!-- pruef: "Ja, übernehmen" in src/components/TpFundBanner.tsx -->
+
 ## Die Geräte in der Halle
 
 Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit

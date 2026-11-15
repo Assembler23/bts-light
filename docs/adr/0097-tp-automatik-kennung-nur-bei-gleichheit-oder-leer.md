@@ -1,6 +1,6 @@
 # 0097 — TP-Automatik übernimmt die Kennung nur bei Gleichheit oder leerem Feld
 
-- **Status:** proposed
+- **Status:** accepted
 - **Datum:** 2026-11-15
 
 ## Kontext
@@ -16,7 +16,10 @@ Datei wechselt also).
 ## Entscheidung
 
 - Kennung der Datei **gleich** der eingetragenen → Pfad still übernehmen.
-- **Keine** Kennung eingetragen → Pfad und Kennung still übernehmen.
+- **Keine** Kennung eingetragen → Pfad und Kennung still übernehmen — aber
+  **nur im Setup**, wo der Turnierleiter es sieht und mit „Speichern"
+  bestätigt. Außerhalb des Setups (App-Start, Takt) tut die Automatik ohne
+  gültige Kennung nichts (Security-Review 15.11.2026).
 - Kennung **weicht ab** oder die Datei trägt keine lesbare Kennung →
   **Rückfrage**, je Fund einmal. Ja übernimmt (bei laufender Übertragung
   startet bts-light sie danach selbst neu, die Frage kündigt das an). Nein

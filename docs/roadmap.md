@@ -765,14 +765,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     Byte-Muster `LinkCode` aus der TP-Datei (kein Jet-Parser); Übernahme im
     Setup, Ablehnung fremder Dateien vor dem Senden (Ergänzung in der
     Takt-Spec).
-  - **TP-Datei selbst finden — PR 1 ✅ umgesetzt in v0.9.423, PR 2 offen:**
+  - **TP-Datei selbst finden — ✅ umgesetzt in v0.9.423 (PR 1) und v0.9.424 (PR 2):**
     Pfad aus den offenen Datei-Handles von `btp.exe` (gemessen, Sonde
     `tests/btp_tp_pfad_probe.rs`). PR 1: Suche beim Öffnen des Setups und per
     Knopf, Schalter „TP-Datei automatisch finden", Rückfrage bei
-    abweichender Kennung. **Offen (PR 2):** Suche bei App-Start,
+    abweichender Kennung. PR 2: Suche bei App-Start,
     Übertragungs-Start und im 60-s-Takt, Banner außerhalb des Setups,
-    Schreibpfad mit Schreibzähler. Vor PR 2 am Windows-PC messen: Zeilen
-    `MINIMAL …` der Sonde. Spec [features/tp-datei-finden.md](features/tp-datei-finden.md),
+    Schreibpfad mit Schreibzähler. **Offen:** Feldtest am Windows-PC
+    (Banner, Neustart nach „Ja", Pfadwechsel bei laufender Übertragung). Spec [features/tp-datei-finden.md](features/tp-datei-finden.md),
     ADR [0096](adr/0096-tp-pfad-aus-den-handles-von-btp.md) ·
     [0097](adr/0097-tp-automatik-kennung-nur-bei-gleichheit-oder-leer.md) ·
     [0098](adr/0098-tp-automatik-schreibpfad-mit-schreibzaehler.md).

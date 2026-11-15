@@ -1,4 +1,4 @@
-import type { TpFileInfo, TpSuche } from "../types";
+import type { TpFileInfo, TpFrageSicht, TpSuche } from "../types";
 
 export type TpWahl =
   | { art: "fehler"; text: string }
@@ -16,3 +16,5 @@ export function tpWahl(eingabe: {
 }): TpWahl;
 
 export function tpSucheText(suche: TpSuche): string | null;
+
+export function tpFrageText(frage: TpFrageSicht, kurz: (guid: string) => string): string;

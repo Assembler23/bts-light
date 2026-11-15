@@ -17,6 +17,7 @@ import { AlertBanner } from "./components/AlertBanner";
 import { AzureFallbackBanner } from "./components/AzureFallbackBanner";
 import { AnsageAusgabeBanner } from "./components/AnsageAusgabeBanner";
 import { PrintWarningBanner } from "./components/PrintWarningBanner";
+import { TpFundBanner } from "./components/TpFundBanner";
 import { AutoAssignPauseBanner } from "./components/AutoAssignPauseBanner";
 import { SlaveConnectBanner } from "./components/SlaveConnectBanner";
 import { AppShell } from "./components/AppShell";
@@ -134,6 +135,7 @@ function defaultConfig(): AppConfig {
       ereignis_enabled: true,
       ereignis_minuten: 5,
       finden_automatisch: true,
+      stand: 0,
     },
     print: {
       auto_enabled: false,
@@ -390,6 +392,25 @@ function App() {
     };
   }, [view]);
 
+  /** Übertragung stoppen und starten — nach einem bestätigten Wechsel der
+   *  Turnier-Kennung durch die TP-Datei-Automatik (der Sync liest seine
+   *  Config nur beim Start). Derselbe Weg wie beim Speichern im Setup, mit
+   *  derselben Pause, damit der alte Tablet-Server den Port freigibt. */
+  async function neustartUebertragung() {
+    setBusy(true);
+    setRunError("");
+    try {
+      await stopSync();
+      await new Promise((r) => setTimeout(r, 400));
+      await startSync();
+      setStatus(await getStatus());
+    } catch (e) {
+      setRunError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleRun() {
     if (!status) return;
     setBusy(true);
@@ -564,6 +585,14 @@ function App() {
         <AzureFallbackBanner />
         <AnsageAusgabeBanner />
         <PrintWarningBanner />
+        <TpFundBanner
+          // Hier ist die Config geladen (Lade- und Assistenten-Ansicht kehren
+          // vorher zurück). Der Slave hat weder Datei noch Upload.
+          bereit={!config.slave_mode}
+          stand={config.tp_upload.stand ?? 0}
+          onConfig={(c) => setConfig(c)}
+          onNeustart={neustartUebertragung}
+        />
         <AutoAssignPauseBanner />
         {runError && (
           <div className="bg-rose-600 px-4 py-2 text-sm font-medium text-white">

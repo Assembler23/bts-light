@@ -1,7 +1,8 @@
 # TP-Datei selbst finden — Spezifikation
 
 > Status: **Freigegeben 15.11.2026** („Na dann setze um“; via /idee: Brief → Grill → How-To → Review).
-> **PR 1 umgesetzt in v0.9.423** (Suche im Setup); PR 2 (Automatik außerhalb des Setups) offen.
+> **PR 1 umgesetzt in v0.9.423** (Suche im Setup), **PR 2 in v0.9.424** (Automatik außerhalb des Setups).
+> Abweichungen der Umsetzung von dieser Fassung stehen unter „Offene Fragen / Annahmen".
 > Quelle: Idee vom 15.11.2026. Betroffene Crates: `src-tauri`, `src`. Nur bts-light, kein Relay, kein badhub.
 > Baut auf [tp-datei-upload.md](tp-datei-upload.md) und [tp-takt-upload.md](tp-takt-upload.md) auf.
 > ADR: [0096](../adr/0096-tp-pfad-aus-den-handles-von-btp.md) (Handles),
@@ -263,7 +264,29 @@ Liveticker-Testturnier.
 - **Ungemessen:** USB-Stick, Defender, zwei Windows-Benutzer am selben PC.
   Annahme: Die Dateiprüfung fängt unlesbare Funde ab; sonst bleibt die
   Handwahl.
-- **Für PR 2 aus dem Security-Review (15.11.2026):** Prozess nicht nur am
+- **Abweichungen der Umsetzung von PR 2 (v0.9.424):**
+  - **Leere Kennung (AK12):** Außerhalb des Setups füllt die Automatik eine
+    fehlende Kennung **nicht** still (Security-Review). Ohne gültige Kennung
+    führt bts-light ohnehin in den Assistenten; dort übernimmt die Suche
+    Datei und Kennung sichtbar, gespeichert wird mit „Speichern".
+  - **Keine Dashboard-Zeile:** Das Banner genügt; eine eigene Zeile im
+    Status-Fenster wurde nicht gebaut.
+  - **Volle Lesung nur bei Wechsel:** Der Takt prüft mit 19 Bytes und liest
+    die Datei erst ganz, wenn BTP eine andere offen hat als die gebundene
+    und dazu noch keine Frage offen ist.
+  - **Prozess weiter nur am Namen erkannt:** Wer unter demselben
+    Windows-Benutzer ein Programm namens `btp.exe` starten kann, liest auch
+    die `config.json` samt badhub-Passwort — die stärkere Prüfung brächte
+    gegen ihn nichts. Still übernommen wird nur bei gleicher Kennung.
+  - **Stiller Wechsel ist sichtbar:** Übernimmt der Takt bei gleicher
+    Kennung einen anderen Pfad, zeigt ein Hinweis-Balken den neuen
+    Dateinamen, bis er weggeklickt wird (Security-Review zu PR 2: Eine in
+    BTP geöffnete Sicherungskopie desselben Turniers würde sonst unbemerkt
+    hochgeladen).
+  - **Antwort Ja prüft nach:** Vor dem Übernehmen wird die Datei noch
+    einmal gelesen; nennt sie inzwischen eine andere Kennung, wird nichts
+    übernommen.
+- **Aus dem Security-Review zu PR 1 (15.11.2026), Grundlage der Punkte oben:** Prozess nicht nur am
   Namen erkennen (Pfad der `btp.exe` oder Besitzer des BTP-Ports prüfen);
   `host`/`slave` aus der gespeicherten Config statt vom Frontend; die Datei
   nicht jede Minute ganz lesen; den Hänger-Deckel als sichtbaren Zustand
