@@ -133,7 +133,7 @@ Die endgültigen Beschriftungen legt die Umsetzung fest; sie werden im Handbuch 
 - Rücknahme: Snapshot wiederherstellen, `setup = 'playing'`, `serveSetupTeam` zurück,
   `teams_corrected` und die `serve_start` der Doppel-Abfrage (`folgeIds`) per Rücknahme-
   Ereignis (ADR 0038) zurücknehmen, senden wie beim Eingriff.
-- In der Ergebnis-Ansicht nimmt „Match wieder öffnen" zuerst die Korrektur zurück (Knopf
+- In der Ergebnis-Ansicht nimmt „Spiel wieder öffnen" (bis v0.9.422 „Match wieder öffnen") zuerst die Korrektur zurück (Knopf
   „Korrektur zurücknehmen").
 - Undo ist auch während der Doppel-Abfrage nach Eingriff 2 möglich.
 

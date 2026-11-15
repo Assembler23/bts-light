@@ -32,6 +32,16 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
     Mannschaft, die Sätze als Spalten, der Sieger oben (vorher „16:21 · 18:21"
     unter dem Siegernamen). „Ergebnis übermitteln" ist der große Knopf, „Match
     wieder öffnen" nur noch rot umrandet statt ein riesiger roter Block.
+  - **Ein Wort je Sache:** Am Tablet heißt es überall „Spiel" (nicht mehr mal
+    „Match"). „Korrektur" meint nur noch das ⇄ Seiten/Mannschaften-Korrigieren:
+    Aus „Korrektur — Match wieder öffnen" wurde „Spiel wieder öffnen", aus
+    „↩ Korrektur — letzter Punkt zurück" in der Pause derselbe Text wie am
+    Rückgängig-Knopf („↩ Punkt für Links zurück", nach einem Satz „↩ Letzten
+    Punkt zurück"), aus „Korrektur nur über die
+    Turnierleitung" „Änderung nur über die Turnierleitung".
+  - **Rot nur mit Bedeutung:** rechte Seite, Zerstörendes, überzogene Uhr,
+    Störung. „Spiel wieder öffnen" ist deshalb neutral umrandet; im Feldbild
+    des Setups folgt die Randfarbe der Seite.
   - **Setup mit Schrittzähler und Feldbild:** Über jeder Frage des
     Assistenten steht „Schritt 2 von 3". Aufschläger und Annehmer wählt man
     auf einem kleinen Feld – jede Mannschaft auf ihrer Hälfte, dazwischen das

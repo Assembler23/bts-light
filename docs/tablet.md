@@ -401,7 +401,7 @@ Aufstellung:
   zur Bestätigung ist die Zähltafel gesperrt. **Einzel** braucht keine Wahl
   und läuft mit getauschter Aufstellung automatisch weiter. Die Wahl
   übersteht einen Tablet-Reload (`serveSetupTeam` wird persistiert);
-  „Korrektur — letzter Punkt zurück" in der Satzpause hebt sie wieder auf.
+  „↩ Letzten Punkt zurück" in der Satzpause hebt sie wieder auf.
   **Schon in der Satzpause** (seit v0.9.351, Schiri-Feedback 08.11.2026):
   Das Pausen-Overlay zeigt im Doppel „**Aufschlag & Annahme jetzt
   festlegen**". Der Knopf öffnet dieselbe Wahl, während die Pause weiterläuft
@@ -672,8 +672,9 @@ Nach vielen einzelnen Erweiterungen wurden alle Ansichten im Demofeld bei
   Querformat auf `clamp(1.9rem, 8.5vmin, 4.4rem)` (hochkant gilt weiter die
   eigene Deckelung).
 - **Spielende.** Knöpfe als eine Spalte gleicher Breite (vorher wuchsen sie
-  über das allgemeine `button { flex: 1 }` zu hohen Blöcken). „Korrektur —
-  Match wieder öffnen" ist nur noch rot umrandet. Die Satzstände stehen als
+  über das allgemeine `button { flex: 1 }` zu hohen Blöcken). „Spiel wieder
+  öffnen" ist nur noch ein umrandeter Nebenknopf (seit Runde 2 neutral statt
+  rot, siehe „Ein Wort je Sache" unten). Die Satzstände stehen als
   Tabelle mit dem Sieger oben (`renderEndstand`/`siegerSeite`, siehe
   „Endstand-Tabelle" unten): Gespeichert sind sie nach Seiten, und nach dem
   letzten Satzwechsel stand der Verlierer links — unter dem Siegernamen las
@@ -834,6 +835,33 @@ Fünfter Teil (ebenfalls v0.9.423), siehe auch „Match-Setup" weiter oben.
   aus BTP. Die Seitenwahl (Schritt 1) bleibt bei zwei großen Kacheln: Dort
   steht ja noch niemand auf einer Seite.
 
+### Ein Wort je Sache, Rot nur mit Bedeutung
+
+Sechster Teil (ebenfalls v0.9.423).
+
+- **„Spiel", nicht „Match".** Alle Texte am Tablet sagen „Spiel" (vorher
+  gemischt: „Spiel beenden", aber „Match wieder öffnen", „wer gewinnt das
+  Match?"). Im Code bleibt `match` der Name der Sache.
+- **„Korrektur" heißt nur noch eines:** das ⇄ **Seiten / Mannschaften
+  korrigieren** samt „↩ Korrektur zurücknehmen". Vorher trugen drei
+  verschiedene Handlungen das Wort:
+
+  | bis v0.9.422 | jetzt |
+  |---|---|
+  | „Korrektur — Match wieder öffnen" (Spielende) | „Spiel wieder öffnen" |
+  | „↩ Korrektur — letzter Punkt zurück" (Pause) | derselbe Text wie am Rückgängig-Knopf der Fußleiste (`undoText`): in der Punktepause „↩ Punkt für Links zurück", in der Satzpause „↩ Letzten Punkt zurück" (die Seiten sind dann schon getauscht, ein Seitenwort führte in die Irre) |
+  | „Korrektur nur über die Turnierleitung" (Ergebnis fest) | „Änderung nur über die Turnierleitung" (`src/io/abschlussAnsicht.mjs`) |
+
+- **Rot** steht nur noch für vier Dinge: die **rechte Seite** (`--team-b`:
+  +1-Fläche, Stand, Marke, Rand im Feldbild), **Zerstörendes** („Spiel
+  abbrechen · Aufgabe", „Court übernehmen", Diagnose löschen, rote Karte),
+  eine **überzogene Uhr** (Pause, Einspielzeit, Aufruf) und eine **Störung**
+  (Verbindung weg, Akku ≤ 10 %). „Spiel wieder öffnen" zerstört nichts und
+  ist deshalb neutral umrandet.
+- Im Feldbild des Setups folgt die Randfarbe der **Seite**, nicht der
+  Mannschaft — nach einem Seitenwechsel stünde sonst Rot neben der blauen
+  +1-Fläche.
+
 ## Akkustand am Tablet (seit v0.9.293)
 
 Im Kiosk fehlt die Android-Statusleiste — den Akkustand eines Tablets
@@ -993,8 +1021,8 @@ Ergebnis soll trotzdem übermittelt werden.
 - „Übernehmen" füllt die Sätze, markiert das Match als beendet und öffnet
   das **normale Match-Ende-Overlay** (Sieger + „Ergebnis übermitteln") —
   ab da läuft alles über den bewährten, gegen Netzausfälle abgesicherten
-  Sende-/Retry-Weg wie beim Live-Zählen. „Korrektur — Match wieder
-  öffnen" macht die Eingabe rückgängig.
+  Sende-/Retry-Weg wie beim Live-Zählen. „Spiel wieder öffnen" macht die Eingabe
+  rückgängig.
 
 Für Kampflos/Aufgabe ist weiterhin der Dialog **„Spiel beenden"** da.
 
@@ -1239,9 +1267,10 @@ Server verwirft zusätzlich einen Score für ein bereits finalisiertes Match
 
 Dasselbe Flag kommt auch nach dem **eigenen** Ergebnis zurück, sobald BTP es
 angenommen hat. Seit v0.9.291 sperrt die Beendet-Ansicht dann **beide**
-Knöpfe — „Ergebnis übermitteln" und „Korrektur — Match wieder öffnen" — und
-sagt „✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung."
-Vorher blieb die Korrektur offen, und das Gate schluckte jeden weiteren
+Knöpfe — „Ergebnis übermitteln" und „Spiel wieder öffnen" (bis v0.9.422
+„Korrektur — Match wieder öffnen") — und
+sagt „✓ Ergebnis steht in BTP fest — Änderung nur über die Turnierleitung."
+Vorher blieb das Wieder-Öffnen offen, und das Gate schluckte jeden weiteren
 Sendeversuch ohne ein Wort (Turnier 12./13.09.2026, Feld 11: 23-mal
 `submit_suppressed_finalized` in 90 s). Die Regel dazu ist
 `abschlussLage` (`src/io/abschlussAnsicht.mjs`, Test

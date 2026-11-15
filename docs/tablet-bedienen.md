@@ -257,8 +257,9 @@ Pause nennt die jeweils geltende Zahl.
 Während der Pause ist die Zähltafel **gesperrt** — es lässt sich nicht
 versehentlich weiterzählen.
 
-**Aus Versehen ausgelöst?** In der Pause gibt es **„↩ Korrektur — letzter Punkt
-zurück"**. Das bricht die Pause ab und nimmt den Punkt zurück, der sie
+**Aus Versehen ausgelöst?** In der Pause steht derselbe Rückgängig-Knopf wie
+unter dem Feld – **„↩ Punkt für Links zurück"**, nach einem Satz **„↩ Letzten
+Punkt zurück"**. Das bricht die Pause ab und nimmt den Punkt zurück, der sie
 ausgelöst hat — der Fall „Ball wird wiederholt".
 
 **Aufschlag schon in der Satzpause festlegen (Doppel).** Zwischen zwei Sätzen
@@ -382,8 +383,11 @@ Nach dem letzten Punkt zeigt das Tablet das Spielende: den Sieger und darunter
 eine kleine **Tabelle** – eine Zeile je Mannschaft, die Sätze als Spalten, der
 Sieger oben. Gewonnene Sätze sind hell, verlorene blasser (ein durch Aufgabe
 abgebrochener Satz hat keinen Gewinner und bleibt blass). Darunter steht groß
-**„Ergebnis übermitteln"**; „Korrektur — Match wieder öffnen" ist bewusst nur
-ein rot umrandeter Knopf, damit er nicht aus Versehen getroffen wird.
+**„Ergebnis übermitteln"**; **„Spiel wieder öffnen"** ist bewusst nur ein
+schmal umrandeter Knopf, damit er nicht aus Versehen getroffen wird. Er nimmt
+den letzten Schritt zurück – meist den letzten Punkt –, und das Spiel läuft
+weiter.
+<!-- pruef: "Spiel wieder öffnen" in src-tauri/assets/tablet.html -->
 
 > **Das Ergebnis geht nicht von allein weg.** Du musst
 > **„Ergebnis übermitteln"** tippen. Erst danach wandert es zur Turnierleitung
@@ -433,9 +437,9 @@ das Ergebnis angenommen hat.
 <!-- pruef: "Jetzt senden" in src-tauri/assets/tablet.html -->
 
 > **Steht das Ergebnis in BTP fest, ist am Tablet Schluss** (seit v0.9.291).
-> Die Beendet-Ansicht sperrt dann „Korrektur — Match wieder öffnen" **und** den
-> Sende-Knopf und sagt: *„Ergebnis steht in BTP fest — Korrektur nur über die
-> Turnierleitung."* Vorher ließ sich die Korrektur drücken, und das erneute
+> Die Beendet-Ansicht sperrt dann „Spiel wieder öffnen" **und** den
+> Sende-Knopf und sagt: *„Ergebnis steht in BTP fest — Änderung nur über die
+> Turnierleitung."* Vorher ließ sich das Spiel wieder öffnen, und das erneute
 > Übermitteln wurde danach stillschweigend verworfen — am 12.09.2026 auf Feld 11
 > 23-mal, ohne ein Wort auf dem Schirm.
 <!-- pruef: "Ergebnis steht in BTP fest" in src-tauri/assets/tablet.html -->

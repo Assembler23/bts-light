@@ -33,13 +33,13 @@ ok(
   "finalisiert nach eigenem Senden",
   lage({ finalized: true, submittedOk: true }),
   { sendenGesperrt: true, korrekturGesperrt: true,
-    status: "✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung." },
+    status: "✓ Ergebnis steht in BTP fest — Änderung nur über die Turnierleitung." },
 );
 ok(
   "finalisiert von Hand (Tablet hatte nie gesendet)",
   lage({ finalized: true }),
   { sendenGesperrt: true, korrekturGesperrt: true,
-    status: "✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung." },
+    status: "✓ Ergebnis steht in BTP fest — Änderung nur über die Turnierleitung." },
 );
 ok(
   "finalisiert schlägt eine ältere Ablehnung",
@@ -49,7 +49,7 @@ ok(
 ok(
   "finalisiert schlägt einen laufenden Versuch",
   lage({ finalized: true, pendingResult: true }).status,
-  "✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung.",
+  "✓ Ergebnis steht in BTP fest — Änderung nur über die Turnierleitung.",
 );
 
 // ── Alles andere wie bisher: Korrektur bleibt möglich ────────────────────

@@ -458,8 +458,8 @@
     button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
     button.primary:disabled { background: #a7d3b5; color: #f0fdf4; border-color: #a7d3b5; }
     button.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
-    /* Gesperrte Korrektur (Ergebnis in BTP fest): blass statt halb-rot, damit
-       der Knopf nicht mehr nach „drück mich" aussieht. */
+    /* Gesperrter roter Knopf: blass statt halb-rot, damit er nicht mehr
+       nach „drück mich" aussieht. */
     button.danger:disabled { background: #e8b4b4; color: #fff5f5; border-color: #e8b4b4; }
     /* Nebenknöpfe (z. B. „📈 Verlauf" in der Fußleiste): bewusst dezent
        (gedämpft, klein, nicht raumgreifend) – die Punktzählung bleibt die
@@ -571,6 +571,9 @@
       text-transform: uppercase; color: #dcfce7; text-align: center;
     }
     .modal .setup-feld .opt { flex: 0 0 auto; min-width: 0; max-width: none; text-align: center; }
+    /* Ein langer Namensteil ohne Leerzeichen ragte sonst aus der schmalen
+       Hälfte (360-px-Handy). */
+    .modal .setup-feld .opt, .modal .setup-feld .fest { overflow-wrap: anywhere; }
     /* Randfarbe nach der SEITE, nicht nach der Mannschaft: Blau ist überall
        links (bzw. vorne), Rot rechts — wie die +1-Flächen und der Stand.
        Nach einem Seitenwechsel stünde sonst Rot auf der blauen Seite. */
@@ -783,8 +786,8 @@
     .match-finished-overlay.visible { display: flex; }
     /* Wie im Pausen-Overlay: EINE Spalte gleich breiter Knöpfe. Vorher griff
        das allgemeine `button { flex: 1 }` — „Ergebnis übermitteln" und
-       „Match wieder öffnen" wuchsen zu hohen Blöcken, und der rote
-       Korrektur-Knopf war das Auffälligste auf dem Schirm
+       „Spiel wieder öffnen" wuchsen zu hohen Blöcken, und der damals rote
+       Wieder-öffnen-Knopf war das Auffälligste auf dem Schirm
        (Usability-Durchgang 15.11.2026). Bei Überlauf scrollt die Ansicht. */
     .match-finished-overlay { overflow-y: auto; justify-content: flex-start; }
     .match-finished-overlay > :first-child { margin-top: auto; }
@@ -794,11 +797,12 @@
       width: min(26rem, 100%); padding: .85rem 1rem; font-size: 1.05rem; font-weight: 700;
     }
     #finished-overlay > button.primary { padding: 1.3rem 1rem; font-size: 1.5rem; font-weight: 800; margin-bottom: .5rem; }
-    /* „Wieder öffnen" bleibt rot (gefährlich), aber als Rahmen — die
-       Haupthandlung ist das Übermitteln. */
-    #finished-overlay > #reopen-btn { background: transparent; color: #fca5a5; border: 2px solid #dc2626; }
-    #finished-overlay > #reopen-btn:active:not(:disabled) { background: rgba(220, 38, 38, .2); }
-    #finished-overlay > #reopen-btn:disabled { opacity: .4; background: transparent; color: #fca5a5; }
+    /* „Spiel wieder öffnen" zerstört nichts (der Stand bleibt, nur der
+       letzte Schritt geht zurück) → neutraler Rahmen. Rot heißt auf dieser
+       Seite nur noch: rechte Seite, Zerstörendes, überzogene Uhr, Störung. */
+    #finished-overlay > #reopen-btn { background: transparent; color: #cbd5e1; border: 2px solid #64748b; }
+    #finished-overlay > #reopen-btn:active:not(:disabled) { background: rgba(148, 163, 184, .2); }
+    #finished-overlay > #reopen-btn:disabled { opacity: .4; background: transparent; color: #cbd5e1; }
     .winner-banner { font-size: 2rem; font-weight: 800; color: #fbbf24; }
     /* Endstand als kleine Tabelle: eine Zeile je Mannschaft, die Sätze als
        Spalten. Die Zeile „21:16 · 18:21 · 21:15" musste man im Kopf den
@@ -1421,7 +1425,7 @@
   <!-- Schiri-Modus: Spielende-Ansage zum Vorlesen, auch hier lesbar. -->
   <div class="break-umpire" id="finished-umpire" hidden></div>
   <div class="retire-pick" id="retire-pick" style="display:none">
-    <div class="retire-pick-label" id="retire-pick-label">Aufgabe — wer gewinnt das Match?</div>
+    <div class="retire-pick-label" id="retire-pick-label">Aufgabe — wer gewinnt das Spiel?</div>
     <div class="retire-options">
       <button class="retire-btn team-a" id="retire-winner-a"></button>
       <button class="retire-btn team-b" id="retire-winner-b"></button>
@@ -1435,7 +1439,7 @@
   <button class="primary" id="demo-neu-fertig" hidden>Neues Übungsspiel</button>
   <!-- Die Ansicht verdeckt die Kopfzeile samt „⋯ Mehr" — deshalb hier ein eigener Knopf. -->
   <button id="finished-korrektur">⇄ Seiten / Mannschaften korrigieren</button>
-  <button class="danger" id="reopen-btn">Korrektur — Match wieder öffnen</button>
+  <button id="reopen-btn">Spiel wieder öffnen</button>
 </div>
 
 <!-- Pausen-Overlay: offizielle BWF-Intervalle mit Countdown -->
@@ -1457,7 +1461,7 @@
     Aufschlag &amp; Annahme jetzt festlegen
   </button>
   <button id="break-correct" style="display:none">
-    ↩ Korrektur — letzter Punkt zurück
+    ↩ Letzten Punkt zurück
   </button>
   <!-- Gerade in der Satzpause fällt auf, wenn die Spieler die Seiten nicht
        gewechselt haben — der Overlay verdeckt aber die Kopfzeile samt „⋯ Mehr". -->
@@ -3375,8 +3379,9 @@ function renderBreak() {
   // ab und nimmt den auslösenden Punkt zurück (z. B. Ball wiederholen).
   els.breakCorrect.style.display =
     (STATE.pause.kind !== 'injury' && STATE.history.length > 0) ? '' : 'none';
-  els.breakCorrect.textContent = oberKorrektur()
-    ? '↩ Korrektur zurücknehmen' : '↩ Korrektur — letzter Punkt zurück';
+  // Derselbe Text wie am Rückgängig-Knopf der Fußleiste — eine Handlung,
+  // ein Wort. „Korrektur" heißt nur noch das ⇄ Seiten/Mannschaften-Korrigieren.
+  els.breakCorrect.textContent = undoText(oberKorrektur(), false);
   els.breakKorrektur.style.display = korrekturMoeglich() ? '' : 'none';
   // Schiri-Modus: den Ansagetext (z. B. „Satz. Der erste Satz wurde gewonnen
   // von … mit 21:12.") auch in der Pausen-Überlagerung zeigen – sonst
@@ -5962,13 +5967,13 @@ function validateCompletedSets(sets, target, requireDecided) {
     const priorL = sets.slice(0, -1).filter(s => s.left > s.right).length;
     const priorR = sets.slice(0, -1).filter(s => s.right > s.left).length;
     if (priorL >= need || priorR >= need) {
-      enterScoreError('Zu viele Sätze — das Match war schon vorher entschieden.');
+      enterScoreError('Zu viele Sätze — das Spiel war schon vorher entschieden.');
       return null;
     }
   } else if (l >= need || r >= need) {
     // Weiterzählen: die abgeschlossenen Sätze dürfen das Match noch NICHT
     // entschieden haben (sonst ist es vorbei → Endstand-Modus nutzen).
-    enterScoreError('Das Match ist mit diesen Sätzen schon entschieden — Haken „Spiel läuft noch" entfernen.');
+    enterScoreError('Das Spiel ist mit diesen Sätzen schon entschieden — Haken „Spiel läuft noch" entfernen.');
     return null;
   }
   return sets;
@@ -6234,13 +6239,13 @@ function abschlussLage(z) {
   if (s.finalized) {
     return {
       sendenGesperrt: true, korrekturGesperrt: true,
-      status: '✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung.',
+      status: '✓ Ergebnis steht in BTP fest — Änderung nur über die Turnierleitung.',
     };
   }
   if (s.ueberholt) {
     return {
       sendenGesperrt: true, korrekturGesperrt: true,
-      status: '✓ In BTP steht für dieses Spiel schon ein Ergebnis — Korrektur nur über die Turnierleitung.',
+      status: '✓ In BTP steht für dieses Spiel schon ein Ergebnis — Änderung nur über die Turnierleitung.',
     };
   }
   if (s.submittedOk) {
@@ -6563,7 +6568,7 @@ function renderSetupModal() {
     } else {
       setSetupText(
         'Wer schlägt zuerst auf?', 'Who serves first?',
-        'Tippe auf den Spieler, der das Match eröffnet.',
+        'Tippe auf den Spieler, der das Spiel eröffnet.',
         'Tap the player who starts the match.');
     }
     // Feldbild: Wählbar ist, wer aufschlagen darf; die übrigen stehen zur
@@ -6591,7 +6596,11 @@ function renderSetupModal() {
     const aufschlag = STATE.pendingServer;
     baueSetupFeld((spieler, teamKey) => {
       if (teamKey !== aufschlag.fromTeamKey) return { wahl: () => chooseReceiver(spieler, teamKey) };
-      return spieler.id === aufschlag.player.id ? { notiz: 'schlägt auf' } : {};
+      // Objektgleichheit zuerst: Ohne `id` (sollte nicht vorkommen) wären
+      // sonst beide Partner markiert.
+      const er = spieler === aufschlag.player
+        || (spieler.id != null && spieler.id === aufschlag.player.id);
+      return er ? { notiz: 'schlägt auf' } : {};
     });
   }
 }
@@ -6888,7 +6897,7 @@ function render() {
       els.retirePick.style.display = STATE.retiredWinner ? 'none' : '';
       els.retirePickLabel.textContent = STATE.walkover
         ? 'Kampflos — wer gewinnt? · Walkover — who wins?'
-        : 'Aufgabe — wer gewinnt das Match? · Retirement — who wins?';
+        : 'Aufgabe — wer gewinnt das Spiel? · Retirement — who wins?';
       els.retireWinnerA.textContent = teamName('a');
       els.retireWinnerB.textContent = teamName('b');
     } else {
@@ -6898,7 +6907,7 @@ function render() {
         const winnerTeamKey = STATE.teamOnSide.a === winnerSide ? 'a' : 'b';
         teamLabel = teamName(winnerTeamKey);
       }
-      els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : 'Match beendet';
+      els.winnerBanner.textContent = winnerSide ? `🏆 ${teamLabel}` : 'Spiel beendet';
       els.retirePick.style.display = 'none';
     }
     renderEndstand();
@@ -6926,7 +6935,7 @@ function render() {
     els.submitBtn.disabled = lage.sendenGesperrt;
     els.reopenBtn.disabled = lage.korrekturGesperrt;
     els.reopenBtn.textContent = korrekturOben
-      ? '↩ Korrektur zurücknehmen' : 'Korrektur — Match wieder öffnen';
+      ? '↩ Korrektur zurücknehmen' : 'Spiel wieder öffnen';
     els.submitStatus.textContent = lage.status;
     // Demofeld: Die lokale `/result`-Antwort ist immer „angenommen" — der
     // Text sagt ehrlich, dass nichts angekommen ist.

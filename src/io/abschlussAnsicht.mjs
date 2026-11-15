@@ -4,7 +4,7 @@
  *  Das Ergebnis war gesendet, BTP hatte es angenommen und das Spiel
  *  finalisiert, das Tablet war zurückgetreten (ADR 0017, Regel b: Ein in BTP
  *  festes Ergebnis wird vom Tablet nie mehr überbügelt). Trotzdem stand der
- *  Knopf „Korrektur — Match wieder öffnen" weiter offen. Der Bediener drückte
+ *  Knopf „Spiel wieder öffnen" (damals „Korrektur — Match wieder öffnen") weiter offen. Der Bediener drückte
  *  ihn, zählte um, und drückte dann 23-mal „Ergebnis übermitteln" — jedes Mal
  *  schluckte das Finalisiert-Gate den Versuch **still**. Auf dem Schirm stand
  *  nichts; im Log stand `submit_suppressed_finalized`, 23-mal.
@@ -47,12 +47,12 @@ export function sendeauftragErledigt(pendingResult, matchId, finalized) {
 
 /** Text, wenn das Ergebnis in BTP fest ist. */
 export const FEST_IN_BTP =
-  "✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung.";
+  "✓ Ergebnis steht in BTP fest — Änderung nur über die Turnierleitung.";
 
 /** Text, wenn der Turnier-PC das Ergebnis als überholt gemeldet hat: In BTP
  *  stand für dieses Spiel schon eines (Spec tablet-stand-robust, Regel C). */
 export const STAND_SCHON_IN_BTP =
-  "✓ In BTP steht für dieses Spiel schon ein Ergebnis — Korrektur nur über die Turnierleitung.";
+  "✓ In BTP steht für dieses Spiel schon ein Ergebnis — Änderung nur über die Turnierleitung.";
 
 /**
  * Sperren und Statuszeile der Beendet-Ansicht.
