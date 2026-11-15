@@ -355,6 +355,16 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Verletzungsunterbrechung: Uhr am Tablet + Eintrag im Spielbericht** — Spec:
+  [features/verletzungsunterbrechung.md](features/verletzungsunterbrechung.md)
+  (freigegeben 14.11.2026, ADR 0095; **umgesetzt in v0.9.417–420**: Zettel-Renderer, Richtzeit,
+  Undo-Neuverankerung + Server-Zeit, Behandlungsuhr). ✚ startet eine hochzählende Uhr (rot ab
+  turnierweiter Richtzeit, Standard 5 min, auch im TL-Web), ✚ geht auch aus der 11er-/Satzpause,
+  und der Schiedsrichterzettel bekommt Beginn, Ende und Dauer automatisch — ohne Person, mit Marke
+  „B" im Raster. Offen: Feldtest (LAN und Cloud, alter Turnier-PC hinter neuer Cloud-Seite) und
+  der Aufräum-PR, der die Menü-Handeinträge „Behandlung beginnt/endet" löscht, sobald kein
+  Turnier-PC unter v0.9.418 mehr im Einsatz ist.
+
 - **Ballzähler am Tablet** — Spec:
   [features/tablet-ballzaehler.md](features/tablet-ballzaehler.md)
   (freigegeben 13.11.2026, ADR 0093; BTP-Messung mit
@@ -620,13 +630,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Verletzungsunterbrechung: Uhr am Tablet + Eintrag im Spielbericht** — Spec:
-  [features/verletzungsunterbrechung.md](features/verletzungsunterbrechung.md)
-  (freigegeben 14.11.2026, ADR 0095). ✚ startet eine hochzählende Uhr (rot ab turnierweiter
-  Richtzeit, Standard 5 min, auch im TL-Web), ✚ geht auch aus der 11er-/Satzpause, und der
-  Schiedsrichterzettel bekommt Beginn, Ende und Dauer automatisch in jedem Modus — ohne Person,
-  mit Marke „B" im Raster. Vier PRs (Zettel-Renderer zuerst im Release), Relay-Deploy über die
-  Seiten.
 - **Stream-Werbung (zweite OBS-Ebene)** — Spec:
   [features/stream-werbung.md](features/stream-werbung.md)
   (freigegeben 12.11.2026, ADR 0092). Transparente Sponsoren-Ebene für OBS unter
