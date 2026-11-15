@@ -388,11 +388,11 @@ for (const name of ["tablet.html", "anzeige.html", "lobby.html"]) {
 
 // ── Satzpunkt-Ansage (Schiri-Modus) ──
 // Eine abweichende Kopie sagte „Satzpunkt" bei jedem Ballwechsel an (oder
-// verschwiege einen neu entstandenen nach dem Gleichstand in der
-// Verlängerung) — das fällt erst dem Schiedsrichter am Feld auf.
+// verschwiege den an der Obergrenze) — das fällt erst dem Schiedsrichter
+// am Feld auf.
 {
   const text = seite("tablet.html");
-  const namen = ["satzSieger", "satzpunktSeiten", "satzpunktTeams", "satzpunktAnsagen"];
+  const namen = ["satzSieger", "satzpunktSeiten", "punkteTeams", "satzpunktAnsagen"];
   const quellen = namen.map((n) => funktion(text, n));
   ok("tablet.html: Satzpunkt-Kopien vorhanden", quellen.every(Boolean), true);
   if (quellen.every(Boolean)) {
@@ -407,11 +407,16 @@ for (const name of ["tablet.html", "anzeige.html", "lobby.html"]) {
     const ALLE = FORMATE.flatMap(([z, c]) => STAENDE.map((s) => [s, z, c]));
     gleich("satzSieger", ALLE, (m, [s, z, c]) => m.satzSieger(s, z, c));
     gleich("satzpunktSeiten", ALLE, (m, [s, z, c]) => m.satzpunktSeiten(s, z, c));
-    gleich("satzpunktTeams", ALLE.flatMap((x) => SEITEN.map((t) => [...x, t])),
-      (m, [s, z, c, t]) => m.satzpunktTeams(s, z, c, t));
-    const T = [false, true].flatMap((a) => [false, true].map((b) => ({ a, b })));
-    gleich("satzpunktAnsagen", T.flatMap((j) => [null, ...T].map((v) => [j, v])),
-      (m, [j, v]) => m.satzpunktAnsagen(j, v));
+    gleich("punkteTeams", STAENDE.flatMap((x) => SEITEN.map((t) => [x, t])),
+      (m, [s, t]) => m.punkteTeams(s, t));
+    // Alle Stände samt beider möglicher Vorstände (und „unbekannt").
+    const FOLGEN = FORMATE.flatMap(([z, c]) => STAENDE.flatMap((s) => [
+      [s, null, z, c],
+      [s, { left: s.left - 1, right: s.right }, z, c],
+      [s, { left: s.left, right: s.right - 1 }, z, c],
+    ]));
+    const ab = (s) => s && { a: s.left, b: s.right };
+    gleich("satzpunktAnsagen", FOLGEN, (m, [j, v, z, c]) => m.satzpunktAnsagen(ab(j), ab(v), z, c));
   }
 }
 
