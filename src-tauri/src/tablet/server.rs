@@ -4314,12 +4314,28 @@ pub(crate) fn match_brief(
         // Dieser Host deutet `teams_corrected` (ADR 0067) → das Tablet darf
         // „Mannschaften tauschen" anbieten.
         teams_correction: true,
-        // Beide setzt der Aufrufer aus der Config.
+        // Diese drei setzt der Aufrufer aus der Config
+        // ([`brief_aus_config`]) — ohne ihn meldet der Brief keine Fähigkeit.
         feld_check: false,
         shuttle_counter: false,
+        injury_guide_secs: 0,
         seed_a: m.team1_seed.clone(),
         seed_b: m.team2_seed.clone(),
     }
+}
+
+/// Die Config-abhängigen Felder eines Briefs setzen — **eine** Stelle für den
+/// LAN-Weg ([`push_match`]) und den Cloud-Weg (`relay_client::push_court`),
+/// damit beide dem Tablet dasselbe anbieten (R3).
+///
+/// Die Richtzeit ist zugleich die Fähigkeitsmeldung „Host kennt die
+/// Behandlungs-Darstellung" (ADR 0095) und deshalb immer > 0. Sie gehört
+/// bewusst **nicht** zum Cloud-Push-Schlüssel: Eine Änderung im Setup wirkt
+/// ab der nächsten Zuweisung, statt ein laufendes Spiel neu zuzuweisen.
+pub(crate) fn brief_aus_config(brief: &mut MatchBrief, cfg: &crate::config::AppConfig) {
+    brief.feld_check = cfg.meetingpoint.enabled && cfg.meetingpoint.field_check_enabled;
+    brief.shuttle_counter = cfg.shuttle_counter;
+    brief.injury_guide_secs = cfg.richtzeit_s();
 }
 
 async fn ws_upgrade(ws: WebSocketUpgrade, State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
@@ -4912,9 +4928,7 @@ async fn push_match(
                         finalized,
                         ctx.tablet.match_officials(m),
                     );
-                    brief.feld_check =
-                        cfg.meetingpoint.enabled && cfg.meetingpoint.field_check_enabled;
-                    brief.shuttle_counter = cfg.shuttle_counter;
+                    brief_aus_config(&mut brief, &cfg);
                     brief
                 },
             }
@@ -5673,6 +5687,44 @@ mod tests {
             (Vec::new(), Vec::new()),
         );
         assert!(!brief.shuttle_counter);
+    }
+
+    /// Ohne den Aufrufer meldet der Brief keine Behandlungs-Fähigkeit —
+    /// sonst könnte ein Weg, der [`brief_aus_config`] vergisst, sie still
+    /// behaupten.
+    #[test]
+    fn match_brief_ohne_aufrufer_meldet_keine_faehigkeit() {
+        let brief = match_brief(
+            &match_on_court(),
+            Vec::new(),
+            false,
+            &crate::config::DisplayConfig::default(),
+            false,
+            (Vec::new(), Vec::new()),
+        );
+        assert_eq!(brief.injury_guide_secs, 0);
+    }
+
+    #[test]
+    fn match_brief_traegt_richtzeit_aus_config() {
+        let mut brief = match_brief(
+            &match_on_court(),
+            Vec::new(),
+            false,
+            &crate::config::DisplayConfig::default(),
+            false,
+            (Vec::new(), Vec::new()),
+        );
+        let mut cfg = crate::config::AppConfig::default();
+        brief_aus_config(&mut brief, &cfg);
+        assert_eq!(brief.injury_guide_secs, 300, "Standard");
+        cfg.injury_guide_seconds = crate::config::RichtzeitS(600);
+        brief_aus_config(&mut brief, &cfg);
+        assert_eq!(brief.injury_guide_secs, 600);
+        // Eine verstellte Config erreicht das Tablet nur geklemmt.
+        cfg.injury_guide_seconds = crate::config::RichtzeitS(0);
+        brief_aus_config(&mut brief, &cfg);
+        assert_eq!(brief.injury_guide_secs, 60);
     }
 
     // ─────────────── Turnierleitungs-Ergebnis (build_manual_result_update) ───────────────

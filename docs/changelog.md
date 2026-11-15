@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.418
+
+- **Richtzeit für die Behandlungspause.** Neuer Abschnitt
+  **„Behandlungspause"** in den Einstellungen: Nach wie vielen Minuten eine
+  Behandlung als zu lang gilt (Standard 5, einstellbar 1–30). In der
+  Turnierleitungssicht wird das Badge „Behandlung seit …" ab dieser Zeit rot
+  („Richtzeit überschritten"). Die Richtzeit ist eine Turnier-Vorgabe, keine
+  Regel — die Pause endet weiter nur am Tablet. Die Uhr am Tablet folgt mit
+  einer der nächsten Versionen; die Tablets übernehmen die Einstellung mit der
+  nächsten Spielzuweisung.
+
 ## v0.9.417
 
 - **Schiedsrichterzettel: Behandlungen mit Dauer.** Eine

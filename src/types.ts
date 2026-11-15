@@ -825,6 +825,10 @@ export interface AppConfig {
   /** „Bälle am Tablet zählen" (Spec tablet-ballzaehler): Zähler am
    *  Zähl-Tablet, Zahl mit dem Ergebnis nach BTP. Standard aus. */
   shuttle_counter?: boolean;
+  /** Richtzeit der Behandlungspause in **Sekunden** (Spec
+   *  verletzungsunterbrechung): danach wird die Uhr am Tablet rot und zählt
+   *  weiter. Standard 300, der Rust-Kern klemmt auf 60–1800. */
+  injury_guide_seconds?: number;
 }
 
 /** Turnierweite Anzeige-Schalter für Spielernamen (Rust: config::DisplayConfig).

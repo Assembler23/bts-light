@@ -8763,6 +8763,7 @@ mod tests {
             teams_correction: true,
             feld_check: false,
             shuttle_counter: false,
+            injury_guide_secs: 0,
             event_label: "Herreneinzel A Viertelfinale".into(),
             best_of_sets: 3,
             target_score: 21,

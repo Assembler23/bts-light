@@ -1354,9 +1354,7 @@ fn push_court(
                         finalized,
                         ctx.tablet.match_officials(&m),
                     );
-                    brief.feld_check =
-                        cfg.meetingpoint.enabled && cfg.meetingpoint.field_check_enabled;
-                    brief.shuttle_counter = cfg.shuttle_counter;
+                    crate::tablet::server::brief_aus_config(&mut brief, &cfg);
                     brief
                 },
                 // Autoritativer 1.-Aufruf-Zeitstempel vom Host (gleiche Quelle
@@ -2428,6 +2426,74 @@ mod tests {
             !score_fp.contains_key(&101),
             "auch die Aufhebung verwirft den Spiegel-Fingerabdruck"
         );
+    }
+
+    /// Kontext mit eigener Config-Datei — für Tests, die die Config ändern
+    /// (der gemeinsame Pfad aus [`ctx_with`] liefe parallel ineinander).
+    fn ctx_mit_config(
+        matches: Vec<BtpMatch>,
+        name: &str,
+        cfg: &AppConfig,
+    ) -> (ServerCtx, std::path::PathBuf) {
+        let tablet = Arc::new(TabletState::default());
+        tablet.set_snapshot(snapshot(matches));
+        let dir = std::env::temp_dir().join(format!("bts_rc_{name}_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pfad = dir.join("config.json");
+        std::fs::write(&pfad, serde_json::to_string(cfg).unwrap()).unwrap();
+        let ctx = ServerCtx::new(
+            tablet,
+            cfg.clone(),
+            reqwest::Client::new(),
+            dir.clone(),
+            pfad.clone(),
+            dir.join("assign.json"),
+            dir,
+            Arc::new(std::sync::Mutex::new(cfg.clone())),
+        );
+        (ctx, pfad)
+    }
+
+    /// Der Cloud-Weg trägt die Richtzeit genau wie der LAN-Weg (R3, ADR
+    /// 0095) — sonst hätte ein Cloud-Tablet nie die Behandlungs-Fähigkeit.
+    #[test]
+    fn cloud_brief_traegt_richtzeit() {
+        let cfg = AppConfig {
+            injury_guide_seconds: crate::config::RichtzeitS(420),
+            ..AppConfig::default()
+        };
+        let (ctx, _pfad) = ctx_mit_config(vec![match_on_court(42, 101)], "richtzeit", &cfg);
+        let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
+        let mut last: HashMap<i64, Option<CourtPushKey>> = HashMap::new();
+        let mut score_fp: HashMap<i64, HostFrame> = HashMap::new();
+        push_court(&ctx, 101, &tx, &mut last, &mut score_fp);
+        let f = text_of(&rx.try_recv().expect("Zuweisung erwartet"));
+        let _ = std::fs::remove_dir_all(_pfad.parent().unwrap());
+        assert!(f.contains("\"injuryGuideSecs\":420"), "{f}");
+    }
+
+    /// Eine geänderte Richtzeit weist ein laufendes Spiel **nicht** neu zu:
+    /// Ein neues `MatchAssigned` mitten im Spiel löste am Tablet die
+    /// Stand-Wahl aus. Sie wirkt ab der nächsten Zuweisung.
+    #[test]
+    fn richtzeit_aendert_den_push_schluessel_nicht() {
+        let cfg = AppConfig::default();
+        let (ctx, pfad) = ctx_mit_config(vec![match_on_court(42, 101)], "schluessel", &cfg);
+        let (tx, mut rx) = mpsc::unbounded_channel::<WsMessage>();
+        let mut last: HashMap<i64, Option<CourtPushKey>> = HashMap::new();
+        let mut score_fp: HashMap<i64, HostFrame> = HashMap::new();
+        push_court(&ctx, 101, &tx, &mut last, &mut score_fp);
+        assert!(rx.try_recv().is_ok(), "erste Zuweisung");
+
+        let neu = AppConfig {
+            injury_guide_seconds: crate::config::RichtzeitS(1200),
+            ..AppConfig::default()
+        };
+        std::fs::write(&pfad, serde_json::to_string(&neu).unwrap()).unwrap();
+        assert_eq!(ctx.app_config().richtzeit_s(), 1200, "neue Config gelesen");
+        push_court(&ctx, 101, &tx, &mut last, &mut score_fp);
+        let _ = std::fs::remove_dir_all(pfad.parent().unwrap());
+        assert!(rx.try_recv().is_err(), "keine erneute Zuweisung");
     }
 
     /// Eine Neusetzung in BTP ändert die Match-ID nicht, muss ein schon
