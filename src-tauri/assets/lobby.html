@@ -17,6 +17,9 @@
   Anzeige-Hülle, ohne ein Feld zu belegen. War das Gerät zuletzt Meetingpoint
   (Merker der Hülle), bringt ein Knopf oben ohne PIN dorthin zurück; die
   Kiosk-App lädt nach jedem WLAN-Aussetzer diese Seite. Umgeleitet wird nie.
+
+  Demofeld (Spec tablet-demofeld): Kachel ganz unten, ohne PIN, führt auf
+  /court/demo — ein abgekapseltes Übungsspiel, das kein Feld belegt.
 -->
 <style>
   * { box-sizing: border-box; }
@@ -74,6 +77,11 @@
   #mp-bereich { margin-top: 1.4rem; }
   #mp-kachel { width: 100%; max-width: 22rem; border-color: #a78bfa; background: #1e1338; }
   #mp-kachel .state { color: #c4b5fd; }
+  /* Demofeld (Spec tablet-demofeld): Übungsspiel ohne PIN, belegt nichts. */
+  #demo-bereich { margin-top: 1.4rem; }
+  #demo-kachel { width: 100%; max-width: 22rem; border-color: #7c3aed; background: #1a1030; }
+  #demo-kachel .court { font-size: 1.3rem; }
+  #demo-kachel .state { color: #c4b5fd; }
   #pin-modal {
     position: fixed; inset: 0; background: rgba(2, 6, 23, .92); display: flex;
     flex-direction: column; align-items: center; justify-content: center; gap: 1rem; z-index: 10;
@@ -108,6 +116,13 @@
       <div class="court">Meetingpoint</div>
       <div class="sub">Anzeige für Spieler · belegt kein Feld</div>
       <div class="state">PIN — antippen</div>
+    </button>
+  </div>
+  <div id="demo-bereich">
+    <button type="button" class="tile" id="demo-kachel">
+      <div class="court">Demofeld</div>
+      <div class="sub">Übungsspiel mit Beispielnamen · belegt kein Feld, überträgt nichts</div>
+      <div class="state">Ausprobieren — antippen</div>
     </button>
   </div>
 </main>
@@ -315,6 +330,8 @@
   mpZurueck.addEventListener('click', zumMeetingpoint);
 
   function go(id) { markeLoeschen(); location.href = '/court/' + encodeURIComponent(id); }
+  // Demofeld: ohne PIN — es lässt sich dort nichts am Turnier verstellen.
+  document.getElementById('demo-kachel').addEventListener('click', function () { go('demo'); });
 
   function render(courts) {
     offline.classList.remove('show');

@@ -655,6 +655,8 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/next", get(|| async { Redirect::to("/info/preparation") }))
         .route("/h/{n}", get(hall_short))
         .route("/court/{id}", get(court_page))
+        // Statisches Segment hat Vorrang vor `{id}` (axum/matchit).
+        .route("/court/demo", get(demo_court_page))
         .route("/courts", get(courts_list))
         .route("/felder", get(lobby_page))
         .route("/anzeige", get(anzeige_page))
@@ -1037,6 +1039,17 @@ async fn court_page(
         // bewusst über das UNERSETZTE `TABLET_HTML`, sonst wäre er je Feld
         // verschieden und der Abgleich sinnlos (Spec `tablet-version-abgleich`).
         .replace("__SEITEN_MARKE__", seiten_marke());
+    ([(header::CACHE_CONTROL, "no-store")], Html(body))
+}
+
+/// Demofeld (`/court/demo`, Spec `tablet-demofeld`): die Tablet-Seite im
+/// abgekapselten Übungsmodus. Belegt kein Feld und berührt keinen Zustand
+/// des Servers — die Seite öffnet nicht einmal einen WebSocket.
+async fn demo_court_page() -> impl IntoResponse {
+    // PIN leer wie Relay und Brücke: Das Zahnrad öffnet im Demofeld ohne
+    // PIN, und die echte Bedien-PIN gehört nicht in eine Übungsseite.
+    tracing::info!("Demofeld ausgeliefert");
+    let body = relay_proto::demo_tablet_seite(TABLET_HTML, "", seiten_marke());
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
@@ -9303,6 +9316,28 @@ mod tests {
             let _ = axum::serve(listener, app).await;
         });
         (format!("http://{addr}"), ctx, dir)
+    }
+
+    /// Spec tablet-demofeld: `/court/demo` liefert den Übungsmodus, ein
+    /// echtes Feld weiterhin die normale Seite — die statische Route darf
+    /// `/court/{id}` nicht verdrängen und umgekehrt.
+    #[tokio::test]
+    async fn demofeld_route_liefert_uebungsmodus_und_laesst_echte_felder_normal() {
+        let (base, _ctx, _dir) = ansage_server().await;
+        let demo = reqwest::get(format!("{base}/court/demo")).await.unwrap();
+        assert_eq!(demo.status(), 200);
+        let demo = demo.text().await.unwrap();
+        assert!(demo.contains("const DEMO = '1' === '1';"));
+        assert!(demo.contains("Number('0')"));
+        assert!(!demo.contains("__TABLET_PIN__"));
+        let feld = reqwest::get(format!("{base}/court/5"))
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(feld.contains("const DEMO = '__DEMO__' === '1';"));
+        assert!(feld.contains("Number('5')"));
     }
 
     fn ansage_entwurf() -> crate::tablet::ansage::AnsageEntwurf {
