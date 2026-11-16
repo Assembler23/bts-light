@@ -37,6 +37,7 @@ const DATEIEN: &[&str] = &[
     "tablet/state.rs",
     "tablet/timeline.rs",
     "tablet/wish_court.rs",
+    "tausch.rs",
     "tts_verbrauch.rs",
     "update.rs",
 ];
