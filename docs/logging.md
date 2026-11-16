@@ -165,6 +165,42 @@ sich etwas tut — `TP-Datei-Automatik: gefunden (…), übernommen`,
 `… Rückfrage gestellt (…)`, `… Rückfrage beantwortet (Ja|Nein), Neustart: …`
 und als Warnung `… Abfrage hängt`. Der Minutentakt ohne Befund bleibt still.
 
+### Seiten-Paket beim Start (seit v0.9.432)
+
+Liegt im App-Datenverzeichnis unter `seiten/` ein nachgeladenes Seiten-Paket
+(Spec [`hotfix-ohne-neustart`](features/hotfix-ohne-neustart.md)), prüft
+bts-light es bei jedem Start vollständig neu. Die Zeilen nennen Folge und
+Grund, nie Inhalte:
+
+| Zeile | Bedeutung |
+|---|---|
+| `Seiten-Paket Folge N aktiv (Commit …)` | Das Paket hat alle Prüfungen bestanden; die Geräte-Seiten kommen aus ihm. |
+| `Seiten-Paket auf der Platte abgelehnt (…) – beiseitegelegt, es gilt der eingebaute Stand` | Signatur, Format, Seitenmenge, Platzhalter, Version oder Folge passten nicht. Die Datei liegt danach als `abgelehnt.paket` daneben. |
+| `Seiten-Paket unlesbar (…) – beiseitegelegt, …` | Die Datei hat nicht die erwartete Form oder ist zu groß. |
+| `Seiten-Paket ohne lesbaren Zustand – beiseitegelegt, …` | `zustand.json` fehlt oder ist kaputt; damit ist unbekannt, welche Folgen zurückgenommen wurden. |
+| `Seiten-Paket gerade nicht lesbar (…) – für diesen Lauf gilt der eingebaute Stand` | Das System hat das Lesen verweigert (etwa ein Virenscanner). Die Datei bleibt liegen und gilt beim nächsten Start wieder. |
+| `Seiten-Paket ist keine gewöhnliche Datei – …` | Unter dem Namen des Pakets liegt etwas anderes; es wird nicht geöffnet. |
+| `Seiten-Paket gehört zu einer anderen Version – verworfen, …` | Nach einem Update der App: Es gelten die Seiten der neuen Version. |
+| `Seiten-Pakete aus: …` | Der Prüfschlüssel oder das App-Datenverzeichnis fehlt; es gilt der eingebaute Stand. |
+
+Ohne Paket im Verzeichnis erscheint keine Zeile.
+
+### Seiten-Paket: Angebot, Übernahme, Rückweg (seit v0.9.433)
+
+| Zeile | Bedeutung |
+|---|---|
+| `Seiten-Paket Folge N geladen, wartet auf die Übernahme` | Im Hintergrund geladen und geprüft; das Banner bietet es an. Noch ist nichts gewechselt. |
+| `Seiten-Paket abgelehnt, nichts geändert: …` | Ein geladenes Paket bestand die Prüfung nicht. Kein Banner; der Grund steht auch unter **Wartung**. Dieselbe Folge wird danach nicht noch einmal geladen. |
+| `Seiten-Paket Folge N übernommen (vorher Folge M, Commit …)` | Klick auf „Jetzt übernehmen": Die Seiten sind gewechselt. |
+| `Seiten-Paket nicht übernommen: …` | Das Ablegen scheiterte (etwa Platte voll); der aktive Stand ist unverändert. |
+| `Seiten-Paket Folge N zurückgenommen und gesperrt, aktiv ist Folge M` | Klick auf „Zurück zum vorigen Stand". |
+| `Voriges Seiten-Paket abgelehnt (…) – zurück zum eingebauten Stand` | Beim Rückweg bestand das vorige Paket die Prüfung nicht mehr. |
+| `Voriges Seiten-Paket ließ sich nicht aktivieren (…) – zurück zum eingebauten Stand` | Beim Rückweg scheiterte das Umbenennen; es gelten die eingebauten Seiten. |
+| `Seiten-Rückweg gescheitert: …` | Schon die Sperre ließ sich nicht schreiben; nichts wurde geändert. |
+
+Ein Netzfehler beim Suchen oder Laden erzeugt bewusst **keine** Zeile —
+offline ist in der Halle der Normalfall.
+
 ## Automatischer Upload (Standard an, abwählbar)
 
 Im Setup steht **„Diagnose-Logs senden"**. Ist der Schalter an, lädt

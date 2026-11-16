@@ -294,7 +294,7 @@ LAN+Cloud voraus.
   wird — am Tablet oder hier — oder das Spiel das Feld verlässt. Einen Ton
   gibt es nicht.
 
-  **Ruf zurücknehmen** (seit v0.9.431): Hinter jedem rufenden Feld steht im
+  **Ruf zurücknehmen** (seit v0.9.435): Hinter jedem rufenden Feld steht im
   Band der Knopf **zurücknehmen**; derselbe Schritt steht als **Ruf
   zurücknehmen** im ⋯-Menü der Feld-Kachel. Nach einer Rückfrage verschwindet
   die Meldung auf allen Geräten der Turnierleitung und am Turnier-PC, und am
@@ -309,7 +309,7 @@ LAN+Cloud voraus.
   - **Das Tablet ist gerade ohne Verbindung:** Die Meldung ist bei der
     Turnierleitung sofort weg; das Megafon am Tablet geht aus, sobald es
     wieder verbunden ist.
-  - **Die Tablet-Seite ist älter als v0.9.431** (seit dem Update nicht neu
+  - **Die Tablet-Seite ist älter als v0.9.435** (seit dem Update nicht neu
     geladen): Sie versteht die Rücknahme nicht, das Megafon bleibt dort an.
     Bei der Turnierleitung bleibt die Meldung trotzdem weg — der nächste Ruf
     von diesem Feld kommt aber erst an, wenn am Tablet einmal „Meldung

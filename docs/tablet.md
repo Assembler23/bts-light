@@ -170,7 +170,8 @@ etwa ein Relay-Deploy mitten im Turnier — erreicht es nur über ein Neuladen,
 und das passiert von selbst nicht.
 
 Deshalb trägt jede ausgelieferte Seite einen **Fingerabdruck** (`seiten_marke`
-über den unersetzten `TABLET_HTML`, in `relay-proto`), und das ohnehin
+über das unersetzte `tablet.html`, in `relay-proto`; am Turnier-PC Teil des
+`Seitenstand` in `tablet/assets.rs`), und das ohnehin
 laufende Lebenszeichen (`pong`) nennt den, den der Server **jetzt** hat.
 Weichen beide ab, ist die geladene Seite alt.
 
@@ -992,7 +993,7 @@ Der Ruf nach der Turnierleitung steht seit v0.9.426 außerdem im
 sich nichts: Es ist derselbe `official_call`, der schon das Abzeichen „TL
 gerufen" an der Feld-Kachel speist.
 
-**Rücknahme durch die Turnierleitung (seit v0.9.431).** Die Wahrheit über den
+**Rücknahme durch die Turnierleitung (seit v0.9.435).** Die Wahrheit über den
 Ruf liegt am Tablet (`STATE.alertOfficial`, übersteht Neuladen und wird nach
 jedem Verbinden neu gemeldet) — eine Rücknahme im TL-Web muss deshalb bis
 dorthin durchgreifen, sonst käme der Ruf beim nächsten Neuverbinden wieder:

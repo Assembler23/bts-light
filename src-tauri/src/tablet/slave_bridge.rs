@@ -34,7 +34,7 @@ use axum::{Json, Router};
 
 use relay_proto::{html_escape, CourtBrief, StreamKind};
 
-use super::assets;
+use super::assets::{self, Seite};
 use super::carrier::{AnGeraet, Traeger};
 use super::server::TABLET_PORT;
 
@@ -230,7 +230,8 @@ async fn monitor(State(cfg): State<Arc<BridgeConfig>>, RawQuery(query): RawQuery
         // `__BASE__` wird serverseitig gesetzt (anders als bei `tablet.html`,
         // das seinen Präfix selbst ableitet) — mit UNSEREM Präfix, sonst
         // fragte die Anzeige Bilder und Zustände weiter bei badhub ab.
-        let body = assets::MONITOR_HTML
+        let body = assets::aktiv()
+            .seite(Seite::Monitor)
             .replace("__MODE__", "device")
             .replace("__BASE__", "/")
             .replace("__COURT_LABEL__", "");
@@ -282,7 +283,8 @@ async fn court_display(
         .find(|c| c.id == id)
         .map(|c| c.label)
         .unwrap_or_default();
-    let body = assets::MONITOR_HTML
+    let body = assets::aktiv()
+        .seite(Seite::Monitor)
         .replace("__MODE__", "fixed")
         .replace("__BASE__", "/")
         .replace("__COURT_LABEL__", &html_escape(&label));
@@ -312,22 +314,18 @@ async fn court(State(cfg): State<Arc<BridgeConfig>>, Path(id): Path<i64>) -> Res
         .find(|c| c.id == id)
         .map(|c| c.label)
         .unwrap_or_else(|| format!("Feld {id}"));
-    let body = assets::TABLET_HTML
-        .replace("__COURT_ID__", &id.to_string())
-        .replace("__COURT_LABEL__", &html_escape(&label))
-        // Der Cloud-Weg setzt die PIN leer; hier ebenso — die ferne Halle
-        // bedient dieselben Geräte wie zuvor.
-        .replace("__TABLET_PIN__", "")
-        // UNSERE Marke: Wir liefern die Seite aus, also stempeln wir auch
-        // den Pong (siehe Modul-Doku).
-        .replace("__SEITEN_MARKE__", assets::seiten_marke());
+    // Der Cloud-Weg setzt die PIN leer; hier ebenso — die ferne Halle
+    // bedient dieselben Geräte wie zuvor. UNSERE Marke: Wir liefern die
+    // Seite aus, also stempeln wir auch den Pong (siehe Modul-Doku). Seite
+    // und Marke kommen aus EINEM Schnappschuss (ADR 0099).
+    let body = assets::aktiv().tablet_seite(id, &html_escape(&label), "");
     ([(header::CACHE_CONTROL, "no-store")], Html(body)).into_response()
 }
 
 /// `/court/demo` — Demofeld (Spec `tablet-demofeld`). Immer hier
 /// ausgeliefert, auch ohne Träger: Die Seite braucht kein Netz.
 async fn demo_court() -> impl IntoResponse {
-    let body = relay_proto::demo_tablet_seite(assets::TABLET_HTML, "", assets::seiten_marke());
+    let body = assets::aktiv().demo_seite();
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
@@ -382,7 +380,7 @@ async fn monitor_ws(
 fn pong_auf_ping(roh: &str) -> Option<String> {
     match serde_json::from_str::<relay_proto::TabletMsg>(roh) {
         Ok(relay_proto::TabletMsg::Ping) => serde_json::to_string(&relay_proto::ServerMsg::Pong {
-            marke: assets::seiten_marke().to_string(),
+            marke: assets::aktiv().marke().to_string(),
         })
         .ok(),
         _ => None,
@@ -944,7 +942,7 @@ mod tests {
     fn versions_ping_wird_lokal_mit_eigener_marke_beantwortet() {
         let pong = pong_auf_ping(r#"{"type":"ping"}"#).expect("Ping muss lokal beantwortet werden");
         assert!(
-            pong.contains(assets::seiten_marke()),
+            pong.contains(assets::aktiv().marke()),
             "der Pong muss die Marke DIESER Binärdatei tragen: {pong}"
         );
     }
@@ -998,14 +996,37 @@ mod tests {
         assert!(!pfad_ist_harmlos("/info/..\\windows"));
     }
 
+    /// Nach einem Seiten-Tausch (Spec `hotfix-ohne-neustart`) nennt der Pong
+    /// die Marke des NEUEN Stands — daran merkt ein Tablet ohne laufendes
+    /// Spiel, dass es neu laden soll. Bliebe die alte Marke stehen, käme der
+    /// Fix nie auf den Geräten an.
+    #[test]
+    fn pong_nennt_nach_tausch_die_neue_marke() {
+        use std::borrow::Cow;
+        let vorher = assets::aktiv();
+        let neu = Arc::new(assets::Seitenstand::aus_seiten(
+            1,
+            assets::Quelle::Paket,
+            |s| Cow::Owned(format!("<!-- neu -->{}", vorher.seite(s))),
+        ));
+        assets::tauschen(neu.clone());
+        let pong = pong_auf_ping(r#"{"type":"ping"}"#).expect("Pong");
+        assets::tauschen(vorher.clone());
+
+        assert_ne!(neu.marke(), vorher.marke());
+        assert!(pong.contains(neu.marke()), "{pong}");
+        assert!(!pong.contains(vorher.marke()), "{pong}");
+    }
+
     /// Der Slave stempelt die Seite mit **seiner** Marke. Käme sie vom Relay,
     /// meldete jedes Tablet der Halle dauerhaft „veraltet" und ein
     /// Reload-Befehl liefe in eine Schleife.
     #[test]
     fn tablet_seite_traegt_die_marke_dieser_binaerdatei() {
-        let marke = assets::seiten_marke();
+        let stand = assets::aktiv();
+        let marke = stand.marke();
         assert!(!marke.is_empty(), "Marke darf nicht leer sein");
-        let seite = assets::TABLET_HTML.replace("__SEITEN_MARKE__", marke);
+        let seite = stand.tablet_seite(1, "Feld 1", "");
         assert!(seite.contains(marke));
         assert!(
             !seite.contains("__SEITEN_MARKE__"),

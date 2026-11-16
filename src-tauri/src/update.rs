@@ -187,6 +187,11 @@ pub struct UpdateInfo {
     pub sync_running: bool,
     /// Ist der Einbau beim Beenden vorgemerkt?
     pub install_on_exit: bool,
+    /// Version dieser App — für „App vX · Seiten-Stand N" auf der
+    /// Wartungsseite.
+    pub app_version: String,
+    /// Stand der Geräte-Seiten (Spec `hotfix-ohne-neustart`).
+    pub seiten: crate::seiten_angebot::SeitenInfo,
 }
 
 /// Zustandsmaschine des Update-Ablaufs. Lebt im `AppState`; die
@@ -271,7 +276,12 @@ impl UpdateManager {
         self.paket()
     }
 
-    pub fn info(&self, occupied_courts: usize, sync_running: bool) -> UpdateInfo {
+    pub fn info(
+        &self,
+        occupied_courts: usize,
+        sync_running: bool,
+        seiten: crate::seiten_angebot::SeitenInfo,
+    ) -> UpdateInfo {
         let (phase, version, notes, message) = match self.phase() {
             Phase::Idle => ("idle", None, None, None),
             Phase::Checking => ("checking", None, None, None),
@@ -289,6 +299,8 @@ impl UpdateManager {
             occupied_courts,
             sync_running,
             install_on_exit: self.install_on_exit(),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            seiten,
         }
     }
 }
@@ -296,6 +308,12 @@ impl UpdateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Seiten-Stand ohne Angebot — für Tests, die nur den Kern-Teil prüfen.
+    fn seiten_info() -> crate::seiten_angebot::SeitenInfo {
+        crate::seiten_angebot::SeitenAngebot::default()
+            .info_fuer(&crate::config::AppConfig::default())
+    }
 
     fn marker(running: bool, written_ms: u64) -> ResumeMarker {
         ResumeMarker {
@@ -415,7 +433,10 @@ mod tests {
         });
         assert_eq!(m.paket(), None);
         assert_eq!(m.paket_fuer_beenden(), None);
-        assert_eq!(m.info(0, false).version.as_deref(), Some("1.0.0"));
+        assert_eq!(
+            m.info(0, false, seiten_info()).version.as_deref(),
+            Some("1.0.0")
+        );
     }
 
     #[test]
@@ -464,7 +485,7 @@ mod tests {
     fn info_spiegelt_phase_und_umfeld() {
         let m = UpdateManager::default();
         m.set_phase(Phase::Error("offline".into()));
-        let i = m.info(3, true);
+        let i = m.info(3, true, seiten_info());
         assert_eq!(i.phase, "error");
         assert_eq!(i.message.as_deref(), Some("offline"));
         assert_eq!(i.occupied_courts, 3);
@@ -473,7 +494,7 @@ mod tests {
 
         m.paket_bereit("2.0.0".into(), None, vec![]);
         m.set_install_on_exit(true);
-        let i = m.info(0, false);
+        let i = m.info(0, false, seiten_info());
         assert_eq!(i.phase, "ready");
         assert_eq!(i.version.as_deref(), Some("2.0.0"));
         assert!(i.install_on_exit);

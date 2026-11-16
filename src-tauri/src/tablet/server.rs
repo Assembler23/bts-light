@@ -35,7 +35,7 @@ use crate::badhub::push;
 use crate::btp::model::{BtpMatch, MatchStatus};
 use crate::btp::{client, proto};
 use crate::config::{AppConfig, CourtMonitorConfig};
-use crate::tablet::assets::{self, seiten_marke, TABLET_HTML};
+use crate::tablet::assets::{self, Seite};
 use crate::tablet::monitor;
 use crate::tablet::perf;
 use crate::tablet::state::{reconnect_decision, ReconnectDecision, TabletState};
@@ -951,7 +951,9 @@ async fn tv_page(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
         && !live
             .chars()
             .any(|c| c.is_whitespace() || matches!(c, '\'' | '"' | '\\' | '<' | '>' | '`'));
-    let body = assets::TV_HTML.replace("__LIVE_URL__", if safe { &live } else { "" });
+    let body = assets::aktiv()
+        .seite(Seite::Tv)
+        .replace("__LIVE_URL__", if safe { &live } else { "" });
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
@@ -1031,14 +1033,9 @@ async fn court_page(
     // PIN fürs Einstellungs-Menü (Feldwechsel) – Live-Config.
     let pin = bedien_pin(&ctx.app_config().tablet_settings_pin);
     tracing::info!("Tablet-Seite ausgeliefert für Feld {court_id} ('{label}')");
-    let body = TABLET_HTML
-        .replace("__COURT_ID__", &court_id.to_string())
-        .replace("__COURT_LABEL__", &html_escape(&label))
-        .replace("__TABLET_PIN__", &pin)
-        // Fingerabdruck der Seite, wie sie in dieser Binärdatei steckt —
-        // bewusst über das UNERSETZTE `TABLET_HTML`, sonst wäre er je Feld
-        // verschieden und der Abgleich sinnlos (Spec `tablet-version-abgleich`).
-        .replace("__SEITEN_MARKE__", seiten_marke());
+    // Seite und Marke aus EINEM Schnappschuss (ADR 0099): Ein Tausch
+    // mitten im Abruf darf nie eine neue Seite mit alter Marke liefern.
+    let body = assets::aktiv().tablet_seite(court_id, &html_escape(&label), &pin);
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
@@ -1049,7 +1046,7 @@ async fn demo_court_page() -> impl IntoResponse {
     // PIN leer wie Relay und Brücke: „Gerät" im Mehr-Menü öffnet im Demofeld
     // ohne PIN, und die echte Bedien-PIN gehört nicht in eine Übungsseite.
     tracing::info!("Demofeld ausgeliefert");
-    let body = relay_proto::demo_tablet_seite(TABLET_HTML, "", seiten_marke());
+    let body = assets::aktiv().demo_seite();
     ([(header::CACHE_CONTROL, "no-store")], Html(body))
 }
 
@@ -1115,7 +1112,9 @@ async fn courts_list(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
 /// „Meetingpoint" (Spec meetingpoint-am-kiosk-tablet; Bedienschutz, keine
 /// Sicherheitsgrenze, wie am Zahnrad).
 fn render_lobby_html(pin: &str) -> String {
-    assets::LOBBY_HTML.replace("__TABLET_PIN__", pin)
+    assets::aktiv()
+        .seite(Seite::Lobby)
+        .replace("__TABLET_PIN__", pin)
 }
 
 async fn lobby_page(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
@@ -1128,7 +1127,8 @@ async fn lobby_page(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
 
 /// Rendert `anzeige.html`. `base` endet mit `/` (LAN `/`).
 fn render_anzeige_html(base: &str, pin: &str) -> String {
-    assets::ANZEIGE_HTML
+    assets::aktiv()
+        .seite(Seite::Anzeige)
         .replace("__BASE__", base)
         .replace("__TABLET_PIN__", pin)
 }
@@ -1656,7 +1656,8 @@ async fn debug_perf(State(ctx): State<Arc<ServerCtx>>) -> impl IntoResponse {
 /// Rendert `monitor.html` mit den Platzhaltern. `base` ist der URL-Präfix
 /// für Unter-Ressourcen (`/` im LAN), `mode` ist `fixed` oder `device`.
 fn render_monitor_html(mode: &str, base: &str, court_label: &str) -> String {
-    assets::MONITOR_HTML
+    assets::aktiv()
+        .seite(Seite::Monitor)
         .replace("__MODE__", mode)
         .replace("__BASE__", base)
         .replace("__COURT_LABEL__", &html_escape(court_label))
@@ -1683,7 +1684,8 @@ async fn monitor_device_page() -> impl IntoResponse {
 
 /// Rendert `tafel.html` mit den Platzhaltern (wie [`render_monitor_html`]).
 fn render_tafel_html(mode: &str, base: &str, court_label: &str) -> String {
-    assets::TAFEL_HTML
+    assets::aktiv()
+        .seite(Seite::Tafel)
         .replace("__MODE__", mode)
         .replace("__BASE__", base)
         .replace("__COURT_LABEL__", &html_escape(court_label))
@@ -1712,7 +1714,9 @@ async fn tafel_page(
 /// Rendert `stream.html` (ADR 0069). Nur `__BASE__`; Felder und Optionen
 /// liest die Seite selbst aus der Adresse und prüft sie dort.
 fn render_stream_html(base: &str) -> String {
-    assets::STREAM_HTML.replace("__BASE__", base)
+    assets::aktiv()
+        .seite(Seite::Stream)
+        .replace("__BASE__", base)
 }
 
 /// Stream-Einblendung für OBS (`/stream?courts=1,2,3`). Kein Gerät, keine
@@ -1730,7 +1734,11 @@ async fn stream_page() -> impl IntoResponse {
 async fn stream_werbung_page() -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-store")],
-        Html(assets::STREAM_WERBUNG_HTML.replace("__BASE__", "/")),
+        Html(
+            assets::aktiv()
+                .seite(Seite::StreamWerbung)
+                .replace("__BASE__", "/"),
+        ),
     )
 }
 
@@ -1926,7 +1934,7 @@ async fn monitor_device_state(
 async fn info_overview_page() -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-store")],
-        Html(assets::OVERVIEW_HTML),
+        Html(assets::aktiv().koerper(Seite::Overview)),
     )
 }
 
@@ -1935,7 +1943,7 @@ async fn info_overview_page() -> impl IntoResponse {
 async fn info_preparation_page() -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-store")],
-        Html(assets::PREPARATION_HTML),
+        Html(assets::aktiv().koerper(Seite::Preparation)),
     )
 }
 
@@ -1943,7 +1951,7 @@ async fn info_preparation_page() -> impl IntoResponse {
 async fn info_winners_page() -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-store")],
-        Html(assets::WINNERS_HTML),
+        Html(assets::aktiv().koerper(Seite::Winners)),
     )
 }
 
@@ -2065,12 +2073,16 @@ async fn info_announce_jobs(
 
 /// Rendert `ansage.html`. `base` endet mit `/` (LAN `/`).
 fn render_ansage_html(base: &str) -> String {
-    assets::ANSAGE_HTML.replace("__BASE__", base)
+    assets::aktiv()
+        .seite(Seite::Ansage)
+        .replace("__BASE__", base)
 }
 
 /// Rendert `meetingpoint.html`. `base` endet mit `/` (LAN `/`).
 pub(crate) fn render_meetingpoint_html(base: &str) -> String {
-    assets::MEETINGPOINT_HTML.replace("__BASE__", base)
+    assets::aktiv()
+        .seite(Seite::Meetingpoint)
+        .replace("__BASE__", base)
 }
 
 #[derive(serde::Deserialize)]
@@ -2259,7 +2271,10 @@ async fn ansage_audio(State(ctx): State<Arc<ServerCtx>>, Path(id): Path<u64>) ->
 /// Liefert die HTML der Werbe-Anzeige. Pollt `/info/ad/state` für die
 /// Bilder-Liste; mode/file/device kommen über den Query-String.
 async fn info_ad_page() -> impl IntoResponse {
-    ([(header::CACHE_CONTROL, "no-store")], Html(assets::AD_HTML))
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(assets::aktiv().koerper(Seite::Ad)),
+    )
 }
 
 /// JSON-Zustand für die Werbe-Anzeige: aktuelle Bilder-Liste +
@@ -2413,7 +2428,7 @@ async fn info_tournament_logo(
 async fn combo_page() -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-store")],
-        Html(assets::COMBO_HTML),
+        Html(assets::aktiv().koerper(Seite::Combo)),
     )
 }
 
@@ -2422,7 +2437,7 @@ async fn combo_page() -> impl IntoResponse {
 async fn info_spielfolge_page() -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-store")],
-        Html(assets::SPIELFOLGE_HTML),
+        Html(assets::aktiv().koerper(Seite::Spielfolge)),
     )
 }
 
@@ -2890,7 +2905,7 @@ fn tl_device(ctx: &ServerCtx, headers: &axum::http::HeaderMap) -> Option<crate::
 /// bekommt. Eine Prüfung hier brächte nichts und würde den Kopplungsablauf
 /// (Adresse aufrufen, Zugang aus dem Fragment übernehmen) unmöglich machen.
 async fn tl_page() -> impl IntoResponse {
-    Html(assets::TL_HTML)
+    Html(assets::aktiv().koerper(Seite::Tl))
 }
 
 /// Der Anzeige-Zustand für die Turnierleitungs-Oberfläche.
@@ -4753,7 +4768,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     // (Spec tablet-version-abgleich) — daran erkennt
                                     // die Seite, dass sie veraltet ist.
                                     &ServerMsg::Pong {
-                                        marke: seiten_marke().to_string(),
+                                        marke: assets::aktiv().marke().to_string(),
                                     },
                                 )
                                 .await;
@@ -4839,7 +4854,7 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                     send_msg(
                         &mut socket,
                         &ServerMsg::Reload {
-                            marke: seiten_marke().to_string(),
+                            marke: assets::aktiv().marke().to_string(),
                         },
                     )
                     .await;
