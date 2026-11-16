@@ -354,9 +354,37 @@ Nach Security- und Code-Review angenommen und hier festgehalten:
   Programmdatei in unbestimmtem Zustand.
 - **Nach einem Rückfall** startet die alte Version die Übertragung nur, wenn
   sie vor dem Wechsel lief.
-- **Der Wechsel selbst ist bis zum ersten Release-Paar ungeprüft**: Er
+- **Der Wechsel selbst war bis zum ersten Release-Paar ungeprüft**: Er
   braucht eine installierte Version mit Wächter und eine neuere mit
-  Kern-Artefakt.
+  Kern-Artefakt. Der erste Lauf steht im nächsten Abschnitt.
+
+### Erster echter Wechsel mit der vollen App (v0.9.439 → v0.9.440, 16.11.2026)
+
+Ein Windows-PC mit installierter v0.9.439 bot nach dem Vorladen **Jetzt
+wechseln** an; der Wechsel auf v0.9.440 gelang. Damit sind erstmals in
+einem Stück gelaufen: Release-Job `kern`, Vorladen, Probelauf, Tausch,
+Wächter, Ankunftsmeldung. `uebergabe-waechter.log`:
+
+| Schritt | Abstand |
+|---|---|
+| Wächter gestartet → neue Version gestartet | 1825 ms |
+| neue Version gestartet → angekommen | 908 ms |
+| **Wächter gestartet → angekommen** | **2734 ms** |
+
+Die 1825 ms sind das Warten auf das Ende der alten App plus der Start der
+neuen Datei; die 908 ms decken sich mit den Läufen unter Linux (755 und
+940 ms).
+
+**Was dieser Lauf nicht belegt:**
+
+- Die Lücke der Übertragung (Erfolgskriterium: Median höchstens 3 s) steht
+  im normalen Log (`Wiederanlauf nach Update: … Lücke N ms`) und liegt
+  nicht vor. Sie beginnt kurz **vor** dem Start des Wächters (Anhalten der
+  Übertragung) und endet, wenn der Tablet-Port wieder offen ist.
+- Ob die Übertragung beim Wechsel lief, welcher Rechner es war und wie
+  lange es vom Klick bis zum Verschwinden des Fensters dauerte, ist nicht
+  festgehalten.
+- Es ist ein einzelner Lauf, kein Median, und kein Hallen-PC.
 
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
 

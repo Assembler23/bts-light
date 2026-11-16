@@ -371,8 +371,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     Unternehmens-Schutzsoftware (ADR 0100): Annahmen halten, der Tausch
     wandert vor das Anhalten. **Der Kernwechsel ist angeschlossen (PR 7b,
     v0.9.439):** Vorladen, Probelauf, „Jetzt wechseln", Wächter, Rückfall,
-    Uninstall-Hook. **Noch nie mit der vollen App gelaufen** — das geht erst,
-    wenn zwei Versionen mit Kern-Artefakt veröffentlicht sind. Es fehlen
+    Uninstall-Hook. **Erster echter Wechsel am 16.11.2026** (v0.9.439 →
+    v0.9.440, Wächter-Start bis Ankunft 2,7 s; ADR 0100) — ein einzelner Lauf,
+    die Lücke der Übertragung ist noch nicht gemessen. Es fehlen
     Kern-Rückweg, Sperrliste und Aufräumen (8) und der Abschluss mit Feldtest
     (9).
   - Nebenbefund für später: `latest.json` ist unsigniert und
