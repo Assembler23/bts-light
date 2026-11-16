@@ -170,7 +170,8 @@ etwa ein Relay-Deploy mitten im Turnier — erreicht es nur über ein Neuladen,
 und das passiert von selbst nicht.
 
 Deshalb trägt jede ausgelieferte Seite einen **Fingerabdruck** (`seiten_marke`
-über den unersetzten `TABLET_HTML`, in `relay-proto`), und das ohnehin
+über das unersetzte `tablet.html`, in `relay-proto`; am Turnier-PC Teil des
+`Seitenstand` in `tablet/assets.rs`), und das ohnehin
 laufende Lebenszeichen (`pong`) nennt den, den der Server **jetzt** hat.
 Weichen beide ab, ist die geladene Seite alt.
 

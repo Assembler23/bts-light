@@ -1,0 +1,217 @@
+name: Seiten-Paket
+
+# Baut aus einem Hotfix-Zweig ein signiertes Paket der Geräte-Seiten
+# (Spec docs/features/hotfix-ohne-neustart.md, ADR 0099). Turnier-PCs mit
+# genau der Kern-Version des Tags bekommen es angeboten und können es ohne
+# Neustart einspielen.
+#
+# VON HAND auf `main` zu starten, mit dem Tag als Eingabe. Bewusst kein
+# Push-Auslöser: Ein Workflow, der bei einem Push auf `hotfix/v*` startet,
+# liefe mit der Workflow-Datei und den Skripten AUS DIESEM ZWEIG — wer dort
+# schreiben darf, könnte Prüfung und Zusammenfassung umbiegen
+# (Security-Review 16.11.2026). So kommen Workflow und Skripte aus `main`,
+# und der Hotfix-Zweig wird nur als Daten gelesen (über git, nie ausgeführt).
+#
+# Ablauf: `pruefen` läuft ohne Secrets — es bricht ab, sobald der Zweig
+# gegenüber dem Tag etwas am Kern ändert, und zeigt den Unterschied der
+# Seiten. `signieren` wartet im Environment `seiten-hotfix` auf die Freigabe
+# eines Maintainers; erst danach wird der Signaturschlüssel gelesen.
+#
+# WICHTIG für die Freigabe: Der Schlüssel ist derselbe wie beim Updater. Wer
+# freigibt, signiert Code für alle Installationen dieser Version.
+#
+# Einrichtung (Admin, siehe docs/release.md): Environment `seiten-hotfix` mit
+# Pflicht-Freigabe und Zweig-Regel NUR `main`. Ohne die Zweig-Regel ließe
+# sich dieser Workflow auch „von" einem anderen Zweig starten.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release-Tag, zu dem der Zweig hotfix/<Tag> gehört (z. B. v0.9.432)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pruefen:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      kern: ${{ steps.plan.outputs.kern }}
+      folge: ${{ steps.plan.outputs.folge }}
+      commit: ${{ steps.plan.outputs.commit }}
+      paket: ${{ steps.plan.outputs.paket }}
+      sha256: ${{ steps.bau.outputs.sha256 }}
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+
+      # Fehlt das Environment, legt GitHub es beim ersten Lauf OHNE Freigabe
+      # an — dann würde sofort signiert. Deshalb hier hart prüfen.
+      - name: Environment hat eine Pflicht-Freigabe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ANZAHL=$(gh api "repos/${GITHUB_REPOSITORY}/environments/seiten-hotfix" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length' || echo 0)
+          if [ "${ANZAHL}" -lt 1 ]; then
+            echo "::error::Environment 'seiten-hotfix' fehlt oder hat keine Pflicht-Freigabe (docs/release.md)."
+            exit 1
+          fi
+
+      - name: Regeln des Bau-Skripts prüfen
+        run: node scripts/test-seiten-paket.mjs
+
+      # Der Zweig als DATEN: ein nacktes Repository ohne Arbeitsverzeichnis.
+      # Nichts daraus wird ausgeführt.
+      - name: Hotfix-Zweig holen
+        id: zweig
+        run: |
+          set -euo pipefail
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Kein Release-Tag: ${TAG}"
+            exit 1
+          fi
+          git clone --quiet --bare "https://github.com/${GITHUB_REPOSITORY}.git" zweig.git
+          COMMIT=$(git -C zweig.git rev-parse --verify "refs/heads/hotfix/${TAG}^{commit}")
+          echo "commit=${COMMIT}" >> "${GITHUB_OUTPUT}"
+
+      # Bricht ab, wenn der Zweig einen Kern-Pfad ändert, nicht vom Tag
+      # abstammt, keine Seite geändert hat oder eine Seite keine gewöhnliche
+      # Datei ist.
+      - name: Zweig gegen den Tag prüfen
+        id: plan
+        env:
+          COMMIT: ${{ steps.zweig.outputs.commit }}
+        run: |
+          set -euo pipefail
+          node scripts/build-seiten-paket.mjs plan \
+            --repo zweig.git --tag "${TAG}" --commit "${COMMIT}" > plan.out
+          cat plan.out >> "${GITHUB_OUTPUT}"
+          node scripts/build-seiten-paket.mjs bericht \
+            --repo zweig.git --tag "${TAG}" --commit "${COMMIT}" >> "${GITHUB_STEP_SUMMARY}"
+
+      # Probebau ohne Secrets. Der Prüfwert bindet das spätere Signieren an
+      # genau diese Bytes.
+      - name: Paket probebauen
+        id: bau
+        env:
+          COMMIT: ${{ steps.zweig.outputs.commit }}
+        run: |
+          set -euo pipefail
+          node scripts/build-seiten-paket.mjs nutzlast \
+            --repo zweig.git --tag "${TAG}" --commit "${COMMIT}" --out paket.btsp
+          echo "sha256=$(sha256sum paket.btsp | cut -d' ' -f1)" >> "${GITHUB_OUTPUT}"
+
+  signieren:
+    needs: pruefen
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Geschütztes Environment: Pflicht-Freigabe, nur von `main` aus.
+    environment: seiten-hotfix
+    # Nie zwei Veröffentlichungen gleichzeitig: Beide schreiben denselben
+    # Index. Nicht abbrechen — ein halber Upload hilft keinem.
+    concurrency:
+      group: seiten-paket-veroeffentlichen
+      cancel-in-progress: false
+    env:
+      TAG: ${{ inputs.tag }}
+      KERN: ${{ needs.pruefen.outputs.kern }}
+      FOLGE: ${{ needs.pruefen.outputs.folge }}
+      COMMIT: ${{ needs.pruefen.outputs.commit }}
+      PAKET: ${{ needs.pruefen.outputs.paket }}
+      SHA256: ${{ needs.pruefen.outputs.sha256 }}
+      HOST: bts-deploy@178.104.221.177
+      VERZEICHNIS: /var/www/badhub/public/download/bts-light
+    steps:
+      # Derselbe Stand von `main` wie in `pruefen`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      # Ohne Cache: In diesen Job kommt gleich ein Schlüssel.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+
+      # Nur für das Signierwerkzeug (@tauri-apps/cli aus dem Lockfile von
+      # `main`). Ohne Installations-Skripte.
+      - name: Signierwerkzeug installieren
+        run: npm ci --ignore-scripts
+
+      # Neu gebaut aus genau dem geprüften Stand — und nur signiert, wenn
+      # dieselben Bytes herauskommen wie im Probebau, den die Freigabe sah.
+      - name: Paket bauen
+        run: |
+          set -euo pipefail
+          git clone --quiet --bare "https://github.com/${GITHUB_REPOSITORY}.git" zweig.git
+          mkdir -p paket
+          node scripts/build-seiten-paket.mjs nutzlast \
+            --repo zweig.git --tag "${TAG}" --commit "${COMMIT}" --out "paket/${PAKET}"
+          echo "${SHA256}  paket/${PAKET}" | sha256sum --check --strict
+
+      - name: Paket signieren
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          npx --no-install tauri signer sign "paket/${PAKET}" > /dev/null
+          test -s "paket/${PAKET}.sig"
+
+      - name: SSH einrichten
+        env:
+          SCHLUESSEL: ${{ secrets.SSH_DEPLOY_KEY_V2 }}
+          BEKANNTE_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "${SCHLUESSEL}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEKANNTE_HOSTS}" > ~/.ssh/known_hosts
+          printf 'Host *\n  StrictHostKeyChecking yes\n' > ~/.ssh/config
+
+      # Kern und Folge benennen genau einen Inhalt. Liegt unter dem Namen
+      # schon etwas ANDERES (Zweig neu geschrieben, gleiche Commit-Zahl),
+      # wird laut abgebrochen statt still zu überschreiben oder zu
+      # überspringen. Liegt dasselbe schon da (erneuter Lauf nach einem
+      # Abbruch), wird es samt frischer Signatur einfach noch einmal gelegt.
+      - name: Paket hochladen
+        run: |
+          set -euo pipefail
+          ssh "${HOST}" "mkdir -p '${VERZEICHNIS}/seiten'"
+          DORT=$(ssh "${HOST}" "sha256sum '${VERZEICHNIS}/seiten/${PAKET}' 2>/dev/null | cut -d' ' -f1" || true)
+          if [ -n "${DORT}" ] && [ "${DORT}" != "${SHA256}" ]; then
+            echo "::error::${PAKET} liegt mit anderem Inhalt auf dem Server. Ein veröffentlichtes Paket wird nie ersetzt — einen weiteren Commit auf den Zweig legen (höhere Folge)."
+            exit 1
+          fi
+          rsync -av "paket/${PAKET}" "paket/${PAKET}.sig" "${HOST}:${VERZEICHNIS}/seiten/"
+
+      # Erst jetzt der Index — gebaut aus dem, was wirklich auf dem Server
+      # liegt, nicht aus dem alten (unsignierten) Index. Kein `--delete`: Der
+      # Rest des Verzeichnisses gehört dem Release-Lauf.
+      - name: Index hochladen
+        run: |
+          set -euo pipefail
+          ssh "${HOST}" "ls -1 '${VERZEICHNIS}/seiten/'" > liste.txt
+          node scripts/build-seiten-paket.mjs index --liste liste.txt --out seiten.json
+          grep -q "\"kern\":\"${KERN}\",\"folge\":${FOLGE}}" seiten.json \
+            || { echo "::error::Der Index nennt das neue Paket nicht."; cat seiten.json; exit 1; }
+          rsync -av seiten.json "${HOST}:${VERZEICHNIS}/"
+          {
+            echo "## Veröffentlicht"
+            echo
+            echo "\`${PAKET}\` — Kern ${KERN}, Folge ${FOLGE}"
+          } >> "${GITHUB_STEP_SUMMARY}"

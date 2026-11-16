@@ -7,10 +7,12 @@ import {
   FolderOpen,
   type LucideIcon,
   RefreshCw,
+  Undo2,
   Upload,
 } from "lucide-react";
 import { appVersion, exportIdentity, importIdentity, openLogDir } from "../api";
 import { useUpdate } from "../components/UpdateBanner";
+import { KNOPF, wartungSeiten } from "../io/updateBanner.mjs";
 
 /** Einheitlicher Aktions-Button mit Icon, Beschriftung und Tooltip. */
 function ActionButton(props: {
@@ -37,7 +39,14 @@ function ActionButton(props: {
 }
 
 export function MaintenancePage() {
-  const { phase: updatePhase, checkNow } = useUpdate();
+  const {
+    phase: updatePhase,
+    checkNow,
+    info: updateStand,
+    seitenZurueck,
+    seitenFehler,
+  } = useUpdate();
+  const seitenStand = wartungSeiten(updateStand);
   const [updateChecked, setUpdateChecked] = useState(false);
   const [version, setVersion] = useState("");
   // Identitäts-Umzug (ADR 0006): Statusmeldung + Datei für die Import-Bestätigung.
@@ -161,6 +170,31 @@ export function MaintenancePage() {
         )}
         {version !== "" && (
           <p className="text-xs text-slate-400">Version {version}</p>
+        )}
+        {/* Seiten-Stand (Spec hotfix-ohne-neustart): dauerhaft sichtbar,
+            samt Rückweg — das Banner zeigt ihn nur direkt nach dem Klick. */}
+        {seitenStand && (
+          <div className="flex flex-col gap-1.5 border-t border-slate-100 pt-3">
+            <p className="text-xs text-slate-600">{seitenStand.stand}</p>
+            {seitenStand.hinweise.map((h) => (
+              <p key={h} className="text-xs text-slate-500">
+                {h}
+              </p>
+            ))}
+            {seitenFehler !== "" && (
+              <p className="text-xs text-red-700">{seitenFehler}</p>
+            )}
+            {seitenStand.rueckweg && (
+              <div>
+                <ActionButton
+                  icon={Undo2}
+                  label={KNOPF.zurueck}
+                  onClick={() => void seitenZurueck()}
+                  title="Die Geräte-Seiten auf den vorigen Stand zurücksetzen. Der jetzige Stand wird nicht erneut angeboten."
+                />
+              </div>
+            )}
+          </div>
         )}
       </section>
 

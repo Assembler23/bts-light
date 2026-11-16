@@ -173,6 +173,23 @@ export const updateInstallNow = (): Promise<void> => invoke("update_install_now"
 export const updateSetInstallOnExit = (an: boolean): Promise<void> =>
   invoke("update_set_install_on_exit", { an });
 
+// ── Hotfix ohne Neustart (Spec `hotfix-ohne-neustart`) ──
+
+/** Im Hintergrund nach einem Seiten-Paket suchen und es vorladen. Kehrt
+ *  sofort zurück; übernommen wird nur per Klick. */
+export const seitenSuchen = (): Promise<void> => invoke("seiten_suchen");
+
+/** Das bereitliegende Seiten-Paket übernehmen: Tablet-, Monitor- und
+ *  TL-Seite wechseln sofort, keine Verbindung reißt ab. */
+export const seitenUebernehmen = (): Promise<void> => invoke("seiten_uebernehmen");
+
+/** Zurück zum vorigen Seiten-Stand; der zurückgenommene wird nicht erneut
+ *  angeboten. */
+export const seitenZurueck = (): Promise<void> => invoke("seiten_zurueck");
+
+/** Die einmalige Meldung im Update-Banner schließen. */
+export const updateMeldungWeg = (): Promise<void> => invoke("update_meldung_weg");
+
 /** Wiederanlauf-Marker abholen (einmalig beim Start): `true` = die
  *  Übertragung lief vor dem Update und soll jetzt von selbst starten. */
 export const takeUpdateResume = (): Promise<boolean> =>

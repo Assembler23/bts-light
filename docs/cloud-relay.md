@@ -52,6 +52,11 @@ Live-Umschalten mitten im Betrieb). Beide Wege bleiben dauerhaft nutzbar.
 **Traffic** ist minimal: pro Punkt ein WebSocket-Frame von wenigen hundert
 Byte – auch bei 20–30 Feldern vernachlässigbar.
 
+> **Seiten im Cloud-Betrieb:** Das Relay liefert seine **eigenen** Kopien der
+> Geräte-Seiten aus. Ein Seiten-Paket am Turnier-PC (Spec
+> [hotfix-ohne-neustart](features/hotfix-ohne-neustart.md)) ändert daran
+> nichts; Cloud-Geräte bekommen einen Fix über den Relay-Deploy.
+
 ## Architektur
 
 `bts-light` ist ein Cargo-Workspace aus drei Crates:
