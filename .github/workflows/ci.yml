@@ -550,6 +550,15 @@ jobs:
       - name: Rust tests
         run: cargo test --workspace
 
+      # Übergabe-Sonde (ADR 0100) auf einem echten Windows: Lässt sich eine
+      # laufende Programmdatei umbenennen, überlebt der Wächter das Ende der
+      # App? Die MESSWERT-Zeilen stehen im Log. Blockiert nichts — ein
+      # Runner ist kein Turnier-PC mit Virenscanner, und ein Messwerkzeug
+      # darf einen PR nicht aufhalten.
+      - name: Übergabe-Sonde (Windows, nur zur Ansicht)
+        continue-on-error: true
+        run: cargo test -p bts-light --test uebergabe_probe -- --ignored --nocapture
+
   # Linux als Entwicklungs- und Test-Plattform (Roadmap "Linux-Variante",
   # Stufe 0). Der Rust-Kern hat fuer alles Windows-Gebundene einen
   # `not(windows)`-Zweig (GDI-Druck -> NichtUnterstuetzt, SSID -> iwgetid) --
@@ -596,6 +605,12 @@ jobs:
 
       - name: Rust tests (Linux)
         run: cargo test --workspace
+
+      # Übergabe-Sonde (ADR 0100): spielt den Kernwechsel mit der echten
+      # Programmdatei durch. Blockiert nichts — sie ist ein Messwerkzeug.
+      - name: Übergabe-Sonde (Linux, nur zur Ansicht)
+        continue-on-error: true
+        run: cargo test -p bts-light --test uebergabe_probe -- --ignored --nocapture
 
       # Datenformat (ADR 0101): gegenüber dem Zielzweig darf die
       # Lesbarkeits-Grenze nie sinken, und ein neuer Abdruck braucht eine neue

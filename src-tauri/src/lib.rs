@@ -17,6 +17,7 @@ pub mod seiten_paket;
 pub mod signatur;
 pub mod sync;
 pub mod tablet;
+pub mod tausch;
 pub mod tl_lokal;
 pub mod tp_finden;
 pub mod tts_teile;
