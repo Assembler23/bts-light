@@ -15,17 +15,30 @@ export function feldMitHalle(c) {
   return c.location ? `${c.court} (${c.location})` : `${c.court}`;
 }
 
+/** Einleitung der Ruf-Zeile — getrennt, weil das Band hinter jedem Feld
+ *  einen Knopf setzt und die Zeile dafür selbst zusammenbaut. */
+export const RUF_EINLEITUNG = "📣 Turnierleitung ans Feld gerufen: ";
+
 /**
- * Meldung „Turnierleitung gerufen" (Megafon-Knopf am Zähl-Tablet): alle
- * Felder, an denen gerade jemand auf die Turnierleitung wartet. Leerer Text,
- * wenn niemand ruft. Die Reihenfolge ist die der Felder — einen Zeitpunkt
- * des Rufs kennt der Turnier-PC nicht.
+ * Die Felder, an denen gerade jemand auf die Turnierleitung wartet
+ * (Megafon-Knopf am Zähl-Tablet) — je Feld die Kennung für die Rücknahme
+ * und die Beschriftung fürs Band. Die Reihenfolge ist die der Felder —
+ * einen Zeitpunkt des Rufs kennt der Turnier-PC nicht.
+ */
+export function rufFelder(courts) {
+  return (courts || [])
+    .filter((c) => c && c.official_call)
+    .map((c) => ({ courtId: c.court_id, name: `Feld ${feldMitHalle(c)}` }));
+}
+
+/**
+ * Meldung „Turnierleitung gerufen" als eine Zeile Text. Leer, wenn niemand
+ * ruft.
  */
 export function rufText(courts) {
-  const felder = (courts || []).filter((c) => c && c.official_call);
+  const felder = rufFelder(courts);
   if (!felder.length) return "";
-  return "📣 Turnierleitung ans Feld gerufen: "
-    + felder.map((c) => `Feld ${feldMitHalle(c)}`).join(", ");
+  return RUF_EINLEITUNG + felder.map((f) => f.name).join(", ");
 }
 
 /**

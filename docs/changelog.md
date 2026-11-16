@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.435
+
+- **TL-Web: Ruf nach der Turnierleitung zurücknehmen.** Ruft ein Feld über
+  das Megafon am Zähl-Tablet, steht im Störungsband hinter dem Feld jetzt der
+  Knopf **zurücknehmen**; derselbe Schritt steht als **Ruf zurücknehmen** im
+  ⋯-Menü der Feld-Kachel. Nach einer Rückfrage ist die Meldung überall weg —
+  auf allen Geräten der Turnierleitung, am Turnier-PC und am Tablet, wo das
+  Megafon ausgeht und kurz „Die Turnierleitung hat den Ruf zurückgenommen."
+  erscheint. Bisher ging das nur am Tablet selbst. Über das Internet wirkt es
+  nach dem Relay-Deploy; ein Tablet, dessen Seite seit dem Update nicht neu
+  geladen wurde, behält das Megafon an, bis dort „Meldung zurücknehmen"
+  getippt wird (**Tablets neu laden** hilft).
+- **Störungsband auf dem Handy:** Feld und Knopf bleiben beim Umbruch
+  zusammen; rufen mehrere Felder, steht jedes mit seinem Knopf für sich.
+
 ## v0.9.434
 
 - **Nach einem Update läuft die Übertragung schneller wieder.** Den
@@ -16,6 +31,7 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - **Roter Balken, wenn der Anschluss für die Hallengeräte belegt ist.** Konnte
   bts-light Port 8088 nicht öffnen — etwa weil es doppelt läuft —, stand das
   bisher nur in der Logdatei. Jetzt sagt es der Balken oben in der App.
+
 ## v0.9.433
 
 - **Verbesserungen für Tablets und Anzeigen ohne Neustart.** Lässt sich ein

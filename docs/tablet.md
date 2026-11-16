@@ -993,6 +993,59 @@ Der Ruf nach der Turnierleitung steht seit v0.9.426 außerdem im
 sich nichts: Es ist derselbe `official_call`, der schon das Abzeichen „TL
 gerufen" an der Feld-Kachel speist.
 
+**Rücknahme durch die Turnierleitung (seit v0.9.435).** Die Wahrheit über den
+Ruf liegt am Tablet (`STATE.alertOfficial`, übersteht Neuladen und wird nach
+jedem Verbinden neu gemeldet) — eine Rücknahme im TL-Web muss deshalb bis
+dorthin durchgreifen, sonst käme der Ruf beim nächsten Neuverbinden wieder:
+
+1. Der Turnier-PC löscht den Ruf in seinem Spiegel sofort (das Band ist leer)
+   und merkt sich je Feld „Rücknahme offen" (`ruf_zuruecknehmen` in
+   `tablet/state.rs`, nur im Arbeitsspeicher).
+2. Er schickt dem Tablet `official_call_cleared` — im Hallennetz über dessen
+   Socket (spätestens nach 2 s), über die Cloud als
+   `HostFrame::OfficialCallCleared` an den Relay.
+3. Das Tablet schaltet das Megafon aus, sichert den Stand, zeigt kurz
+   **„Die Turnierleitung hat den Ruf zurückgenommen."** und antwortet
+   **immer** mit seinem `alert` (`beiRufZurueckgenommen`).
+4. Erst dieses `alert` mit „kein Ruf" löscht den Merker. Bis dahin hält der
+   Turnier-PC einen wiedergemeldeten Ruf zurück (`record_alert` gibt `true`
+   zurück) und sagt es dem Tablet direkt noch einmal.
+<!-- pruef: "Die Turnierleitung hat den Ruf zurückgenommen." in src-tauri/assets/tablet.html -->
+
+Damit Schritt 4 auch nach einem Abriss eintritt, meldet das Tablet beim
+Verbinden seine Meldungen jetzt **unbedingt** — auch „keine". Vorher schwieg
+ein Tablet ohne Meldung, und der Merker wäre stehen geblieben.
+
+Turnier-PC und Relay nehmen ein `alert` allerdings nur von dem Gerät an, das
+das Feld **hält**. Steht ein Tablet vor „Feld belegt", verpufft seine Meldung
+vom Verbinden. Es merkt sie deshalb vor und holt sie nach, sobald es das Feld
+hat — nach **Übernehmen** ebenso wie nach dem selbsttätigen Wiederanmelden
+(`meldungenNachholen`, ausgelöst von der Zuweisung; über die Cloud auch von
+„kein Spiel"). Im Hallennetz schickt der Turnier-PC bei einem leeren Feld
+nach der Übernahme kein „kein Spiel" — die Vormerkung bleibt dann bis zur
+nächsten Zuweisung stehen. Das ist folgenlos: Eine offene Rücknahme endet
+ohnehin, sobald das Spiel das Feld verlässt.
+Ohne das bliebe nach einem Tablet-Wechsel eine Rücknahme offen, und der erste
+echte Ruf des neuen Geräts würde zurückgehalten. Im Hallennetz sagt der
+Turnier-PC die offene Rücknahme dem neuen Halter zusätzlich von sich aus
+(2-s-Takt des Sockets); über die Cloud gibt es diesen zweiten Weg nicht.
+
+Die Kehrseite fängt die Stand-Übernahme auf: Ein frisches **Ersatz-Tablet**
+meldet beim Verbinden „keine" und löscht damit den Ruf am Turnier-PC —
+übernimmt es gleich darauf den gesicherten Stand des ausgefallenen Geräts
+samt dessen Meldungen, meldet es sie sofort neu (`uebernimmStand`). Der Ruf
+steht dann wieder im Band. Das gilt auch für einen Ruf, den die
+Turnierleitung zurückgenommen hat, **während das alte Tablet schon
+ausgefallen war**: Der gesicherte Stand kennt die Rücknahme nicht, der Ruf
+kommt mit dem Ersatz-Tablet einmal zurück und lässt sich dann endgültig
+zurücknehmen.
+
+Eine ältere, nicht neu geladene Tablet-Seite kennt die Nachricht nicht: Das
+Megafon bleibt dort an, und der Turnier-PC hält weitere Rufe dieses Felds
+zurück, bis am Tablet einmal „Meldung zurücknehmen" getippt wurde. Der Merker
+überlebt einen Neustart des Turnier-PCs nicht; ein nie bestätigter Ruf
+erscheint danach wieder. Die Verletzungsmeldung läuft unverändert durch.
+
 ## Spiel abbrechen (Aufgabe)
 
 Gibt ein:e Spieler:in verletzungsbedingt auf, beendet **„Spiel abbrechen"**

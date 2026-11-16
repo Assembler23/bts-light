@@ -308,6 +308,12 @@ Zwei Meldungen gehen vom Tablet an die Turnierleitung, beide ohne PIN:
   Sache erledigt, den Knopf noch einmal antippen und **Meldung zurücknehmen**
   wählen — sie verschwindet dann überall.
   <!-- pruef: "Meldung zurücknehmen" in src-tauri/assets/tablet.html -->
+
+  Die Turnierleitung kann den Ruf auch von sich aus zurücknehmen — etwa wenn
+  schon jemand unterwegs ist. Dann geht das Megafon von allein aus, und unten
+  steht kurz **„Die Turnierleitung hat den Ruf zurückgenommen."** Braucht ihr
+  doch noch jemanden, einfach erneut rufen.
+  <!-- pruef: "Die Turnierleitung hat den Ruf zurückgenommen." in src-tauri/assets/tablet.html -->
   <!-- pruef: /<span class="txt" data-t>Turnierleitung<\/span>/ in src-tauri/assets/tablet.html -->
 
 Beide Meldungen erscheinen bei der Turnierleitung in einer Leiste, die auf

@@ -1374,6 +1374,20 @@
   <span data-t>↔ SEITENWECHSEL — Spieler die Hälften tauschen</span>
 </div>
 
+<!-- Die Turnierleitung hat den Ruf (Megafon) von ihrer Seite aus
+     zurückgenommen. Kurzer Hinweis statt Dialog: Das Megafon ist schon
+     wieder aus, zu entscheiden gibt es nichts — und das Zählen bleibt frei.
+     Etwas höher als der Seitenwechsel-Hinweis, falls beide zusammenfallen. -->
+<div id="ruf-toast" style="
+  position: fixed; left: 50%; bottom: 10.5rem; transform: translateX(-50%);
+  background: #0ea5e9; color: #04263a; padding: .8rem 1.6rem;
+  border-radius: 1rem; font-size: 1.15rem; font-weight: 800;
+  box-shadow: 0 8px 30px rgba(0,0,0,.5); z-index: 20;
+  display: none; text-align: center;
+">
+  <span data-t>Die Turnierleitung hat den Ruf zurückgenommen.</span>
+</div>
+
 <!-- Neue Fassung verfügbar (Spec `tablet-version-abgleich`). Erscheint nur,
      solange ein Spiel läuft — sonst lädt die Seite sich selbst neu. Bewusst
      oben und nicht als Vollbild: Das Zählen darf nie verdeckt sein. -->
@@ -2430,6 +2444,7 @@ const EN = {
   'Turnierleitung wurde gerufen': 'The tournament desk has been called',
   'Ist die Sache erledigt? Dann kannst du die Meldung zurücknehmen.': 'Resolved? Then you can cancel the call.',
   'Meldung zurücknehmen': 'Cancel call',
+  'Die Turnierleitung hat den Ruf zurückgenommen.': 'The tournament desk has cancelled the call.',
   'Turnierleitung rufen?': 'Call the tournament desk?',
   'Es wird eine Meldung an die Turnierleitung gesendet, dass an diesem Feld ein Offizieller benötigt wird.':
     'A message will be sent to the tournament desk that an official is needed at this court.',
@@ -2806,8 +2821,11 @@ function connect() {
     // Identität ist die CourtID; der Feldname geht nur informativ mit.
     sendIdentify();
     if (sendBattery) sendBattery();
-    // Aktive Meldungen nach einem Reconnect erneut melden.
-    if (STATE.alertInjury || STATE.alertOfficial) sendAlert();
+    // Meldungen nach einem Reconnect erneut melden — auch „keine". Hat die
+    // Turnierleitung einen Ruf zurückgenommen, während dieses Tablet
+    // offline war, wartet der Turnier-PC auf genau diese Bestätigung; ohne
+    // sie hielte er auch den NÄCHSTEN, neuen Ruf zurück.
+    sendAlert();
     // WICHTIG: nach einem Reconnect den aktuellen Stand re-pushen. Wurde
     // während der Offline-Zeit weitergezählt, hat der Server (und damit
     // Monitore + Liveticker) sonst nur den veralteten Stand und
@@ -2860,6 +2878,7 @@ function connect() {
     }
     if (msg.type === 'match_assigned') {
       beiMatchAssigned(msg);
+      meldungenNachholen();
     }
     else if (msg.type === 'reload') {
       // Fernbefehl aus der Turnierleitung. Anders als der stille Abgleich
@@ -2880,10 +2899,11 @@ function connect() {
       neuLaden(msg.marke || '');
       return;
     }
-    else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearReidentify(); clearMatch(); }
+    else if (msg.type === 'match_cleared') { tlog('info', 'match_cleared'); clearReidentify(); clearMatch(); meldungenNachholen(); }
     else if (msg.type === 'court_occupied') {
       tlog('info', 'court_occupied');
       STATE.occupied = true;
+      MELDUNGEN_OFFEN = true; // die Meldung vom Verbinden zählt hier nicht
       render();
       // Haben wir ein laufendes Match geladen, sind wir der rechtmäßige
       // Zähler, der nach einem Netzausfall zurückkommt – automatisch weiter
@@ -2894,6 +2914,7 @@ function connect() {
     else if (msg.type === 'state_restore') {
       beiStateRestore(msg);
     }
+    else if (msg.type === 'official_call_cleared') { tlog('info', 'official_call_cleared'); beiRufZurueckgenommen(); }
   };
   ws.onclose = (ev) => {
     els.connDot.classList.remove('ok');
@@ -3338,14 +3359,18 @@ function isDoubles() {
   return STATE.match && (STATE.match.teamA.length >= 2 || STATE.match.teamB.length >= 2);
 }
 
-let switchToastTimer = null;
-function showSwitchToast() {
-  const el = document.getElementById('switch-toast');
+// Kurzer Hinweis am unteren Rand, der nach 6 s von selbst verschwindet.
+// Je Element ein eigener Timer: Ein zweiter Hinweis darf den ersten nicht
+// vorzeitig ausblenden.
+const toastTimer = {};
+function zeigeToast(id) {
+  const el = document.getElementById(id);
   if (!el) return;
   el.style.display = 'block';
-  if (switchToastTimer) clearTimeout(switchToastTimer);
-  switchToastTimer = setTimeout(() => { el.style.display = 'none'; }, 6000);
+  if (toastTimer[id]) clearTimeout(toastTimer[id]);
+  toastTimer[id] = setTimeout(() => { el.style.display = 'none'; }, 6000);
 }
+function showSwitchToast() { zeigeToast('switch-toast'); }
 
 // ─────────────────────────────── Pausen (BWF-Intervalle) ──────────────
 // Offizielle Intervalle: 60 s sobald ein Team 11 Punkte erreicht, 120 s
@@ -3817,6 +3842,20 @@ function sendAlert() {
   tlog('info', 'alert', { injury: STATE.alertInjury, official: STATE.alertOfficial });
 }
 
+// Turnier-PC und Relay nehmen `alert` nur von dem Gerät an, das das Feld
+// HÄLT. An einem belegten Feld verpufft die Meldung vom Verbinden
+// (`ws.onopen`) deshalb — und nach der Übernahme käme von allein keine mehr.
+// Hat die Turnierleitung inzwischen einen Ruf zurückgenommen, bliebe das
+// unbestätigt offen und verschluckte den nächsten echten Ruf von diesem
+// Feld. Darum: vormerken, und nachmelden, sobald dieses Gerät das Feld hat
+// (erkennbar an der Zuweisung bzw. an „kein Spiel").
+let MELDUNGEN_OFFEN = false;
+function meldungenNachholen() {
+  if (!MELDUNGEN_OFFEN) return;
+  MELDUNGEN_OFFEN = false;
+  sendAlert();
+}
+
 function startInjury() {
   if (!verletzungMoeglich()) return;
   // Anker und Phase VOR dem Pausenwechsel — danach wäre die Phase immer
@@ -3862,6 +3901,25 @@ function confirmMegaphone() {
   sendAlert();
   els.megaphoneModal.classList.remove('visible');
   render();
+}
+
+// Die Turnierleitung hat den Ruf von ihrer Oberfläche aus zurückgenommen
+// (Nachricht `official_call_cleared`). Der Ruf lebt hier am Tablet — ohne
+// diesen Schritt stünde das Megafon weiter auf „gerufen", und das nächste
+// Neuverbinden meldete den erledigten Ruf erneut.
+function beiRufZurueckgenommen() {
+  if (STATE.alertOfficial) {
+    STATE.alertOfficial = false;
+    // Ein offener Megafon-Dialog steht noch auf „Meldung zurücknehmen" — sein
+    // Knopf schaltet nur um und riefe die Turnierleitung damit erneut.
+    els.megaphoneModal.classList.remove('visible');
+    persistState();
+    zeigeToast('ruf-toast');
+    render();
+  }
+  // Immer bestätigen, auch wenn hier gar kein Ruf (mehr) stand: Der
+  // Turnier-PC hält neue Rufe dieses Felds zurück, bis er „kein Ruf" hört.
+  sendAlert();
 }
 
 // Laufende Spieldauer in der Kopfzeile (MM:SS ab Matchstart).
@@ -4471,6 +4529,7 @@ function beiStateRestore(msg) {
         // Hosts — das übernehmende Gerät zeichnet nahtlos weiter (AK-10).
         sendRallySync();
         sendMatchEventSync();
+        sendAlert(); // die Meldungen des übernommenen Stands, s. `uebernimmStand`
         render();
       }
     } else if (wahl === 'lokal') {
@@ -4512,6 +4571,12 @@ function uebernimmStand(p) {
   persistState(true);
   sendRallySync();
   sendMatchEventSync();
+  // Der übernommene Stand bringt seine Meldungen mit (✚, 📣). Beim Verbinden
+  // hat dieses Gerät gerade erst SEINE gemeldet — bei einem frischen
+  // Ersatz-Tablet „keine", und der Turnier-PC hat den Ruf daraufhin
+  // gelöscht. Ohne diese Meldung leuchtete hier das Megafon, während die
+  // Turnierleitung nichts mehr sähe.
+  sendAlert();
   if (STATE.pendingResult) trySubmitPending();
 }
 
@@ -8683,14 +8748,20 @@ els.breakAbort.addEventListener('click', abortMatchRetired);
 els.breakInjury.addEventListener('click', startInjury);
 els.retireWinnerA.addEventListener('click', () => { STATE.retiredWinner = 'a'; persistState(); render(); });
 els.retireWinnerB.addEventListener('click', () => { STATE.retiredWinner = 'b'; persistState(); render(); });
-els.takeoverBtn.addEventListener('click', () => {
+// Das Feld von Hand übernehmen (Knopf in „Feld belegt" und „abgelöst").
+function feldUebernehmen() {
   clearReidentify(); // manuelle Übernahme ersetzt den Auto-Retry
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'take_over', deviceId: DEVICE_ID }));
   tlog('info', 'take_over');
+  // Erst MIT dem Feld zählen die Meldungen dieses Geräts wieder. Nicht
+  // gleich hier melden: Der übernommene Stand kommt erst noch und bringt
+  // seine eigenen Meldungen mit — nachgeholt wird nach der Zuweisung.
+  MELDUNGEN_OFFEN = true;
   STATE.occupied = false;
   STATE.locked = false;
   render();
-});
+}
+els.takeoverBtn.addEventListener('click', feldUebernehmen);
 // Spieldauer-Uhr im Sekundentakt aktualisieren.
 setInterval(renderClock, 1000);
 setInterval(renderAufrufUhr, 1000);

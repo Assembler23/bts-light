@@ -591,6 +591,9 @@ where
     // (Review-Befund). Der erste `ticker`-Tick feuert sofort und schickt
     // MatchAssigned + Spiegel in der richtigen Reihenfolge.
     let mut score_fp: HashMap<i64, HostFrame> = HashMap::new();
+    // Je Sitzung: Nach einem Neuverbinden mit dem Relay wird jede noch offene
+    // Rücknahme eines Rufs nach der Turnierleitung noch einmal gesagt.
+    let mut ruf_wacht = crate::tablet::state::RufWacht::default();
     // Felder, deren Cloud-Zustand in DIESER Verbindung schon einmal an den
     // Relay zurückging (die eine Ausnahme von Riegel 1, siehe
     // `score_mirror_frame`). Lebt je Verbindung — nach einem Relay-Neustart
@@ -639,6 +642,15 @@ where
                 // Seite von ihm, nicht von hier.
                 if reload_wacht.faellig(&ctx.tablet) {
                     let _ = tx.send(text(&HostFrame::ReloadTablets));
+                }
+                // Zurückgenommene Rufe nach der Turnierleitung an die
+                // Cloud-Tablets weitersagen — der Relay reicht es an das
+                // Tablet des Felds durch. Ist dort gerade keins verbunden,
+                // verfällt der Hinweis; das Tablet meldet seinen Ruf beim
+                // Wiederverbinden und bekommt die Antwort dann direkt
+                // (Arm `Alert` in `handle_frame`).
+                for court_id in ruf_wacht.faellig(&ctx.tablet) {
+                    let _ = tx.send(text(&HostFrame::OfficialCallCleared { court_id }));
                 }
                 push_all_courts(ctx, &tx, &mut last_match, &mut score_fp);
                 // Score-Spiegel-Sweep NACH den Zuweisungen (gleiche FIFO-Wire
@@ -1021,7 +1033,12 @@ async fn handle_frame(
             official,
             ..
         } => {
-            ctx.tablet.record_alert(court_id, injury, official);
+            // `true` = das Tablet meldet einen Ruf, den die Turnierleitung
+            // schon zurückgenommen hat. Gleich antworten: Ein Neuverbinden
+            // des Tablets am Relay sieht der Takt oben nicht.
+            if ctx.tablet.record_alert(court_id, injury, official) {
+                let _ = tx.send(text(&HostFrame::OfficialCallCleared { court_id }));
+            }
         }
         RelayFrame::Result {
             req_id,
@@ -3001,6 +3018,99 @@ mod tests {
                 "Runde {runde}: der Idle-Wächter hat die Sitzung beendet"
             );
         }
+    }
+
+    /// Liest `dauer` lang mit, was der Host dem Relay schickt, und sammelt
+    /// die Felder der Hinweise „Ruf zurückgenommen".
+    async fn ruecknahmen_in(server: &mut TestStrom, dauer: Duration) -> Vec<i64> {
+        let mut felder = Vec::new();
+        let ende = tokio::time::sleep(dauer);
+        tokio::pin!(ende);
+        loop {
+            tokio::select! {
+                _ = &mut ende => return felder,
+                msg = server.next() => match msg {
+                    Some(Ok(WsMessage::Text(t))) => {
+                        if let Ok(HostFrame::OfficialCallCleared { court_id }) =
+                            serde_json::from_str::<HostFrame>(t.as_str())
+                        {
+                            felder.push(court_id);
+                        }
+                    }
+                    Some(_) => {}
+                    None => return felder,
+                },
+            }
+        }
+    }
+
+    async fn tablet_meldet(server: &mut TestStrom, court_id: i64, official: bool) {
+        let frame = RelayFrame::Alert {
+            court_id,
+            court_label: court_id.to_string(),
+            injury: false,
+            official,
+        };
+        server
+            .send(WsMessage::Text(
+                serde_json::to_string(&frame).unwrap().into(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    fn ruf_im_stand(ctx: &ServerCtx, court_id: i64) -> bool {
+        ctx.tablet
+            .overview()
+            .iter()
+            .any(|o| o.court_id == court_id && o.official_call)
+    }
+
+    /// Die Cloud-Strecke der Rücknahme, Ende zu Ende am Host: Der Sweep sagt
+    /// es dem Relay **einmal** je Sitzung (ohne Zustellbestätigung — hängt
+    /// kein Tablet am Feld, verfällt der Hinweis dort). Die Lücke schließt
+    /// die Antwort auf die Wiedermeldung: Meldet das Tablet den alten Ruf
+    /// erneut, bekommt es den Hinweis direkt noch einmal. Erst „kein Ruf"
+    /// beendet das Zurückhalten.
+    #[tokio::test(start_paused = true)]
+    async fn zurueckgenommener_ruf_geht_ueber_den_relay_ans_tablet() {
+        let ctx = ctx_zwei_felder();
+        assert!(!ctx.tablet.record_alert(1, false, true));
+        assert!(ctx.tablet.ruf_zuruecknehmen(1));
+        let (dienste, _belegt) =
+            dienste_ohne_netz(attrappe(Arc::new(Mess::default()), Duration::ZERO));
+        let (client, mut server) = ws_paar().await;
+        let sitzung = sitzung_starten(ctx.clone(), client, dienste);
+
+        // Mehrere Takte lang mitgelesen: genau ein Hinweis, kein Dauerfeuer.
+        assert_eq!(
+            ruecknahmen_in(&mut server, Duration::from_secs(7)).await,
+            vec![1]
+        );
+
+        // Das Tablet hat ihn verpasst und meldet seinen alten Ruf wieder.
+        tablet_meldet(&mut server, 1, true).await;
+        assert_eq!(
+            ruecknahmen_in(&mut server, Duration::from_secs(3)).await,
+            vec![1],
+            "die Wiedermeldung wird sofort beantwortet"
+        );
+        assert!(!ruf_im_stand(&ctx, 1), "der Ruf bleibt zurückgehalten");
+
+        // Das Tablet bestätigt mit „kein Ruf" …
+        tablet_meldet(&mut server, 1, false).await;
+        assert!(ruecknahmen_in(&mut server, Duration::from_secs(3))
+            .await
+            .is_empty());
+        assert!(!ctx.tablet.ruf_ruecknahme_offen(1));
+
+        // … und der nächste Ruf ist wieder ein echter.
+        tablet_meldet(&mut server, 1, true).await;
+        assert!(ruecknahmen_in(&mut server, Duration::from_secs(3))
+            .await
+            .is_empty());
+        assert!(ruf_im_stand(&ctx, 1));
+        assert!(!sitzung.is_finished());
     }
 
     #[test]

@@ -290,9 +290,36 @@ LAN+Cloud voraus.
 
   Die Zeile steht auf **jedem** Gerät der Turnierleitung, in jedem Profil und
   **unabhängig vom Hallenfilter** — auch wer gerade nur Halle 2 ansieht,
-  erfährt vom Ruf aus Halle 1. Sie bleibt stehen, bis der Ruf **am Tablet
-  zurückgenommen** wird oder das Spiel das Feld verlässt; im TL-Web lässt sie
-  sich nicht wegklicken. Einen Ton gibt es nicht.
+  erfährt vom Ruf aus Halle 1. Sie bleibt stehen, bis der Ruf zurückgenommen
+  wird — am Tablet oder hier — oder das Spiel das Feld verlässt. Einen Ton
+  gibt es nicht.
+
+  **Ruf zurücknehmen** (seit v0.9.435): Hinter jedem rufenden Feld steht im
+  Band der Knopf **zurücknehmen**; derselbe Schritt steht als **Ruf
+  zurücknehmen** im ⋯-Menü der Feld-Kachel. Nach einer Rückfrage verschwindet
+  die Meldung auf allen Geräten der Turnierleitung und am Turnier-PC, und am
+  Zähl-Tablet geht das Megafon aus — dort erscheint kurz der Hinweis, dass die
+  Turnierleitung den Ruf zurückgenommen hat. Gedacht für „erledigt" oder „es
+  ist jemand unterwegs"; die Verletzungsmeldung (✚) bleibt davon unberührt.
+<!-- pruef: "zurücknehmen" in src-tauri/assets/tl.html -->
+<!-- pruef: "Ruf zurücknehmen" in src-tauri/assets/tl.html -->
+
+  Drei Randfälle, damit nichts überrascht:
+
+  - **Das Tablet ist gerade ohne Verbindung:** Die Meldung ist bei der
+    Turnierleitung sofort weg; das Megafon am Tablet geht aus, sobald es
+    wieder verbunden ist.
+  - **Die Tablet-Seite ist älter als v0.9.435** (seit dem Update nicht neu
+    geladen): Sie versteht die Rücknahme nicht, das Megafon bleibt dort an.
+    Bei der Turnierleitung bleibt die Meldung trotzdem weg — der nächste Ruf
+    von diesem Feld kommt aber erst an, wenn am Tablet einmal „Meldung
+    zurücknehmen" getippt wurde. **Tablets neu laden** behebt das.
+  - **Der Turnier-PC wird neu gestartet**, bevor das Tablet die Rücknahme
+    bestätigt hat: Der Ruf erscheint wieder und lässt sich erneut
+    zurücknehmen.
+
+  Fehlt der Knopf, läuft am Turnier-PC noch eine ältere Version — dann geht
+  es wie bisher nur am Tablet.
 
   Das Band kann seitdem **mehrere Zeilen** tragen: der Ruf zuerst, darunter
   „Ergebnis fehlt", darunter der Meetingpoint-Hinweis. Vorher verdeckte eine

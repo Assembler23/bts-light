@@ -1595,6 +1595,20 @@ pub enum ServerMsg {
     /// gesperrt – kein Zählen mehr möglich.
     #[serde(rename = "session_superseded")]
     SessionSuperseded,
+    /// Die Turnierleitung hat den Ruf dieses Felds („Turnierleitung ans
+    /// Feld") aus ihrer Oberfläche zurückgenommen.
+    ///
+    /// Der Ruf lebt am **Tablet**: Es meldet ihn nach jedem Neuverbinden
+    /// erneut. Nähme der Host ihn nur bei sich weg, käme er beim nächsten
+    /// Wackler zurück — und das Megafon am Tablet bliebe „an". Deshalb sagt
+    /// der Host es dem Tablet, das Tablet löscht seinen Merker und bestätigt
+    /// mit einem `alert` ohne Ruf.
+    ///
+    /// Eine ältere Tablet-Seite kennt den Typ nicht und übergeht ihn. Der
+    /// Host hält den Ruf dann von sich aus zurück, bis das Tablet ihn selbst
+    /// einmal ohne Ruf meldet.
+    #[serde(rename = "official_call_cleared")]
+    OfficialCallCleared,
     /// Spielzustand für ein Tablet, das einen Court übernimmt – damit es
     /// das laufende Spiel fortsetzt statt bei 0:0 zu beginnen.
     #[serde(rename = "state_restore")]
@@ -2367,6 +2381,17 @@ pub enum TlAction {
         court_id: i64,
         locked: bool,
     },
+    /// Den Ruf eines Felds nach der Turnierleitung zurücknehmen — das, was
+    /// sonst nur das Megafon am Zähl-Tablet kann.
+    ///
+    /// Trägt den **Zielzustand** („kein Ruf"), kein Umschalten: Zwei
+    /// Turnierleitungs-Geräte dürfen dasselbe Feld quittieren, ohne dass das
+    /// zweite den Ruf wieder einschaltet. Einen Ruf **setzen** kann die
+    /// Turnierleitung nicht — der kommt immer vom Feld.
+    ClearOfficialCall {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+    },
     /// Erneuter Aufruf eines Spiels, das bereits auf dem Feld steht (2./3.
     /// Aufruf). Die **Stufe zählt der Host** — sie darf nicht im Browser
     /// leben, sonst zählt bei mehreren Geräten jedes für sich.
@@ -3030,6 +3055,14 @@ pub enum HostFrame {
     /// Seite. Der Host kennt seine eigene, und die ist im Cloud-Betrieb nicht
     /// die, die das Tablet geladen hat.
     ReloadTablets,
+    /// Die Turnierleitung hat den Ruf dieses Felds zurückgenommen. Der Relay
+    /// setzt das in ein [`ServerMsg::OfficialCallCleared`] an das Tablet
+    /// **dieses** Felds um und merkt sich nichts — der Ruf lebt am Tablet
+    /// und am Host, nicht am Relay.
+    OfficialCallCleared {
+        #[serde(rename = "courtId")]
+        court_id: i64,
+    },
     /// Satzstand-Spiegel des Hosts (autoritativ). Im LAN(+Cloud)-Betrieb
     /// zählen die Tablets am Relay vorbei direkt gegen den Host — ohne diesen
     /// Spiegel bleiben Cloud-Monitor und Cloud-Übersicht auf 0:0 stehen
@@ -5675,6 +5708,7 @@ mod tests {
                 locked: true,
             },
             TlAction::ReloadTablets,
+            TlAction::ClearOfficialCall { court_id: 5 },
             TlAction::SetWishCourt {
                 match_id: 4711,
                 court_id: Some(3),
@@ -5910,6 +5944,26 @@ mod tests {
         let frame = serde_json::to_string(&HostFrame::ReloadTablets).unwrap();
         let zurueck: HostFrame = serde_json::from_str(&frame).unwrap();
         assert_eq!(zurueck, HostFrame::ReloadTablets);
+    }
+
+    #[test]
+    fn ruf_zuruecknehmen_wire_form() {
+        // Drei Stationen, drei Formen: Oberfläche → Host, Host → Relay,
+        // Host/Relay → Tablet. Die Tablet-Seite vergleicht den Typ als
+        // Zeichenkette — ein Tippfehler wäre dort ein stilles Übergehen.
+        let aktion = serde_json::to_string(&TlAction::ClearOfficialCall { court_id: 7 }).unwrap();
+        assert_eq!(aktion, r#"{"action":"clear_official_call","courtId":7}"#);
+        roundtrip(&TlAction::ClearOfficialCall { court_id: 7 });
+
+        let frame = serde_json::to_string(&HostFrame::OfficialCallCleared { court_id: 7 }).unwrap();
+        assert_eq!(frame, r#"{"type":"official_call_cleared","courtId":7}"#);
+        let zurueck: HostFrame = serde_json::from_str(&frame).unwrap();
+        assert_eq!(zurueck, HostFrame::OfficialCallCleared { court_id: 7 });
+
+        let msg = serde_json::to_string(&ServerMsg::OfficialCallCleared).unwrap();
+        assert_eq!(msg, r#"{"type":"official_call_cleared"}"#);
+        let zurueck: ServerMsg = serde_json::from_str(&msg).unwrap();
+        assert_eq!(zurueck, ServerMsg::OfficialCallCleared);
     }
 
     #[test]
