@@ -140,7 +140,7 @@ pub fn run() {
             commands::update_info,
             commands::update_install_now,
             commands::update_set_install_on_exit,
-            commands::take_update_resume,
+            commands::take_wiederanlauf,
             commands::get_status,
             commands::wifi_status,
             commands::internet_status,
@@ -253,6 +253,9 @@ pub fn run() {
             // einmalig in die Geräte-Datei um (ADR 0049).
             commands::migrate_combo_dir_einmalig(app.handle());
             setup_tray(app.handle())?;
+            // Zuletzt: Lief die Übertragung vor einem Update, läuft sie
+            // jetzt wieder an — ohne auf das Fenster zu warten.
+            commands::wiederanlauf_im_kern(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {

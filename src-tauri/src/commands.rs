@@ -112,6 +112,10 @@ pub struct AppState {
     /// Phasen des Update-Ablaufs + geladenes Paket (Spec
     /// `update-im-turnierbetrieb`, ADR 0057).
     pub update: crate::update::UpdateManager,
+    /// Ergebnis des Wiederanlaufs im Kern, bis das Fenster es abholt.
+    pub wiederanlauf: Mutex<Option<WiederanlaufMeldung>>,
+    /// Anhaltezeit der Vorversion, bis der LAN-Server die Lücke misst.
+    pub wiederanlauf_stop_ms: Mutex<Option<u64>>,
     /// Stand des letzten TP-Datei-Uploads (Spec `tp-datei-upload`). Nur im
     /// Speicher: nicht in der Config, nicht in der `SyncEngine` (die wird bei
     /// jedem Speichern neu gebaut). Geht beim Neustart verloren — der Server
@@ -2812,8 +2816,153 @@ pub fn tp_upload_status(state: State<'_, AppState>) -> TpUploadStatus {
 }
 
 /// Startet die Hintergrund-Polling-Schleife (BTP → Badhub, alle 5 s).
+/// Meldung für die Leiste, wenn der Tablet-Server nicht läuft.
+fn lan_fehler_text(e: &std::io::Error) -> String {
+    let grund = if e.kind() == std::io::ErrorKind::AddrInUse {
+        "der Port ist belegt – läuft bts-light doppelt oder nutzt ihn ein anderes Programm?"
+            .to_string()
+    } else {
+        e.to_string()
+    };
+    format!(
+        "Der Tablet-Server konnte Port {} nicht öffnen ({grund})",
+        crate::tablet::server::TABLET_PORT
+    )
+}
+
+/// Was der Wiederanlauf nach einem Update tun soll.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WiederanlaufPlan {
+    /// Kein frischer Marker einer laufenden Übertragung.
+    Nichts,
+    /// Übertragung starten; `stop_ms` ist der Anfang der Lücke.
+    Starten { stop_ms: u64 },
+    /// Die Übertragung lief, kann aber nicht starten — mit dem Grund, den
+    /// die Turnierleitung zu sehen bekommt.
+    Abgelehnt { grund: String },
+}
+
+/// Entscheidet rein aus Marker und Konfiguration (testbar ohne App).
+pub(crate) fn wiederanlauf_plan(
+    marker: Option<&crate::update::ResumeMarker>,
+    config: Result<&AppConfig, String>,
+) -> WiederanlaufPlan {
+    let Some(marker) = marker else {
+        return WiederanlaufPlan::Nichts;
+    };
+    let config = match config {
+        Ok(c) => c,
+        Err(e) => {
+            return WiederanlaufPlan::Abgelehnt {
+                grund: format!("Die Einstellungen ließen sich nicht lesen ({e})."),
+            }
+        }
+    };
+    match pruefe_startbedingungen(config) {
+        Ok(()) => WiederanlaufPlan::Starten {
+            stop_ms: marker.written_ms,
+        },
+        Err(grund) => WiederanlaufPlan::Abgelehnt { grund },
+    }
+}
+
+/// Was das Fenster nach dem Start über den Wiederanlauf erfährt.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct WiederanlaufMeldung {
+    /// Die Übertragung wurde vom Kern gestartet.
+    pub gestartet: bool,
+    /// Sie lief vor dem Update, konnte aber nicht starten — warum.
+    pub fehler: Option<String>,
+}
+
+/// Wiederanlauf nach einem Update, **im Kern**: Lief die Übertragung, als
+/// die Vorversion anhielt, startet sie hier von selbst — in `.setup()`, ohne
+/// auf das Fenster zu warten. Das verkürzt die Unterbrechung und ist die
+/// Voraussetzung dafür, sie zu messen (Spec hotfix-ohne-neustart, E7).
+///
+/// Der Marker wird in jedem Fall verbraucht. Das Ergebnis holt das Fenster
+/// über [`take_wiederanlauf`] ab.
+pub fn wiederanlauf_im_kern(app: &AppHandle) {
+    let marker = crate::update::take_resume_marker(&update_resume_pfad(app), now_ms());
+    if marker.is_none() {
+        return;
+    }
+    let state = app.state::<AppState>();
+    let geladen = AppConfig::load_from(&config_path(app)).map_err(|e| e.to_string());
+    let meldung = match wiederanlauf_plan(marker.as_ref(), geladen.as_ref().map_err(Clone::clone)) {
+        WiederanlaufPlan::Nichts => return,
+        WiederanlaufPlan::Abgelehnt { grund } => {
+            tracing::warn!("Wiederanlauf nach Update nicht möglich: {grund}");
+            WiederanlaufMeldung {
+                gestartet: false,
+                fehler: Some(grund),
+            }
+        }
+        WiederanlaufPlan::Starten { stop_ms } => {
+            let config = geladen.expect("Plan Starten setzt eine lesbare Konfiguration voraus");
+            *state.config.lock().expect("Config-Mutex nicht vergiftet") = config;
+            *state
+                .wiederanlauf_stop_ms
+                .lock()
+                .expect("Wiederanlauf-Mutex nicht vergiftet") = Some(stop_ms);
+            let ergebnis = start_sync_kern(app, &state);
+            // Die Anhaltezeit gehört nur zu DIESEM Start. Hat der LAN-Server
+            // sie nicht abgeholt (kein LAN, Start gescheitert), muss sie weg
+            // — sonst mäße ein späterer Start von Hand eine „Lücke" von
+            // Minuten oder Stunden.
+            state
+                .wiederanlauf_stop_ms
+                .lock()
+                .expect("Wiederanlauf-Mutex nicht vergiftet")
+                .take();
+            match ergebnis {
+                Ok(()) => {
+                    tracing::info!(
+                        "Wiederanlauf nach Update: Übertragung vom Kern gestartet, {} ms nach dem Anhalten der Vorversion",
+                        crate::update::luecke_ms(stop_ms, now_ms())
+                    );
+                    WiederanlaufMeldung {
+                        gestartet: true,
+                        fehler: None,
+                    }
+                }
+                Err(grund) => {
+                    tracing::warn!("Wiederanlauf nach Update gescheitert: {grund}");
+                    WiederanlaufMeldung {
+                        gestartet: false,
+                        fehler: Some(grund),
+                    }
+                }
+            }
+        }
+    };
+    *state
+        .wiederanlauf
+        .lock()
+        .expect("Wiederanlauf-Mutex nicht vergiftet") = Some(meldung);
+}
+
+/// Holt das Ergebnis des Wiederanlaufs ab — einmal; danach ist es leer.
+#[tauri::command]
+pub fn take_wiederanlauf(state: State<'_, AppState>) -> WiederanlaufMeldung {
+    state
+        .wiederanlauf
+        .lock()
+        .expect("Wiederanlauf-Mutex nicht vergiftet")
+        .take()
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    start_sync_kern(&app, &state)
+}
+
+/// Der Start der Übertragung ohne Tauri-`State` — derselbe Weg für den Knopf
+/// im Fenster und für den Wiederanlauf nach einem Update, der schon in
+/// `.setup()` läuft, bevor das Fenster etwas geladen hat (Spec
+/// hotfix-ohne-neustart, E7).
+pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let mut slot = state.sync_task.lock().expect("Task-Mutex nicht vergiftet");
     if slot.is_some() {
         return Ok(()); // läuft bereits
@@ -2858,7 +3007,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Live-Stände vom letzten Lauf wiederherstellen, BEVOR der erste Sync
     // läuft – sonst pusht run_once kurzzeitig BTPs 0:0. Danach jede
     // Score-Änderung dauerhaft sichern.
-    let scores_path = tablet_scores_path(&app);
+    let scores_path = tablet_scores_path(app);
     if let Some(parent) = scores_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -2868,12 +3017,12 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // setzen (gleiches Verzeichnis wie die Live-Stände, oben schon angelegt).
     // Geladen wird die Queue erst beim ersten Snapshot — dann liegt der
     // Turnier-Guard (`tournament_name`) vor.
-    tablet.set_btp_retry_path(tablet_btp_retry_path(&app));
+    tablet.set_btp_retry_path(tablet_btp_retry_path(app));
     // Schiedsrichter-Roster (ADR 0022): Pfad jetzt, das Turnier kommt mit dem
     // ersten Snapshot — passt der Datei-Kopf nicht, wird der Stand verworfen.
     tablet
         .officials_store()
-        .set_path(tablet_officials_path(&app));
+        .set_path(tablet_officials_path(app));
     tablet
         .officials_store()
         .set_enabled(config.officials.enabled);
@@ -2886,20 +3035,20 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
     // Ausnahmeliste der automatischen Feldvergabe (Spec
     // `feldvergabe-ausnahme`, Muster ADR 0022): Pfad jetzt, das Turnier
     // kommt mit dem ersten Snapshot.
-    tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(&app));
-    tablet.set_wish_courts_path(tablet_wish_courts_path(&app));
+    tablet.set_auto_assign_exclusions_path(tablet_exclusions_path(app));
+    tablet.set_wish_courts_path(tablet_wish_courts_path(app));
     // Vorbereitungs-Aufrufe überleben Neustart und Update (ADR 0071).
-    tablet.set_meetingpoint_path(tablet_meetingpoint_path(&app));
-    tablet.set_queue_order_path(tablet_queue_order_path(&app));
+    tablet.set_meetingpoint_path(tablet_meetingpoint_path(app));
+    tablet.set_queue_order_path(tablet_queue_order_path(app));
     // Druck-Gedächtnis des Autodrucks (Spec
     // `schiedsrichterzettel-autodruck`): ebenso Pfad jetzt, Turnier
     // später. Ohne ihn druckte ein App-Neustart alle laufenden Spiele nach.
-    tablet.set_print_log_path(tablet_print_log_path(&app));
+    tablet.set_print_log_path(tablet_print_log_path(app));
     // Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster ADR 0022):
     // Pfad jetzt, das Turnier kommt mit dem ersten Snapshot.
-    tablet.set_match_times_path(tablet_match_times_path(&app));
+    tablet.set_match_times_path(tablet_match_times_path(app));
     // Auto-Hallen (Spec `hallen-vorverteilung`, ADR 0029): ebenso.
-    tablet.set_auto_halls_path(tablet_auto_halls_path(&app));
+    tablet.set_auto_halls_path(tablet_auto_halls_path(app));
     // Punktverlauf: dauerhafte Ablage je Turnier (ADR 0015). Verzeichnis
     // jetzt, das Turnier kommt mit dem ersten Snapshot; die GUID aus der
     // Check-In-Config wandert als badhub-Brücke in den Datei-Kopf.
@@ -3091,10 +3240,10 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
 
     // Geteilter Tablet-Kontext – je nach Modus betreibt ihn der
     // eingebettete Server (LAN) oder der Relay-Client (Cloud).
-    let monitor_dir = monitor_ad_dir(&app);
+    let monitor_dir = monitor_ad_dir(app);
     let _ = std::fs::create_dir_all(&monitor_dir);
-    let cfg_path = config_path(&app);
-    let assignments_path = monitor_assignments_path(&app);
+    let cfg_path = config_path(app);
+    let assignments_path = monitor_assignments_path(app);
     let log_dir = app
         .path()
         .app_log_dir()
@@ -3127,9 +3276,22 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
             .expect("Tablet-Server-Mutex nicht vergiftet");
         if server_slot.is_none() {
             let ctx = ctx.clone();
+            let tablet_fuer_lage = state.tablet.clone();
+            // Nach einem Update misst das Binden die Lücke seit dem
+            // Anhalten der Vorversion.
+            let stop_ms = state
+                .wiederanlauf_stop_ms
+                .lock()
+                .expect("Wiederanlauf-Mutex nicht vergiftet")
+                .take();
+            let lauf = tablet_fuer_lage.lan_start(stop_ms);
             *server_slot = Some(tauri::async_runtime::spawn(async move {
                 if let Err(e) = crate::tablet::server::run(ctx).await {
                     tracing::error!("Tablet-Server beendet: {e}");
+                    // Nicht nur ins Log: Ohne diesen Server erreichen die
+                    // Geräte im Hallennetz den PC nicht, und die
+                    // Turnierleitung sähe davon sonst nichts.
+                    tablet_fuer_lage.lan_fehler(lauf, &lan_fehler_text(&e));
                 }
             }));
         }
@@ -3156,7 +3318,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
             if tls_slot.is_none() {
                 let ctx = ctx.clone();
                 let port = tls_port;
-                let cert_dir = config_path(&app)
+                let cert_dir = config_path(app)
                     .parent()
                     .map(|p| p.to_path_buf())
                     .unwrap_or_default();
@@ -3457,19 +3619,6 @@ pub fn update_set_install_on_exit(state: State<'_, AppState>, an: bool) -> Resul
     }
 }
 
-/// Liest und löscht den Wiederanlauf-Marker. `true` = die Übertragung lief
-/// vor dem Update und soll jetzt von selbst wieder anlaufen. Das Frontend
-/// ruft das einmal nach dem Laden der Konfiguration und startet dann über
-/// `start_sync` — derselbe Weg wie der Knopf, mit derselben Fehleranzeige.
-#[tauri::command]
-pub fn take_update_resume(app: AppHandle) -> bool {
-    let wieder = crate::update::take_resume(&update_resume_pfad(&app), now_ms());
-    if wieder {
-        tracing::info!("Wiederanlauf nach Update: Übertragung wird automatisch gestartet");
-    }
-    wieder
-}
-
 /// Schließpfad: Ist der Einbau beim Beenden vorgemerkt, legt das den
 /// Installer ab und startet ihn stumm (ohne Neustart der App). Fehler
 /// werden nur geloggt — das Beenden darf daran nicht scheitern.
@@ -3568,6 +3717,7 @@ pub fn stop_sync(state: State<'_, AppState>) {
     // und danach schreibt niemand mehr (Review-Fund 19.08.2026). Synchron,
     // damit dieser Aufruf erst zurückkehrt, wenn die Datei steht.
     state.tablet.flush_scores();
+    state.tablet.lan_gestoppt();
     *state.status.lock().expect("Status-Mutex nicht vergiftet") = SyncStatus::default();
     // Auch die Lage des (eben beendeten) Senders: Sonst stünde nach dem
     // nächsten Start kurz die Störung von vorhin in der Zeile.
@@ -3670,6 +3820,9 @@ pub struct TabletInfo {
     /// Relay diesen PC seit über 30 s abweist, weil ein anderer PC dasselbe
     /// Turnier hält (Spec relay-haerten, PR 9).
     pub cloud_hinweis: Option<String>,
+    /// Hinweis zum LAN-Server — gesetzt, wenn der Tablet-Port sich nicht
+    /// öffnen ließ, obwohl die Übertragung läuft.
+    pub lan_hinweis: Option<String>,
 }
 
 /// Liefert Verbindungsart, Tablet-Adressen-Basis und die Felder-Übersicht.
@@ -3728,6 +3881,7 @@ pub fn tablet_overview(state: State<'_, AppState>) -> TabletInfo {
             .then(|| state.tablet.cloud_hinweis())
             .flatten()
             .map(str::to_string),
+        lan_hinweis: state.tablet.lan_hinweis(),
     }
 }
 
@@ -9004,6 +9158,122 @@ mod tests {
         assert!(!gespeichert.auto_assign_paused);
         assert!(gespeichert.auto_assign_paused_tournament.is_empty());
         assert!(!shared.lock().unwrap().auto_assign_paused);
+    }
+
+    /// Regression (Roadmap 06.09.2026, Spec hotfix-ohne-neustart G7): Die im
+    /// TL-Web gesetzte Pause der Feldvergabe überlebt den Prozesswechsel bei
+    /// einem Update. Zwei „Prozesse" — getrennte `TabletState`, verbunden nur
+    /// über die Datei — und der Weg, den `start_sync_kern` geht.
+    #[test]
+    fn pause_der_automatik_ueberlebt_den_wiederanlauf() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+
+        // Alte Version: Die Turnierleitung pausiert die Automatik.
+        {
+            let shared = Arc::new(Mutex::new(AppConfig::default()));
+            let tablet = TabletState::default();
+            tablet
+                .persist_auto_assign_pause(true, |anwenden| {
+                    mutate_config_at(&path, &shared, |cfg| {
+                        anwenden(cfg);
+                        Ok(())
+                    })
+                    .map(|_| ())
+                })
+                .unwrap();
+            assert!(tablet.auto_assign_paused());
+        }
+
+        // Neue Version: Konfiguration von der Platte, frischer Zustand.
+        let geladen = AppConfig::load_from(&path).unwrap();
+        assert!(geladen.auto_assign_paused, "die Pause steht in der Datei");
+        let tablet = TabletState::default();
+        assert!(!tablet.auto_assign_paused());
+        tablet.load_auto_assign_pause(
+            geladen.auto_assign_paused,
+            &geladen.auto_assign_paused_tournament,
+        );
+        assert!(tablet.auto_assign_paused());
+        // Der erste Snapshot desselben Turniers hebt sie nicht auf.
+        tablet.bind_auto_assign_pause(&geladen.auto_assign_paused_tournament);
+        assert!(
+            tablet.auto_assign_paused(),
+            "nach dem Wiederanlauf vergibt die Automatik weiter keine Felder"
+        );
+    }
+
+    fn frischer_marker() -> crate::update::ResumeMarker {
+        crate::update::ResumeMarker {
+            running: true,
+            written_ms: 5_000,
+            from_version: "0.9.0".into(),
+        }
+    }
+
+    fn startbare_config() -> AppConfig {
+        let mut cfg = AppConfig {
+            connection_mode: crate::config::ConnectionMode::Lan,
+            tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".into(),
+            ..AppConfig::default()
+        };
+        cfg.badhub.password = "geheim".into();
+        cfg
+    }
+
+    #[test]
+    fn kern_wiederanlauf_startet_bei_frischem_marker() {
+        let cfg = startbare_config();
+        assert_eq!(pruefe_startbedingungen(&cfg), Ok(()));
+        assert_eq!(
+            wiederanlauf_plan(Some(&frischer_marker()), Ok(&cfg)),
+            WiederanlaufPlan::Starten { stop_ms: 5_000 },
+            "der Schreibzeitpunkt des Markers ist der Anfang der Lücke"
+        );
+        // Ohne Marker (kein Update, Übertragung lief nicht, Marker zu alt —
+        // das entscheidet `take_resume_marker`) passiert nichts.
+        assert_eq!(wiederanlauf_plan(None, Ok(&cfg)), WiederanlaufPlan::Nichts);
+        assert_eq!(
+            wiederanlauf_plan(None, Err("egal".into())),
+            WiederanlaufPlan::Nichts
+        );
+    }
+
+    #[test]
+    fn kein_wiederanlauf_ohne_startbedingungen_und_grund_wird_gemeldet() {
+        let marker = frischer_marker();
+        // Passwort fehlt: nicht starten, aber sagen warum — sonst wartete
+        // die Turnierleitung auf eine Übertragung, die nie kommt.
+        let mut ohne_passwort = startbare_config();
+        ohne_passwort.badhub.password.clear();
+        assert_eq!(
+            wiederanlauf_plan(Some(&marker), Ok(&ohne_passwort)),
+            WiederanlaufPlan::Abgelehnt {
+                grund: "Es ist kein Badhub-Passwort konfiguriert.".into()
+            }
+        );
+        let mut ohne_kennung = startbare_config();
+        ohne_kennung.tournament_uuid.clear();
+        ohne_kennung.checkin.tournament_uuid.clear();
+        assert!(matches!(
+            wiederanlauf_plan(Some(&marker), Ok(&ohne_kennung)),
+            WiederanlaufPlan::Abgelehnt { grund } if grund.contains("Turnier-Kennung")
+        ));
+        // Konfiguration unlesbar.
+        assert!(matches!(
+            wiederanlauf_plan(Some(&marker), Err("kaputt".into())),
+            WiederanlaufPlan::Abgelehnt { grund } if grund.contains("kaputt")
+        ));
+    }
+
+    #[test]
+    fn lan_fehler_text_nennt_port_und_ursache() {
+        let belegt = std::io::Error::from(std::io::ErrorKind::AddrInUse);
+        let text = lan_fehler_text(&belegt);
+        assert!(text.contains("8088"), "{text}");
+        assert!(text.contains("belegt"), "{text}");
+        let anderer = std::io::Error::other("irgendwas");
+        assert!(lan_fehler_text(&anderer).contains("irgendwas"));
     }
 
     #[test]

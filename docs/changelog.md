@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.434
+
+- **Nach einem Update läuft die Übertragung schneller wieder.** Den
+  Wiederanlauf übernimmt jetzt das Programm selbst gleich beim Start, statt zu
+  warten, bis das Fenster geladen ist.
+- **Die Unterbrechung wird gemessen.** In der Logdatei steht nach jedem Update,
+  wie lange die Geräte im Hallennetz den PC nicht erreicht haben („Lücke N
+  ms"). Das ist die Grundlage, um den geplanten Wechsel ohne Installer zu
+  bewerten.
+- **Roter Balken, wenn der Anschluss für die Hallengeräte belegt ist.** Konnte
+  bts-light Port 8088 nicht öffnen — etwa weil es doppelt läuft —, stand das
+  bisher nur in der Logdatei. Jetzt sagt es der Balken oben in der App.
+
 ## v0.9.430
 
 - **Turnierleitungs-Oberfläche mit einem Klick am Turnier-PC.** In der

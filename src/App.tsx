@@ -8,7 +8,7 @@ import {
   saveConfig,
   startSync,
   stopSync,
-  takeUpdateResume,
+  takeWiederanlauf,
   wifiStatus,
 } from "./api";
 import { setLegacyOutput, setSharedOverrides } from "./io/announcer";
@@ -234,29 +234,23 @@ function App() {
         const brauchtGuid = !c.slave_mode && !isTournamentGuid(c.tournament_uuid);
         const eingerichtet = Boolean(c.badhub.password) && !brauchtGuid;
         setView(eingerichtet ? "dashboard" : "wizard");
-        // Wiederanlauf nach einem Update (Spec `update-im-turnierbetrieb`):
-        // lief die Übertragung, als der Installer die App beendete, startet
-        // sie hier von selbst — derselbe Weg wie der Knopf, mit derselben
-        // Fehleranzeige. Nur bei eingerichteter App; sonst führt der
-        // Assistent ohnehin erst zum fehlenden Feld.
-        void wiederAnlaufen(eingerichtet);
+        // Wiederanlauf nach einem Update: Den Start übernimmt seit
+        // v0.9.434 der Rust-Kern schon beim Programmstart (Spec
+        // hotfix-ohne-neustart, E7). Hier wird nur das Ergebnis abgeholt.
+        void wiederAnlaufen();
       })
       .catch(() => setView("wizard"));
   }, []);
 
-  /** Marker immer abholen (sonst bliebe er liegen), starten nur bei
-   *  eingerichteter App. */
-  async function wiederAnlaufen(eingerichtet: boolean) {
+  /** Ergebnis des Wiederanlaufs im Kern abholen: Status auffrischen, wenn
+   *  er gestartet hat; den Grund zeigen, wenn er nicht starten konnte. */
+  async function wiederAnlaufen() {
     try {
-      const wieder = await takeUpdateResume();
-      if (!wieder || !eingerichtet) return;
-      setBusy(true);
-      await startSync();
-      setStatus(await getStatus());
+      const ergebnis = await takeWiederanlauf();
+      if (ergebnis.fehler) setRunError(ergebnis.fehler);
+      if (ergebnis.gestartet) setStatus(await getStatus());
     } catch (e) {
       setRunError(String(e));
-    } finally {
-      setBusy(false);
     }
   }
 

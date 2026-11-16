@@ -76,15 +76,23 @@ pub fn remove_resume(path: &Path) {
 /// abgelaufener Marker verschwindet damit ebenfalls — er soll keinen
 /// späteren Start mehr beeinflussen.
 pub fn take_resume(path: &Path, now_ms: u64) -> bool {
+    take_resume_marker(path, now_ms).is_some()
+}
+
+/// Wie [`take_resume`], liefert aber den gültigen Marker selbst — sein
+/// Schreibzeitpunkt ist der Anfang der Lücke, die der Wiederanlauf misst.
+pub fn take_resume_marker(path: &Path, now_ms: u64) -> Option<ResumeMarker> {
     let inhalt = std::fs::read(path);
     remove_resume(path);
-    let Ok(bytes) = inhalt else {
-        return false;
-    };
-    match serde_json::from_slice::<ResumeMarker>(&bytes) {
-        Ok(marker) => resume_gilt(&marker, now_ms),
-        Err(_) => false,
-    }
+    let marker = serde_json::from_slice::<ResumeMarker>(&inhalt.ok()?).ok()?;
+    resume_gilt(&marker, now_ms).then_some(marker)
+}
+
+/// Dauer der Unterbrechung in Millisekunden: vom Anhalten der alten Version
+/// (Schreibzeitpunkt des Markers) bis der Tablet-Port der neuen wieder
+/// offen ist. Eine zurückgestellte Uhr ergibt 0 statt einer Riesenzahl.
+pub fn luecke_ms(stop_ms: u64, wieder_offen_ms: u64) -> u64 {
+    wieder_offen_ms.saturating_sub(stop_ms)
 }
 
 /// Argumente des stillen Einbaus beim Beenden: stumm, als Update erkannt,
@@ -360,6 +368,36 @@ mod tests {
             installer_dateiname("../1.0\\x"),
             "bts-light-update-..1.0x-setup.exe"
         );
+    }
+
+    #[test]
+    fn marker_wird_genau_einmal_genommen() {
+        let dir = tempfile::tempdir().unwrap();
+        let pfad = dir.path().join("update-resume.json");
+        write_resume(&pfad, &marker(true, 1_000)).unwrap();
+
+        let genommen = take_resume_marker(&pfad, 2_000).expect("frischer Marker");
+        assert_eq!(genommen.written_ms, 1_000);
+        assert!(!pfad.exists(), "der Marker ist weg");
+        // Ein zweiter Start (oder das Frontend danach) bekommt nichts mehr.
+        assert!(take_resume_marker(&pfad, 2_000).is_none());
+        assert!(!take_resume(&pfad, 2_000));
+
+        // Auch ein Marker, der NICHT gilt, verschwindet beim Nehmen.
+        write_resume(&pfad, &marker(false, 1_000)).unwrap();
+        assert!(take_resume_marker(&pfad, 2_000).is_none());
+        assert!(!pfad.exists());
+        write_resume(&pfad, &marker(true, 1_000)).unwrap();
+        assert!(take_resume_marker(&pfad, 1_000 + RESUME_MAX_AGE_MS + 1).is_none());
+        assert!(!pfad.exists());
+    }
+
+    #[test]
+    fn luecke_wird_aus_stop_und_bind_berechnet() {
+        assert_eq!(luecke_ms(10_000, 12_350), 2_350);
+        assert_eq!(luecke_ms(10_000, 10_000), 0);
+        // Uhr zurückgestellt: 0, kein Überlauf.
+        assert_eq!(luecke_ms(10_000, 9_000), 0);
     }
 
     #[test]

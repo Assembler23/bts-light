@@ -748,6 +748,9 @@ pub async fn run(ctx: Arc<ServerCtx>) -> std::io::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", TABLET_PORT)).await?;
     tracing::info!("Tablet-Server lauscht auf http://{}", lan_host());
+    // Signal „Port offen": löscht eine frühere Fehlermeldung und misst nach
+    // einem Update die Lücke (Spec hotfix-ohne-neustart).
+    ctx_fuer_takt.tablet.lan_gebunden(now_ms());
     // TL-Erkennungstakt (Spec tl-web-push): lebt und stirbt mit dem
     // LAN-Server — er versorgt dessen Antwort-Cache und `/tl-ws`-Nudges.
     // Im reinen Cloud-Modus läuft weder Server noch Takt; dort erkennt der

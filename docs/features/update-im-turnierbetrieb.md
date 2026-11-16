@@ -60,6 +60,22 @@ Marker jünger als 15 Minuten ist. Ein liegen gebliebener Marker (Installer
 abgebrochen, PC aus) startet Tage später nichts. Der Start läuft über
 denselben `start_sync` wie der Knopf — mit derselben Fehleranzeige.
 
+**Seit v0.9.434 im Kern** (Spec
+[hotfix-ohne-neustart](hotfix-ohne-neustart.md), E7): Den Marker liest nicht
+mehr das Fenster, sondern `commands::wiederanlauf_im_kern` in `.setup()` —
+die Übertragung startet, bevor das WebView geladen hat. Der gemeinsame Rumpf
+heißt `start_sync_kern`; der Knopf ruft ihn genauso. Das Fenster holt nur
+noch das Ergebnis ab (`take_wiederanlauf`): Status auffrischen oder den Grund
+zeigen, warum nicht gestartet wurde. Die Entscheidung selbst
+(`wiederanlauf_plan`) ist eine reine Funktion aus Marker und Konfiguration.
+
+**Die Lücke wird gemessen.** Der Schreibzeitpunkt des Markers ist ihr Anfang.
+Sobald der Tablet-Port wieder offen ist, loggt der Kern die Dauer:
+`Wiederanlauf nach Update: Tablet-Port wieder offen, Lücke N ms`. Im reinen
+Cloud-Betrieb gibt es keinen Port; dort steht nur die Zeit bis zum Start der
+Übertragung im Log. Der Marker entsteht kurz **vor** dem Ende der alten
+Version — die Zahl ist also eher etwas zu groß als zu klein.
+
 ### Feldstempel aus dem persistierten Bruttostart
 
 `reconcile_on_court` übernimmt beim **ersten** Abgleich nach dem
@@ -100,7 +116,7 @@ App-Start ─► update_check ─► Manifest ─► neuer? ─► download (Hin
                         │                                          │
               Installer → App neu                    Schließen → flush + /S /UPDATE
                         │                                          │
-        take_update_resume → start_sync                  keine App, neue Version
+   .setup(): wiederanlauf_im_kern → start_sync_kern      keine App, neue Version
 ```
 
 ## Tests
@@ -111,6 +127,13 @@ App-Start ─► update_check ─► Manifest ─► neuer? ─► download (Hin
   `Installing`).
 - `tablet/state.rs`: Erster Abgleich übernimmt den persistierten Stempel,
   zweiter Abgleich stempelt „jetzt", ohne Stempel bleibt „jetzt".
+- Wiederanlauf im Kern (seit v0.9.434): `marker_wird_genau_einmal_genommen`,
+  `luecke_wird_aus_stop_und_bind_berechnet` (`update.rs`);
+  `kern_wiederanlauf_startet_bei_frischem_marker`,
+  `kein_wiederanlauf_ohne_startbedingungen_und_grund_wird_gemeldet`,
+  `pause_der_automatik_ueberlebt_den_wiederanlauf` (`commands.rs`);
+  `lan_lage_misst_die_luecke_genau_einmal_und_meldet_fehler`
+  (`tablet/state.rs`).
 
 ## Offen / Feldtest
 
