@@ -25,6 +25,7 @@ import * as sp from "../src/io/satzpunkt.mjs";
 import * as as from "../src/io/ansageSchrift.mjs";
 import * as me from "../src/io/matchEvents.mjs";
 import * as bu from "../src/io/behandlungsUhr.mjs";
+import * as se from "../src/io/satzErgaenzen.mjs";
 
 let failures = 0;
 function ok(name, got, want) {
@@ -527,6 +528,30 @@ for (const name of ["tablet.html", "anzeige.html", "lobby.html"]) {
       for (const d of [0, 999, 299_999, 300_000, 4_503_000]) for (const r of [60, 300, 1800]) UHR.push([T + d, start, r]);
     ok("tablet.html: behandlungsUhr wie Modul",
       UHR.map(([j, s, r]) => f.behandlungsUhr(j, s, r)), UHR.map(([j, s, r]) => bu.behandlungsUhr(j, s, r)));
+  }
+}
+
+// ── Autovervollständigung im Ergebnis-Dialog (src/io/satzErgaenzen.mjs) ──
+// Eine abweichende Kopie schlüge einen falschen Sieger-Stand vor, der wie
+// getippt aussieht — oder überschriebe einen von Hand gesetzten Wert.
+{
+  const text = seite("tablet.html");
+  const namen = ["satzErgaenzen", "gegenfeldNach"];
+  const quellen = namen.map((n) => funktion(text, n));
+  ok("tablet.html: Satz-Ergänzen-Kopien vorhanden", quellen.every(Boolean), true);
+  if (quellen.every(Boolean)) {
+    // eslint-disable-next-line no-new-func
+    const f = new Function(quellen.join("\n") + "\nreturn { " + namen.join(", ") + " };")();
+    const ZIELE = [[21, 30], [15, 21], [11, 15], [21, 21], [21, undefined], [21, 5], [99, 104], [0, 30], [undefined, 30]];
+    const PUNKTE = [...Array.from({ length: 33 }, (_, i) => i), -1, 1.5, NaN, "11", null, undefined, 99];
+    const E = [];
+    for (const [z, c] of ZIELE) for (const pkt of PUNKTE) E.push([pkt, z, c]);
+    ok("tablet.html: satzErgaenzen wie Modul", E.map((a) => f.satzErgaenzen(...a)), E.map((a) => se.satzErgaenzen(...a)));
+    const G = [];
+    for (const [z, c] of ZIELE)
+      for (const ein of ["", " ", "0", "1", "11", "19", "20", "21", "22", "30", "abc", "-3", "1.5", null, undefined, 7])
+        for (const [w, a] of [[0, false], [21, true], [22, true], [19, false], [21, false], [0, true]]) G.push([ein, w, a, z, c]);
+    ok("tablet.html: gegenfeldNach wie Modul", G.map((a) => f.gegenfeldNach(...a)), G.map((a) => se.gegenfeldNach(...a)));
   }
 }
 

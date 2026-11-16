@@ -175,6 +175,10 @@ jobs:
       # dem Speicher — alles, was hier durchrutscht, umgeht die PIN.
       - name: PIN-Freigabe (JS)
         run: node scripts/test-pin-freigabe.mjs
+      # Autovervollständigung im Ergebnis-Dialog des Tablets: Ein falscher
+      # Vorschlag sähe wie eine Eingabe aus und ginge als Ergebnis nach BTP.
+      - name: Satz ergänzen (JS)
+        run: node scripts/test-satz-ergaenzen.mjs
 
       # Ordnung zwischen Push und Voll-Abruf auf den Anzeige-Seiten: Push nur
       # bei echt neuerer Sequenz, ein Voll-Abruf darf gleichziehen (der
@@ -350,6 +354,11 @@ jobs:
       # gehen noch das Folgespiel blockieren. Geprueft am echten Seiten-Code.
       - name: Geparkte Ergebnisse am Tablet (JS)
         run: node scripts/test-geparkt.mjs
+
+      # Sprachumschalter: Jeder Text, der durch t() oder data-t laeuft,
+      # braucht eine englische Fassung; verwaiste Eintraege fallen auf.
+      - name: Sprachen am Tablet (JS)
+        run: node scripts/test-tablet-sprache.mjs
 
       # Ohne Turnier-PC antwortet der Cloud-Relay 503 mit Grund. Die Anzeigen
       # muessen das von einer Leitungsstoerung unterscheiden.

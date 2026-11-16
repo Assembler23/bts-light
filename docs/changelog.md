@@ -4,6 +4,73 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.425
+
+- **Zähl-Tablet aufgeräumt.** Alle Ansichten wurden im Zusammenhang
+  durchgesehen; vieles war nach und nach dazugekommen.
+  - **Ein Menü für alles Seltene:** Oben rechts steht „⋯ Mehr". Dort liegen
+    „Ergebnis eintragen …", „Spiel beenden …" (bisher „Match beenden …"),
+    „⇄ Seiten / Mannschaften korrigieren" und „✚ Verletzung · Behandlung" —
+    alles **ohne PIN**, und nur, was gerade geht. Das Zahnrad gibt es nicht
+    mehr.
+  - **Schiri-Modus ohne PIN:** Er steht im selben Menü und lässt sich frei
+    ein- und ausschalten. Die PIN schützt nur noch „Feld wechseln ·
+    Anzeige …".
+  - **Ein Zurück-Knopf statt drei:** Er sitzt unten links und sagt, was er
+    zurücknimmt — „↩ Punkt für Links zurück", „↩ Korrektur zurücknehmen",
+    direkt nach der Aufstellung „↩ Aufstellung ändern".
+  - **Kopfzeile:** rechts nur noch „📣 Turnierleitung" (beschriftet, erscheint
+    erst im Spiel) und „⋯ Mehr". Feld und Spiel stehen je in einer Zeile; auf
+    kleineren Tablets zeigt die Verbindung bei bestehender Verbindung nur den
+    grünen Punkt.
+  - **Warten auf das Spiel:** Die Ansicht sagt „Warte auf das nächste Spiel" —
+    und nach zehn Sekunden ohne Verbindung „Keine Verbindung zum Turnier-PC",
+    statt gleich auszusehen.
+  - **Spielstand größer (Querformat):** Neben dem Stand steht kein Knopf mehr;
+    „📈 Verlauf" sitzt unten rechts.
+  - **Spielende:** Der Endstand steht als kleine Tabelle – eine Zeile je
+    Mannschaft, die Sätze als Spalten, der Sieger oben (vorher „16:21 · 18:21"
+    unter dem Siegernamen). „Ergebnis übermitteln" ist der große Knopf, „Spiel
+    wieder öffnen" nur noch schmal umrandet statt ein riesiger roter Block.
+  - **Ein Wort je Sache:** Am Tablet heißt es überall „Spiel" (nicht mehr mal
+    „Match"). „Korrektur" meint nur noch das ⇄ Seiten/Mannschaften-Korrigieren:
+    Aus „Korrektur — Match wieder öffnen" wurde „Spiel wieder öffnen", aus
+    „↩ Korrektur — letzter Punkt zurück" in der Pause derselbe Text wie am
+    Rückgängig-Knopf („↩ Punkt für Links zurück", nach einem Satz „↩ Letzten
+    Punkt zurück"), aus „Korrektur nur über die
+    Turnierleitung" „Änderung nur über die Turnierleitung".
+  - **Rot nur mit Bedeutung:** rechte Seite, Zerstörendes, überzogene Uhr,
+    Störung. „Spiel wieder öffnen" ist deshalb neutral umrandet; im Feldbild
+    des Setups folgt die Randfarbe der Seite.
+  - **Setup mit Schrittzähler und Feldbild:** Über jeder Frage des
+    Assistenten steht „Schritt 2 von 3". Aufschläger und Annehmer wählt man
+    auf einem kleinen Feld – jede Mannschaft auf ihrer Hälfte, dazwischen das
+    Netz; der gewählte Aufschläger steht bei der Annehmer-Wahl markiert da.
+  - **Ergebnis eintragen ergänzt den Sieger:** Tippst du die Punkte des
+    Verlierers, füllt das Tablet das Gegenfeld selbst aus (11 → 21, 20 → 22).
+    Der Vorschlag ist gelb hinterlegt und lässt sich übertippen.
+  - **Pausen:** Der Seitenwechsel steht als oranges Band in der Pause, statt
+    als Hinweis über Text und Knöpfen zu liegen.
+  - **Menü:** passt wieder auf den Schirm (Titel und „Schließen" waren
+    abgeschnitten), zweispaltig, „Große Schrift" und „Vollbild" jetzt unter
+    „Anzeige".
+  - **Dialoge:** „Abbrechen" ist überall ein ruhiger Rahmen-Knopf und sieht
+    nicht mehr wie eine weitere Wahl aus.
+  - **Gezählt? Die Ziffer leuchtet.** Nach jedem Punkt springt die gezählte
+    Zahl kurz auf. Die +1-Flächen werden dafür nicht mehr blass — die kurze
+    Sperre gegen Doppeltipps bleibt, man sieht sie nur nicht mehr.
+  - **Satzpunkt und Spielpunkt am Stand:** „Satzpunkt links" (bzw. rechts,
+    vorne, hinten, beide) steht über dem Stand — für alle, nicht nur im
+    Schiri-Modus.
+  - **Deutsch oder English:** Unter „⋯ Mehr" lässt sich die Sprache des
+    Tablets umstellen — ohne PIN, auch mitten im Spiel, je Gerät gespeichert.
+    Die Seite spricht damit **eine** Sprache; Doppel-Beschriftungen wie
+    „Zurück · Back" oder „Spiel beenden? · End the match?" gibt es nicht
+    mehr. Deutsch bleiben die Ansagetexte des Schiri-Modus (zum Vorlesen),
+    die Diagnose, Namen aus BTP und ein Ablehnungsgrund der Turnierleitung.
+  - **Fehlerbehebung:** „Ergebnis eintragen" zeigte „Aktueller Satz (läuft)"
+    auch ohne Haken bei „Spiel läuft noch".
+
 ## v0.9.424
 
 - **TP-Datei: die Suche läuft jetzt von selbst mit.** bts-light sieht beim

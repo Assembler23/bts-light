@@ -20,8 +20,10 @@ geprüfte Zähl-Logik ein.
 > erst beim Drucken aus dem BTP-Snapshot.
 
 ## Aktivieren
-Tablet → **⚙ (Header) → PIN** (Standard `0000`, einstellbar; innerhalb der
-Fünf-Minuten-Freigabe nach einer Eingabe entfällt sie) → **„Schiri-Modus: an"**.
+Tablet → **⋯ Mehr** (Kopfzeile) → **„Schiri-Modus: an"** — seit v0.9.425
+**ohne PIN** (vorher hinter dem Zahnrad und der Einstellungs-PIN). Der Modus
+verstellt nichts am Gerät und überträgt nichts; die PIN hielt nur
+Schiedsrichter auf, die sie nicht kannten.
 Opt-in pro Tablet, lokal gespeichert (`localStorage`). Es erscheint eine **immer
 sichtbare Ansage-Leiste**.
 
@@ -52,7 +54,8 @@ und wie groß das Tablet war.
   kleinste Stufe nicht, **scrollt die Leiste**, statt sich über Kopfzeile oder
   Plus-Knöpfe zu legen (das tat die Eröffnungsansage in der Anordnung
   „übereinander" vorher).
-- **„Große Schrift: an"** im Zahnrad-Menü, Abschnitt „Schiedsrichter". Gilt
+- **„Große Schrift: an"** unter „⋯ Mehr → Feld wechseln · Anzeige …"
+  (hinter der PIN), Abschnitt „Anzeige" (bis v0.9.422 „Schiedsrichter"). Gilt
   **je Gerät** (`localStorage`, Schlüssel `badhub.tablet.grosseSchrift`), nicht
   je Feld, und wirkt auch ohne Schiri-Modus. Setzt die Klasse `lesbar` am
   `<body>`: Ansage Schwarz auf Weiß mit kräftigem Rahmen, Marke und
@@ -85,12 +88,16 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 | Aufgabe | „{Unterlegene Seite} aufgegeben. Das Spiel wurde gewonnen von {Sieger} {gespielte Stände}." (Anhang 4, 6.5 + 6.4). Das Tablet kennt nur die Seite, nicht den einzelnen Spieler — im Doppel nennt es beide Namen. |
 | Behandlungspause | „Das Spiel ist unterbrochen." (Anhang 4, 3.11.1) |
 
-Badges: **Satzpunkt** / **Spielpunkt** (bis v0.9.350 „Satzball"/„Matchball";
+Marke **Satzpunkt** / **Spielpunkt** (bis v0.9.350 „Satzball"/„Matchball";
 Schiri-Feedback vom 08.11.2026 — das Vokabular sagt „Satzpunkt").
-Das Abzeichen steht, **solange** ein Satzpunkt besteht — auch an den
-Ständen, an denen die Ansage das Wort weglässt. Die Regel liegt in
-`src/io/satzpunkt.mjs` (Test `scripts/test-satzpunkt.mjs`, Inline-Kopie im
-Tablet).
+Die Marke steht, **solange** ein Satzpunkt besteht — auch an den
+Ständen, an denen die Ansage das Wort weglässt. Seit v0.9.425 sitzt sie
+**am Stand** (`#punkt-lage`, `renderPunktLage`) statt als Abzeichen in der
+Ansage-Leiste, nennt die Seite („Satzpunkt links", bei beiden „Satzpunkt
+beide") und erscheint **auch ohne Schiri-Modus** — Zähltafelbediener sehen
+sie genauso. Das Abzeichen der Leiste (`#umpire-badge`) gehört damit allein
+den Karten. Die Regel liegt in `src/io/satzpunkt.mjs` (Test
+`scripts/test-satzpunkt.mjs`, Inline-Kopie im Tablet).
 <!-- pruef: "Spielpunkt" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Feldseiten wechseln." in src-tauri/assets/tablet.html -->
 <!-- pruef: "schlägt auf zu" in src-tauri/assets/tablet.html -->
@@ -176,4 +183,7 @@ Alle Texte stehen gebündelt in den `ump*`-Funktionen in `tablet.html`
   Warnung (gelb), **F** Fehler (rot), **D** Disqualifikation; dazu **R** für
   „Oberschiedsrichter gerufen".
 - Bewusst **nicht** gebaut: Übertragung an badhub, weitere Sprachen — bei
-  Bedarf später.
+  Bedarf später. Das gilt auch nach dem Sprachumschalter der
+  Bedienoberfläche (v0.9.425): Stellt jemand das Tablet auf English, werden
+  Knöpfe, Abzeichen („Warning", „Interval") und der Hinweis „Choose
+  positions …" englisch — die **Ansagetexte** bleiben deutsch.

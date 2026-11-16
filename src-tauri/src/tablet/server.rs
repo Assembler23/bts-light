@@ -1046,8 +1046,8 @@ async fn court_page(
 /// abgekapselten Übungsmodus. Belegt kein Feld und berührt keinen Zustand
 /// des Servers — die Seite öffnet nicht einmal einen WebSocket.
 async fn demo_court_page() -> impl IntoResponse {
-    // PIN leer wie Relay und Brücke: Das Zahnrad öffnet im Demofeld ohne
-    // PIN, und die echte Bedien-PIN gehört nicht in eine Übungsseite.
+    // PIN leer wie Relay und Brücke: „Gerät" im Mehr-Menü öffnet im Demofeld
+    // ohne PIN, und die echte Bedien-PIN gehört nicht in eine Übungsseite.
     tracing::info!("Demofeld ausgeliefert");
     let body = relay_proto::demo_tablet_seite(TABLET_HTML, "", seiten_marke());
     ([(header::CACHE_CONTROL, "no-store")], Html(body))

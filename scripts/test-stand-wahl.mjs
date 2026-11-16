@@ -143,7 +143,9 @@ function funktion(name) {
 const FUNKTIONEN = ["fortschritt", "punkte", "vergleiche", "satzEntschieden", "hostSaetzeLesen", "hostSaetzeTeilen",
   "saetzeSchluessel", "ringMerken", "imRing", "wahlBeiRestore", "wahlBeiZuweisung",
   "ringSichern", "beiStateRestore", "uebernimmStand", "zwischenstandSetzen", "einstiegMitSaetzen",
-  "beiMatchAssigned", "chooseSide", "matchWinnerSide", "requiredSetsToWin", "intervalThreshold", "sendScoreUpdate"];
+  "beiMatchAssigned", "chooseSide", "matchWinnerSide", "requiredSetsToWin", "intervalThreshold", "sendScoreUpdate",
+  // Sprachumschalter: Der Hinweis „Spielstand … übernommen" läuft über `t`.
+  "t"];
 
 const SPIEL = (id, extra = {}) => ({ matchId: id, targetScore: 21, capScore: 30, bestOfSets: 3, ...extra });
 
@@ -160,7 +162,7 @@ function tablet(zustand = {}) {
   };
   const merk = (name) => (...a) => { ruf.push(name); return a; };
   const attrappen = {
-    STATE, SCHREIBER: "A", COURT_ID: 101, COURT_LABEL: "Feld 1",
+    STATE, SCHREIBER: "A", COURT_ID: 101, COURT_LABEL: "Feld 1", SPRACHE: "de", EN: {},
     WebSocket: { OPEN: 1 }, ws: { readyState: 1, send: (x) => gesendet.push(JSON.parse(x)) },
     localStorage: { setItem: (k, v) => { speicher[k] = v; }, getItem: (k) => speicher[k] ?? null },
     tlog: (stufe, was, d) => ruf.push("log:" + was),

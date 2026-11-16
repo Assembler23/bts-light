@@ -200,7 +200,8 @@ Das Menü bietet vier Punkte:
 Eine falsch eingegebene PIN öffnet nichts; die App zeigt kurz den Hinweis
 „PIN falsch" und bleibt in der aktuellen Ansicht.
 
-Die Einstellungs-PIN der Zähl-Seite (Zahnrad-Symbol, `tablet_settings_pin`)
+Die Einstellungs-PIN der Zähl-Seite („⋯ Mehr → Feld wechseln · Anzeige …",
+`tablet_settings_pin`)
 ist von der Kiosk-PIN vollständig getrennt — zwei Ebenen wie in
 [tablet-kiosk.md](tablet-kiosk.md) beschrieben. Wer beide auf denselben Wert
 setzt, merkt den Unterschied im Alltag nicht.

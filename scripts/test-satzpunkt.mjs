@@ -109,7 +109,7 @@ function spiel(ziel, cap, bestOf, saetze, punkte, teamOnSide = { a: "left", b: "
 {
   const { STATE, f, ansagen } = spiel(15, 21, 3, [{ left: 15, right: 3 }], [...R(9), ...L(14), "right"]);
   ok("Tablet 15er im 2. Satz: Spielpunkt einmal", ansagen.slice(-2), ["14 Spielpunkt 9", "10:14"]);
-  ok("Tablet: Abzeichen bleibt, solange der Satzpunkt besteht", f.umpPunktLage().wort, "Spielpunkt");
+  ok("Tablet: Marke bleibt, solange der Satzpunkt besteht", f.umpPunktLage().wort, "Spielpunkt");
   // Undo zurück auf 14:9 → der Satzpunkt ist wieder der neu erreichte.
   STATE.currentSet = STATE.history.pop().currentSet;
   STATE.servingSide = "left";

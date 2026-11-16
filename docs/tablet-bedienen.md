@@ -41,8 +41,8 @@ vor seinem ersten Einsatz —, nimmt das **Demofeld** (seit v0.9.416). Es
 geht **mitten im laufenden Turnier**, an jedem Turnier-Tablet:
 
 - in der Feldwahl die Kachel **Demofeld** ganz unten (ohne PIN), oder
-- im Zahnrad-Menü unter **Feld wechseln** den Eintrag
-  **Demofeld · Übungsspiel**.
+- über **⋯ Mehr** → **Feld wechseln · Anzeige …** in der Feldliste den
+  Eintrag **Demofeld · Übungsspiel**.
 <!-- pruef: "Demofeld · Übungsspiel" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Ausprobieren — antippen" in src-tauri/assets/lobby.html -->
 
@@ -53,23 +53,38 @@ v0.9.422). Dann wählst du ein **Übungsspiel**: Einzel, Doppel oder Mixed ab
 Spielpunkt bei 20:18 bzw. 14:12 bis zum Übermitteln des Ergebnisses. Alles
 läuft wie im echten Spiel: Seitenwahl, Aufschlag, Pausen, Karten, Korrektur,
 Schiri-Modus. Der **Ballzähler** ist auf dem Demofeld immer an.
-<!-- pruef: "'Sätze ' + z.name" in src-tauri/assets/tablet.html -->
-<!-- pruef: "name: 'bis 15', ziel: 15, cap: 21, pause: 8" in src-tauri/assets/tablet.html -->
+<!-- pruef: "'Sätze bis {ziel}'" in src-tauri/assets/tablet.html -->
+<!-- pruef: "ziel: 15, cap: 21, pause: 8" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Übungsspiel wählen" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Doppel · Verlängerung" in src-tauri/assets/tablet.html -->
 
 **Am Turnier ändert das nichts.** Die Namen sind ausgedacht, kein echtes
 Spiel wird genommen, kein Feld belegt. Nichts geht an die Turnierleitung,
 an BTP, an die Monitore oder den Liveticker — auch „Ergebnis übermitteln"
-und die Knöpfe ✚ und 📣 bleiben auf dem Tablet. Ein großes **ÜBUNG** im
+und die Meldungen ✚ und 📣 bleiben auf dem Tablet. Ein großes **ÜBUNG** im
 Hintergrund und „Übung · nichts wird übertragen" oben rechts erinnern daran.
 <!-- pruef: "Übung · nichts wird übertragen" in src-tauri/assets/tablet.html -->
 
-Auf dem Demofeld öffnet das Zahnrad **ohne PIN**: So lassen sich
-Schiri-Modus und Große Schrift frei ausprobieren, und **Neues Übungsspiel
-wählen** führt zurück zur Auswahl. Zurück an ein echtes Feld geht es über
-die Feldliste im selben Menü.
+Auf dem Demofeld verlangt auch **Feld wechseln · Anzeige …** im Mehr-Menü
+**keine PIN**: So lassen sich Schiri-Modus und Große Schrift frei
+ausprobieren. **Neues Übungsspiel wählen** (ebenfalls unter **⋯ Mehr**)
+führt zurück zur Auswahl. Zurück an ein echtes Feld geht es über die
+Feldliste unter **Feld wechseln · Anzeige …**.
 <!-- pruef: "Neues Übungsspiel wählen" in src-tauri/assets/tablet.html -->
+
+## Warten auf das Spiel
+
+Liegt noch kein Spiel auf dem Feld, steht groß der Feldname da und darunter
+**„Warte auf das nächste Spiel"**. Zu tun ist nichts: Die Zähltafel startet
+von selbst, sobald die Turnierleitung ein Spiel zuweist.
+<!-- pruef: "Warte auf das nächste Spiel" in src-tauri/assets/tablet.html -->
+
+Erreicht das Tablet den Turnier-PC länger als etwa zehn Sekunden nicht,
+steht dort stattdessen **„Keine Verbindung zum Turnier-PC"**. Das Tablet
+versucht es von selbst weiter. Dauert es länger: WLAN prüfen oder der
+Turnierleitung Bescheid geben.
+<!-- pruef: "Keine Verbindung zum Turnier-PC" in src-tauri/assets/tablet.html -->
+<!-- pruef: /OFFLINE_HINWEIS_MS = 10_000;/ in src-tauri/assets/tablet.html -->
 
 ## Ein Spiel aufsetzen
 
@@ -78,11 +93,21 @@ Liegt ein Spiel auf dem Feld, zeigt die Kopfzeile eine **Aufruf-Uhr**:
 auffälliger. Sie läuft, bis die Aufstellung bestätigt ist, und sagt dir auf
 einen Blick, ob hier gerade jemand vermisst wird.
 
-Ein kurzer Assistent führt dann durch drei Fragen:
+Ein kurzer Assistent führt dann durch drei Fragen. Über jeder Frage steht, wo
+du bist – zum Beispiel **„Schritt 2 von 3"**:
+<!-- pruef: "t('Schritt {n} von {m}', schritt)" in src-tauri/assets/tablet.html -->
 
 1. **Welches Team steht links?**
 2. **Wer schlägt zuerst auf?**
 3. **Wer nimmt an?** — nur im Doppel.
+
+Aufschläger und Annehmer wählst du auf einem kleinen **Feldbild**: Jede
+Mannschaft steht auf ihrer Hälfte, so wie du sie vor dir siehst, dazwischen
+das Netz. Du tippst den Namen an. Bei der dritten Frage steht der gewählte
+Aufschläger gelb markiert mit **„schlägt auf"** auf seiner Seite, den Annehmer
+tippst du gegenüber an.
+<!-- pruef: "schlägt auf" in src-tauri/assets/tablet.html -->
+<!-- pruef: "setup-feld" in src-tauri/assets/tablet.html -->
 
 Bei Doppel und Mixed wird **nach jedem Satz neu gefragt**, wer aufschlägt und
 annimmt. Das ist gewollt: Die Aufstellung darf sich zwischen den Sätzen ändern.
@@ -94,7 +119,7 @@ der Spieler (und des Schiedsrichters) unter **Anwesenheit bestätigen**. Wer
 da ist, tippt seinen Namen an — der Haken geht an die Turnierleitung. Das ist
 nur ein Hinweis für sie: Gezählt werden kann jederzeit, auch ohne
 Bestätigung. Siehe [meetingpoint.md](meetingpoint.md).
-<!-- pruef: "Anwesenheit bestätigen · Confirm presence" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Anwesenheit bestätigen (antippen)" in src-tauri/assets/tablet.html -->
 
 ## Zählen
 
@@ -111,18 +136,47 @@ Auf dem Schirm steht dabei:
 - auf Wunsch **Vereinsname und Wappen** unter den Spielernamen. Das schaltet
   die Turnierleitung turnierweit; das Tablet übernimmt es mit der nächsten
   Zuweisung, ohne Neuladen.
-- der Knopf **📈 Verlauf** mit dem Punktverlauf je Satz. Der wird lokal
-  mitgeschrieben und **funktioniert auch ohne Netz**.
+- der Knopf **📈 Verlauf** unten rechts, mit dem Punktverlauf je Satz. Der
+  wird lokal mitgeschrieben und **funktioniert auch ohne Netz**. Der Knopf
+  erscheint mit dem ersten Punkt.
+- oben rechts ein **Punkt** für die Verbindung: grün = verbunden. Auf
+  kleineren Tablets steht bei bestehender Verbindung nur der Punkt; „verbinde…"
+  und „getrennt" stehen immer als Text daneben.
 
-Ein Fehltipp lässt sich zurücknehmen. Der Verlauf wird dabei mit korrigiert.
+**Dein Tipp hat gezählt, wenn die Ziffer aufleuchtet:** Die Zahl der Seite,
+die den Punkt bekommen hat, springt kurz auf und leuchtet orange nach.
+
+Steht eine Seite einen Punkt vor dem Satzgewinn, erscheint über dem Stand –
+an der Stelle der Zeile „Satz 2 · best of 3 · bis 21" – eine Marke in ihrer
+Farbe: **„Satzpunkt links"** oder „… rechts" (hinter dem Feld
+„vorne"/„hinten"), bei 29:29 „Satzpunkt beide". Entschiede der Satz zugleich
+das Spiel, heißt sie **„Spielpunkt …"**. Sie bleibt stehen, solange der
+Satzpunkt besteht — du musst dafür nichts einschalten.
+<!-- pruef: "'Spielpunkt' : 'Satzpunkt'" in src-tauri/assets/tablet.html -->
+<!-- pruef: "seiteWort(lage.seite) : t('beide')" in src-tauri/assets/tablet.html -->
+
+Ein Fehltipp lässt sich zurücknehmen — mit dem orangen Knopf **unten
+links**. Es gibt nur diesen einen (seit v0.9.425; vorher waren es bis zu
+drei), und er sagt, was er zurücknimmt: **„↩ Punkt für Links zurück"** oder
+„… Rechts …" — zählst du hinter dem Feld, „Vorne" und „Hinten". Der Verlauf
+wird dabei mit korrigiert.
+<!-- pruef: "↩ Punkt für " in src-tauri/assets/tablet.html -->
+
+Direkt nach der Aufstellung, vor dem ersten Punkt, heißt derselbe Knopf
+**„↩ Aufstellung ändern"** und führt zurück in die Seiten- und
+Aufschlagwahl.
+<!-- pruef: "↩ Aufstellung ändern" in src-tauri/assets/tablet.html -->
 
 **Im Entscheidungssatz** weist das Tablet beim Erreichen der Pausen-Schwelle
-darauf hin, dass die **Seiten gewechselt** werden.
+darauf hin, dass die **Seiten gewechselt** werden: In der Pause steht unter der
+Überschrift ein oranges Band **„↔ Seitenwechsel"** — ebenso in jeder Satzpause.
+<!-- pruef: "↔ Seitenwechsel — Spieler tauschen die Hälften" in src-tauri/assets/tablet.html -->
 
 ## Seiten oder Mannschaften korrigieren
 
-Stimmt das Tablet nicht mehr mit dem Feld überein, tippst du in der Kopfzeile
-auf **⇄**. Eine PIN brauchst du dafür nicht. Der Dialog bietet zwei Wege:
+Stimmt das Tablet nicht mehr mit dem Feld überein, tippst du oben rechts
+auf **⋯ Mehr** und dort auf **⇄ Seiten / Mannschaften korrigieren**. Eine PIN
+brauchst du dafür nicht. Der Dialog bietet zwei Wege:
 <!-- pruef: "Seiten oder Mannschaften korrigieren" in src-tauri/assets/tablet.html -->
 
 | Was ist passiert? | Knopf | Was danach gilt |
@@ -142,15 +196,16 @@ Gut zu wissen:
 - **Im Doppel** fragt das Tablet nach „Mannschaften tauschen" sofort, **wer
   gerade aufschlägt und wer annimmt** — welcher Spieler wo steht, weiß es nach
   dem Tausch nicht. Der Stand bleibt dabei.
-- **„↩ Korrektur zurücknehmen"** steht danach dort, wo sonst „Letzten Punkt
-  zurück" steht, und macht den Tausch rückgängig. Erst danach nimmt der Knopf
-  wieder Punkte zurück.
+- **„↩ Korrektur zurücknehmen"** steht danach auf dem Zurück-Knopf unten
+  links und macht den Tausch rückgängig. Erst danach nimmt der Knopf wieder
+  Punkte zurück.
 <!-- pruef: "Korrektur zurücknehmen" in src-tauri/assets/tablet.html -->
 - **Im Entscheidungssatz vor 11** wechseln die Seiten bei 11 trotzdem noch
   einmal — die Rückfrage weist darauf hin. Korrigiert wird nur, was am Tablet
   nicht zum Feld passt.
-- **In der Pause und am Spielende** verdeckt die Anzeige die Kopfzeile. Dort
-  steht dafür ein eigener Knopf **„⇄ Seiten / Mannschaften korrigieren"**.
+- **In der Pause und am Spielende** verdeckt die Anzeige die Kopfzeile samt
+  „⋯ Mehr". Dort steht dafür ein eigener Knopf
+  **„⇄ Seiten / Mannschaften korrigieren"**.
 - **Nach dem Übermitteln** geht es am Tablet nicht mehr — dann ist die
   Turnierleitung dran.
 - „Mannschaften tauschen" fehlt, solange der Turnier-PC noch eine ältere
@@ -206,8 +261,9 @@ Pause nennt die jeweils geltende Zahl.
 Während der Pause ist die Zähltafel **gesperrt** — es lässt sich nicht
 versehentlich weiterzählen.
 
-**Aus Versehen ausgelöst?** In der Pause gibt es **„↩ Korrektur — letzter Punkt
-zurück"**. Das bricht die Pause ab und nimmt den Punkt zurück, der sie
+**Aus Versehen ausgelöst?** In der Pause steht derselbe Rückgängig-Knopf wie
+unter dem Feld – **„↩ Punkt für Links zurück"**, nach einem Satz **„↩ Letzten
+Punkt zurück"**. Das bricht die Pause ab und nimmt den Punkt zurück, der sie
 ausgelöst hat — der Fall „Ball wird wiederholt".
 
 **Aufschlag schon in der Satzpause festlegen (Doppel).** Zwischen zwei Sätzen
@@ -226,10 +282,11 @@ Ein Neuladen oder ein Gerätetausch behält die laufende Pause bei.
 
 ## Der Turnierleitung etwas melden
 
-Oben rechts sitzen zwei Knöpfe. Sie tragen **nur die Zeichen** ✚ und 📣 — die
-Beschriftung erscheint erst, wenn man darauf zeigt:
+Zwei Meldungen gehen vom Tablet an die Turnierleitung, beide ohne PIN:
 
-- **✚ Verletzung/Behandlung** — unterbricht das Spiel. Eine große Uhr zählt
+- **✚ Verletzung · Behandlung** — steht unter **⋯ Mehr** (seit v0.9.425;
+  vorher ein eigener Knopf in der Kopfzeile). Unterbricht das Spiel. Eine
+  große Uhr zählt
   die **Behandlungspause** hoch, darunter steht die Richtzeit des Turniers
   (Standard 5 Minuten). Ist sie erreicht, wird die Uhr rot und der Titel lautet
   **„Behandlungspause — Richtzeit überschritten"** — die Uhr zählt weiter, die
@@ -240,30 +297,78 @@ Beschriftung erscheint erst, wenn man darauf zeigt:
 - **✚ auch in der Pause:** Passiert die Verletzung in der Pause bei 11 oder in
   der Satzpause, verdeckt die Pausenanzeige die Kopfzeile. Dafür steht dort der
   Knopf **„✚ Verletzung · Behandlung"**; er macht aus der Pause eine
-  Behandlungspause. Nach Spielende ist ✚ gesperrt.
+  Behandlungspause. Nach Spielende gibt es den Eintrag nicht mehr.
   <!-- pruef: "✚ Verletzung · Behandlung" in src-tauri/assets/tablet.html -->
-- **📣 Turnierleitung rufen** — meldet, dass jemand ans Feld kommen soll. Es
-  erscheint eine Rückfrage, damit nichts aus Versehen ausgelöst wird.
+- **📣 Turnierleitung** — der Knopf oben rechts (auf schmalen Geräten nur
+  das Zeichen 📣). Er meldet, dass jemand ans Feld kommen soll. Es erscheint
+  eine Rückfrage, damit nichts aus Versehen ausgelöst wird. Der Knopf
+  erscheint, sobald die Aufstellung bestätigt ist — ohne Spiel und während
+  der Seitenwahl fehlt er.
+  <!-- pruef: /<span class="txt" data-t>Turnierleitung<\/span>/ in src-tauri/assets/tablet.html -->
 
 Beide Meldungen erscheinen bei der Turnierleitung in einer Leiste, die auf
 jeder Seite sichtbar ist — mit Feldnummer. **Aufgelöst werden sie am Tablet**,
 nicht am PC: durch „Weiterspielen" beziehungsweise durch Zurücknehmen der
 Meldung.
 
-## Das Zahnrad-Menü
+## Das Mehr-Menü
 
-Hinter dem Zahnrad stecken die Dinge, die man selten braucht und deshalb nicht
-aus Versehen antippen soll. Es ist durch eine **PIN** geschützt (voreingestellt
-`0000`, die Turnierleitung kennt sie):
+Oben rechts sitzt **⋯ Mehr** (auf schmalen Geräten nur „⋯"). Dahinter steckt
+alles, was man selten braucht (seit v0.9.425 — vorher lag ein Teil davon in
+Kopf- und Fußzeile, der Rest hinter einem Zahnrad mit PIN). Das Menü öffnet
+**ohne PIN** und zeigt nur, was gerade geht:
 
-- **Feld wechseln**, ohne einen QR-Code zu scannen,
+| Abschnitt | Einträge |
+|---|---|
+| **Spiel** | **Ergebnis eintragen …** · **Spiel beenden …** · **⇄ Seiten / Mannschaften korrigieren** · **✚ Verletzung · Behandlung** |
+| **Schiedsrichter** | **Schiri-Modus: an/aus** — ohne PIN |
+| **Sprache · Language** | **Deutsch** · **English** — ohne PIN |
+| **Gerät** | **Feld wechseln · Anzeige …** — hinter der PIN |
+<!-- pruef: "Ergebnis eintragen …" in src-tauri/assets/tablet.html -->
+<!-- pruef: "Schiri-Modus: " in src-tauri/assets/tablet.html -->
+<!-- pruef: "Feld wechseln · Anzeige …" in src-tauri/assets/tablet.html -->
+
+Solange kein Spiel gezählt wird, fehlt der Abschnitt „Spiel". Auf breiten
+Tablets stehen die Einträge zweispaltig; passt das Menü nicht auf den Schirm,
+lässt es sich verschieben. **Schließen** steht als Rahmen-Knopf ganz unten.
+
+### Sprache: Deutsch oder English
+
+Das Tablet spricht Deutsch oder Englisch (seit v0.9.425). Umgestellt wird
+unter **⋯ Mehr** im Abschnitt **Sprache · Language**: **Deutsch** oder
+**English** antippen — ohne PIN, auch mitten im Spiel. Der Stand, die Uhr und
+eine laufende Pause bleiben dabei, wie sie sind.
+<!-- pruef: "Sprache · Language" in src-tauri/assets/tablet.html -->
+<!-- pruef: /id="sprache-en">English</ in src-tauri/assets/tablet.html -->
+
+- Die Wahl gilt **für dieses Tablet** und bleibt gespeichert — auch nach
+  einem Feldwechsel und über Nacht. Andere Tablets und die Monitore ändern
+  sich nicht.
+- **Deutsch bleiben** die Ansagetexte des Schiri-Modus (sie werden in der
+  Halle vorgelesen), die Namen von Feld, Klasse und Spielern und ein
+  Ablehnungsgrund, den die Turnierleitung zurückschickt.
+- Bis v0.9.422 standen einige Knöpfe in beiden Sprachen zugleich
+  („Zurück · Back"). Das gibt es nicht mehr.
+
+### Gerät — hinter der PIN
+
+Das Feld wechseln und die Anzeige umstellen soll niemand aus Versehen. Dieser
+Teil ist deshalb durch eine **PIN** geschützt (voreingestellt `0000`, die
+Turnierleitung kennt sie). Solange die PIN verlangt wird, trägt der Eintrag
+ein Schloss 🔒.
+
+**Feld wechseln** — ohne einen QR-Code zu scannen.
+
+**Anzeige:**
+
 - **Anzeige (nur Spielstand)** — macht das Gerät zur reinen Zähltafel,
-- **Ansicht: …** — Seiten und Anordnung in einem Zug (seit v0.9.292): der
-  Zyklus läuft automatisch → links/rechts → rechts/links → oben/unten →
-  unten/oben. In der Anzeige-Hülle genügt dafür ein **Tipp auf die
-  Punktzahlen**, ohne PIN; ein kurzes Etikett nennt die neue Ansicht.
-<!-- pruef: "Ansicht:" in src-tauri/assets/tablet.html -->
-- **Schiri-Modus ein- und ausschalten**,
+- **Anordnung: …** — automatisch, nebeneinander (links–rechts) oder
+  übereinander (vorn–hinten, für den Platz hinter dem Feld). In der
+  Anzeige-Hülle heißt der entsprechende Eintrag **Ansicht: …** (seit
+  v0.9.292) und schaltet Seiten und Anordnung in einem Zug; dort genügt auch
+  ein **Tipp auf die Punktzahlen**, ohne PIN.
+<!-- pruef: "Anordnung: " in src-tauri/assets/tablet.html -->
+<!-- pruef: "Ansicht: " in src-tauri/assets/anzeige.html -->
 - **Große Schrift: an/aus** (seit v0.9.414) — für alle, die schlecht sehen:
   größere Ansagetexte, Schwarz auf Weiß, kräftigere Spielernamen. Die
   Einstellung bleibt auf diesem Tablet gespeichert,
@@ -271,10 +376,10 @@ aus Versehen antippen soll. Es ist durch eine **PIN** geschützt (voreingestellt
 - **Vollbild**.
 
 > **Die PIN wird fünf Minuten gemerkt** (seit v0.9.284). Nach einer richtigen
-> Eingabe öffnet das Zahnrad fünf Minuten lang ohne erneute Eingabe — auch über
-> einen Feldwechsel und „Neu laden" hinweg. Die Frist läuft ab der Eingabe und
-> verlängert sich **nicht** von selbst. Praktisch, wenn du mehrere Felder
-> hintereinander einrichtest.
+> Eingabe öffnet „Feld wechseln · Anzeige …" fünf Minuten lang ohne erneute
+> Eingabe — auch über einen Feldwechsel und „Neu laden" hinweg. Die Frist
+> läuft ab der Eingabe und verlängert sich **nicht** von selbst. Praktisch,
+> wenn du mehrere Felder hintereinander einrichtest.
 <!-- Fuenf Minuten: FREIGABE_MS in der Regel. Aendert sich die Frist,
      steht hier eine falsche Zahl. -->
 <!-- pruef: /FREIGABE_MS = 5 \* 60 \* 1000/ in src/io/pinFreigabe.mjs -->
@@ -284,12 +389,12 @@ aus Versehen antippen soll. Es ist durch eine **PIN** geschützt (voreingestellt
 Wer als Schiedsrichter zählt, hat zusätzlich die Karten zur Hand — gelb, rot,
 schwarz — samt der vorzulesenden Ansagen.
 
-> **Der Schiri-Modus muss erst eingeschaltet werden**, im Zahnrad-Menü. Ohne
-> ihn erscheinen die Karten gar nicht.
+> **Der Schiri-Modus muss erst eingeschaltet werden** — unter **⋯ Mehr**,
+> ohne PIN (seit v0.9.425). Ohne ihn erscheinen die Karten gar nicht.
 
 Die Ansage zum Vorlesen steht so groß da, wie der Platz es zulässt — kurze
-Ansagen größer als lange. Reicht das nicht, hilft **Große Schrift** im
-Zahnrad-Menü.
+Ansagen größer als lange. Reicht das nicht, hilft **Große Schrift** unter
+**⋯ Mehr** → **Feld wechseln · Anzeige …**.
 
 Details: [Schiri-Modus am Zähltablett](umpire-mode.md).
 
@@ -297,7 +402,15 @@ Details: [Schiri-Modus am Zähltablett](umpire-mode.md).
 
 ### Regulär
 
-Nach dem letzten Punkt zeigt das Tablet das Spielende.
+Nach dem letzten Punkt zeigt das Tablet das Spielende: den Sieger und darunter
+eine kleine **Tabelle** – eine Zeile je Mannschaft, die Sätze als Spalten, der
+Sieger oben. Gewonnene Sätze sind hell, verlorene blasser (ein durch Aufgabe
+abgebrochener Satz hat keinen Gewinner und bleibt blass). Darunter steht groß
+**„Ergebnis übermitteln"**; **„Spiel wieder öffnen"** ist bewusst nur ein
+schmal umrandeter Knopf, damit er nicht aus Versehen getroffen wird. Er nimmt
+den letzten Schritt zurück – meist den letzten Punkt –, und das Spiel läuft
+weiter.
+<!-- pruef: "Spiel wieder öffnen" in src-tauri/assets/tablet.html -->
 
 > **Das Ergebnis geht nicht von allein weg.** Du musst
 > **„Ergebnis übermitteln"** tippen. Erst danach wandert es zur Turnierleitung
@@ -347,25 +460,26 @@ das Ergebnis angenommen hat.
 <!-- pruef: "Jetzt senden" in src-tauri/assets/tablet.html -->
 
 > **Steht das Ergebnis in BTP fest, ist am Tablet Schluss** (seit v0.9.291).
-> Die Beendet-Ansicht sperrt dann „Korrektur — Match wieder öffnen" **und** den
-> Sende-Knopf und sagt: *„Ergebnis steht in BTP fest — Korrektur nur über die
-> Turnierleitung."* Vorher ließ sich die Korrektur drücken, und das erneute
+> Die Beendet-Ansicht sperrt dann „Spiel wieder öffnen" **und** den
+> Sende-Knopf und sagt: *„Ergebnis steht in BTP fest — Änderung nur über die
+> Turnierleitung."* Vorher ließ sich das Spiel wieder öffnen, und das erneute
 > Übermitteln wurde danach stillschweigend verworfen — am 12.09.2026 auf Feld 11
 > 23-mal, ohne ein Wort auf dem Schirm.
 <!-- pruef: "Ergebnis steht in BTP fest" in src-tauri/assets/tablet.html -->
 
-### Vorzeitig — der Knopf „Match beenden …"
+### Vorzeitig — „Spiel beenden …"
 
-In der Fußzeile sitzt **„Match beenden …"**. Er öffnet einen Dialog mit **drei**
-Wegen — die Wahl hat unterschiedliche Folgen:
-<!-- pruef: "Match beenden" in src-tauri/assets/tablet.html -->
+Unter **⋯ Mehr** steht **„Spiel beenden …"** (bis v0.9.422 „Match beenden …"
+in der Fußzeile). Der Eintrag öffnet einen Dialog mit **drei** Wegen — die
+Wahl hat unterschiedliche Folgen:
+<!-- pruef: "Spiel beenden …" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Kampflos" in src-tauri/assets/tablet.html -->
 
 | Wahl | Wirkung |
 |---|---|
 | **Aufgabe — nur dieses Spiel** | Dieses Spiel wird als Aufgabe gewertet. Alles andere läuft weiter. |
 | **Verletzung — auch Folgespiele der Disziplin** | Zusätzlich werden die **restlichen Spiele dieser Disziplin** kampflos gewertet. |
-| **Kampflos · Walkover** | Eine Partei ist nicht angetreten. Geht ab 0:0. |
+| **Kampflos** | Eine Partei ist nicht angetreten. Geht ab 0:0. |
 
 > **Die mittlere Wahl ist die folgenreichste am ganzen Tablet.** Sie wirkt über
 > das aktuelle Spiel hinaus auf die gesamte Disziplin. Im Zweifel die erste
@@ -392,6 +506,14 @@ Wurde auf Papier gezählt oder das Tablet gar nicht benutzt, lässt sich der
 Spiel noch, bietet derselbe Dialog außerdem den **Einstieg in ein laufendes
 Spiel** an — du übernimmst dann mit dem aktuellen Stand und zählst weiter.
 
+**Du tippst nur die Punkte des Verlierers.** Das Tablet ergänzt den Sieger
+selbst: aus 11 wird 21:11, aus 20 wird 22:20. Der ergänzte Wert ist gelb
+hinterlegt – stimmt er nicht, tippst du ihn einfach über; was du selbst
+eingetragen hast, ändert das Tablet nie (eine 0 zählt als leer). Tippst du die Punkte des Siegers (21
+oder mehr), ergänzt es nichts, denn dann ist der Gegner offen.
+<!-- pruef: "es-vorschlag" in src-tauri/assets/tablet.html -->
+<!-- pruef: "if (punkte < target - 1) return target;" in src-tauri/assets/tablet.html -->
+
 ## Das Tablet wechseln
 
 Fällt ein Gerät aus oder ist der Akku leer, öffnet das Ersatzgerät dasselbe
@@ -407,8 +529,8 @@ es bei 0:0).
 **Nach einem Neustart des Turnier-PCs** kennt er nur noch die Sätze, nicht
 mehr die Aufstellung. Das Ersatzgerät steigt dann mit diesem Satzstand ein
 und fragt wie beim Spielbeginn: welches Team links steht und wer gerade
-aufschlägt. Der Pfeil „letzten Punkt zurück" reicht in diesem Fall nicht
-hinter den Einstieg.
+aufschlägt. Der Zurück-Knopf reicht in diesem Fall nicht hinter den
+Einstieg.
 <!-- pruef: "Wer schlägt gerade auf?" in src-tauri/assets/tablet.html -->
 
 **Kurze Netzaussetzer sind keine Übernahme.** Verliert dasselbe Tablet
@@ -477,18 +599,22 @@ nach bisherigem Stand nicht.
 Meist hängt noch eine alte Sitzung eines anderen Geräts. **Court übernehmen**
 löst das auf.
 
-**Das Zahnrad-Menü lässt sich nicht öffnen.**
-Es ist mit einer PIN geschützt, damit niemand aus Versehen das Feld wechselt.
-Die PIN kennt die Turnierleitung; voreingestellt ist `0000`. Siehe
+**„Feld wechseln · Anzeige …" verlangt eine PIN.**
+Dieser Teil des Mehr-Menüs ist geschützt, damit niemand aus Versehen das Feld
+wechselt. Alles andere im Menü geht ohne PIN. Die PIN kennt die
+Turnierleitung; voreingestellt ist `0000`. Siehe
 [Einstellungs-PIN & Kiosk-Sperre](tablet-kiosk.md).
 
 **Die Pause läuft rot weiter.**
 Das ist kein Fehler, sondern gewollt — sie wartet auf **Weiterspielen**.
 
 **Das Tablet reagiert nach einem Punkt kurz nicht.**
-Nach jedem gezählten Punkt ist die Zähltafel für einen Sekundenbruchteil
-gesperrt. Das verhindert, dass ein hektischer Doppeltipp zwei Punkte vergibt.
+Nach jedem gezählten Punkt nimmt die Zähltafel für einen Sekundenbruchteil
+keinen weiteren Tipp an. Das verhindert, dass ein hektischer Doppeltipp zwei
+Punkte vergibt. Man sieht die Sperre nicht (bis v0.9.422 wurden die Flächen
+dabei blass) — ob dein Tipp gezählt hat, zeigt die **aufleuchtende Ziffer**.
 Kurz warten und normal weitertippen — es ist nichts verloren.
+<!-- pruef: "var SCORE_COOLDOWN_MS = 700;" in src-tauri/assets/tablet.html -->
 
 **„Ergebnis übermitteln" bleibt gesperrt.**
 Bei Aufgabe und kampfloser Wertung muss zuerst der **Sieger** gewählt werden.

@@ -253,8 +253,11 @@ Turnier** ausprobieren — deshalb ist er vollständig abgekapselt:
   `loadMatch` und — mit Zwischenstand — `einstiegMitSaetzen`, also denselben
   Weg wie beim Tablet-Wechsel mitten im Spiel. Ein neues Szenario ist ein
   Eintrag mehr.
-- Das Zahnrad öffnet ohne PIN (Schiri-Modus, Große Schrift frei
-  ausprobierbar); „Anzeige (nur Spielstand)" ist ausgeblendet.
+- „⋯ Mehr → Feld wechseln · Anzeige …" öffnet ohne PIN (Große Schrift frei
+  ausprobierbar; der Schiri-Modus ist seit v0.9.425 ohnehin PIN-frei);
+  „Anzeige (nur Spielstand)" ist ausgeblendet.
+- Mit englischer Bedienoberfläche heißt das Feld „Practice court"
+  (siehe „Sprache der Bedienoberfläche").
 
 Spec: [`features/tablet-demofeld.md`](features/tablet-demofeld.md).
 
@@ -405,7 +408,7 @@ Aufstellung:
   zur Bestätigung ist die Zähltafel gesperrt. **Einzel** braucht keine Wahl
   und läuft mit getauschter Aufstellung automatisch weiter. Die Wahl
   übersteht einen Tablet-Reload (`serveSetupTeam` wird persistiert);
-  „Korrektur — letzter Punkt zurück" in der Satzpause hebt sie wieder auf.
+  „↩ Letzten Punkt zurück" in der Satzpause hebt sie wieder auf.
   **Schon in der Satzpause** (seit v0.9.351, Schiri-Feedback 08.11.2026):
   Das Pausen-Overlay zeigt im Doppel „**Aufschlag & Annahme jetzt
   festlegen**". Der Knopf öffnet dieselbe Wahl, während die Pause weiterläuft
@@ -414,18 +417,20 @@ Aufstellung:
   die Wahl bleibt fällig und öffnet sonst wie bisher nach „Weiterspielen".
   Ist sie getroffen, kehrt das Overlay zurück; „Weiterspielen" fragt dann
   nicht noch einmal. Der Status an den Host bleibt `break_game`.
-- **Zurück-Schritt:** Ab Schritt 2 gibt es einen **„← Zurück · Back"**-
+- **Zurück-Schritt:** Ab Schritt 2 gibt es einen **„← Zurück"**-
   Button. Er verwirft die zuletzt getroffene Wahl und springt einen
   Schritt zurück – so lassen sich Fehleingaben korrigieren, ohne das
   Match neu zuweisen zu müssen. (Bei der Per-Satz-Aufschlagwahl entfällt
   das Zurück: das Gewinnerteam steht durch den Satzstand fest.)
-- **Zweisprachig:** Titel und Hinweise des Assistenten erscheinen
-  Deutsch **und** Englisch (internationale Spieler:innen). Das gilt auch
-  für das Megafon-Popup.
+- **Sprache (seit v0.9.425):** Die Seite spricht **eine** Sprache —
+  Deutsch oder Englisch, umschaltbar unter **⋯ Mehr** (Abschnitt
+  „Sprache der Bedienoberfläche"). Vorher standen Titel und Hinweise des
+  Assistenten und das Megafon-Popup in beiden Sprachen zugleich.
 - **Kopfzeile bleibt sichtbar (seit v0.9.278):** Der Assistent deckt nur
   noch den Bereich unter der Kopfzeile ab. Feldname, Aufruf-Uhr,
-  Sponsor-Leiste, Verbindungspunkt und das **Zahnrad** (Einstellungen,
-  Feldwechsel) bleiben während der Seitenwahl sichtbar und antippbar —
+  Sponsor-Leiste, Verbindungspunkt und **⋯ Mehr** (bis v0.9.422 das
+  Zahnrad; Feldwechsel unter „Gerät") bleiben während der Seitenwahl
+  sichtbar und antippbar —
   vorher lag der Scrim über allem, und ein Feldwechsel war erst nach
   der Aufstellung möglich. Technisch: `#setup-modal` beginnt bei
   `--kopf-hoehe`, die ein `ResizeObserver` aus der Kopfzeile misst; die
@@ -482,7 +487,7 @@ und rot pulsierend **„Letzter Aufruf"**.
   3 s nach, höchstens fünfmal je Zuweisung.
 - Stufenlogik in `src/io/aufrufUhr.mjs` (Test `scripts/test-aufruf-uhr.mjs`),
   Inline-Kopie in `tablet.html`. Auf schmalen Geräten (≤ 640 px) zeigt
-  die Marke nur die Zeit, die Farbe trägt die Stufe — damit das Zahnrad
+  die Marke nur die Zeit, die Farbe trägt die Stufe — damit „⋯ Mehr"
   rechts erreichbar bleibt.
 - **Bekannte Grenzen (vorbestehend, gelten für die TV-Uhr genauso):** Im
   Cloud-Modus rechnet die Uhr Relay-Zeit gegen einen Host-Stempel, eine
@@ -498,8 +503,10 @@ Spec [features/tablet-seiten-korrigieren.md](features/tablet-seiten-korrigieren.
 [ADR 0067](adr/0067-mannschaften-berichtigt-kipp-ereignis.md). Bedienung im
 Handbuch-Kapitel [tablet-bedienen.md](tablet-bedienen.md).
 
-Der Knopf **⇄** (Kopfzeile, ohne PIN; in Pause und Ergebnis-Ansicht ein eigener
-Knopf, weil deren Overlays die Kopfzeile verdecken) öffnet zwei Eingriffe:
+Der Eintrag **⇄ Seiten / Mannschaften korrigieren** (Mehr-Menü, ohne PIN —
+bis v0.9.422 ein Knopf ⇄ in der Kopfzeile; in Pause und Ergebnis-Ansicht ein
+eigener Knopf, weil deren Overlays die Kopfzeile verdecken) öffnet zwei
+Eingriffe:
 
 | Eingriff | Zustand | Gemeldeter Stand | Gesendet |
 |---|---|---|---|
@@ -513,7 +520,7 @@ Knopf, weil deren Overlays die Kopfzeile verdecken) öffnet zwei Eingriffe:
   `korrektur: {art, eventId, folgeIds, serveSetupTeamVorher}` auf `history`.
   Bei „Mannschaften tauschen" trägt er — als einziger Undo-Stand — eine
   Vollkopie des Punktverlaufs (siehe „Gespiegelter Zustand: Format 2").
-  `undo()`, `reopen()`, `setupBack()` und „Korrektur" in der Pause nehmen ihn
+  `undo()`, `reopen()`, `setupBack()` und der Rückgängig-Knopf in der Pause nehmen ihn
   zuerst zurück (`korrekturZuruecknehmen`): Snapshot zurück, Ereignisse per
   `retract` am selben Anker, Karten zurückkippen.
 - **Doppel:** Nach „Mannschaften tauschen" im laufenden Spiel setzt das Tablet
@@ -574,7 +581,8 @@ Erweiterung 06.09.2026):
   (nebeneinander): Die Plus-Spalten sind dort etwa 9 rem breit statt eines
   Fünftels der Breite, der Court wird gut zwei Drittel größer. Die Knöpfe
   bleiben in beiden Fällen ein Tippziel über die volle Breite bzw. Höhe.
-- **Wahl** im Zahnrad-Menü (hinter der PIN), Eintrag „Anordnung" reihum:
+- **Wahl** unter „⋯ Mehr → Feld wechseln · Anzeige …" (hinter der PIN),
+  Eintrag „Anordnung" reihum:
   **automatisch** (Standard: Hochformat → übereinander, Querformat →
   nebeneinander; Drehen des Tablets schaltet live um, mitten im Spiel, ohne
   Neuladen) · **nebeneinander (links–rechts)** · **übereinander
@@ -652,6 +660,248 @@ Erweiterung 06.09.2026):
   Ansage laufen ausschließlich auf den Ansage-Rechnern (Turnierleitung +
   ferne-Halle-Slave, `src/io/announcer.ts`), nie in `tablet.html`.
 
+## Aufgeräumte Bedienung (Usability-Durchgang, v0.9.425)
+
+Nach vielen einzelnen Erweiterungen wurden alle Ansichten im Demofeld bei
+1280×800, 962×601 (Fire HD 8) und 800×1280 (hochkant) durchgesehen. Geändert:
+
+- **Nur noch ein ↩.** Die Rückgängig-Knöpfe in der Kopfzeile
+  (`#undo-btn-top`) und am Satzstand sind entfallen; es bleibt der eine in
+  der Fußleiste (siehe „Mehr-Menü, ein Zurück-Knopf, Warte-Ansicht" unten).
+  Die Kopfzeile hatte zuvor bis zu elf Elemente.
+- **Kopfzeile einzeilig.** Feldname und Spiel enden bei Platzmangel mit „…"
+  statt über drei Zeilen umzubrechen. Unter 1000 px Breite steht bei
+  bestehender Verbindung nur der grüne Punkt (`.conn:has(.dot.ok)`); andere
+  Zustände und der Übungshinweis bleiben Text. Ohne `:has` bleibt alles wie
+  vorher.
+- **Satzstand größer.** Neben dem Stand steht kein Knopf mehr — „📈 Verlauf"
+  sitzt rechts in der Fußleiste (`.subtle`, erscheint mit dem ersten
+  Ballwechsel). Die Tafel wird dadurch flacher, die Ziffern wachsen im
+  Querformat auf `clamp(1.9rem, 8.5vmin, 4.4rem)` (hochkant gilt weiter die
+  eigene Deckelung).
+- **Spielende.** Knöpfe als eine Spalte gleicher Breite (vorher wuchsen sie
+  über das allgemeine `button { flex: 1 }` zu hohen Blöcken). „Spiel wieder
+  öffnen" ist nur noch ein umrandeter Nebenknopf (seit Runde 2 neutral statt
+  rot, siehe „Ein Wort je Sache" unten). Die Satzstände stehen als
+  Tabelle mit dem Sieger oben (`renderEndstand`/`siegerSeite`, siehe
+  „Endstand-Tabelle" unten): Gespeichert sind sie nach Seiten, und nach dem
+  letzten Satzwechsel stand der Verlierer links — unter dem Siegernamen las
+  man „16:21 · 18:21".
+- **Pausen.** Der Seitenwechsel steht als Band `#break-wechsel` im Overlay (in
+  jeder Satzpause und bei der Punktepause im Entscheidungssatz); der Toast
+  `#switch-toast` erscheint nur noch ohne Pause — er lag vorher über
+  Hinweistext und Knöpfen. Hinweistexte gekürzt.
+- **Menü.** Scrollt bei Überlauf (vorher lagen Titel und „Schließen" bei
+  800 px Höhe außerhalb des Schirms); ab 700 px zweispaltig. Aufbau siehe
+  nächster Abschnitt.
+- **Dialoge.** „Abbrechen"/„Schließen"/„Zurück" (Klasse `.opt.abbrechen`)
+  sind ruhige Rahmen-Knöpfe auf eigener Zeile statt gleichwertiger weißer
+  Karten — in „Spiel beenden?" sah Abbrechen wie eine vierte Beendigungsart
+  aus. Haupthandlungen in Dialogen sind gefüllt (`.opt.primaer`).
+- **Fehler „Ergebnis eintragen".** „Aktueller Satz (läuft)" stand auch ohne
+  Haken da: Ein Inline-`style="display:flex"` schlug das `hidden`-Attribut.
+
+### Mehr-Menü, ein Zurück-Knopf, Warte-Ansicht
+
+Zweiter Teil desselben Durchgangs (ebenfalls v0.9.425). Leitgedanke: Was bei
+jedem Ballwechsel gebraucht wird, steht offen da; alles Seltene liegt hinter
+**einem** Knopf, und nur was das Gerät verstellt, hinter der PIN.
+
+- **Kopfzeile:** rechts nur noch „📣 Turnierleitung" (`#megaphone-btn`,
+  ausgeblendet statt ausgegraut, solange nicht gezählt wird) und „⋯ Mehr"
+  (`#mehr-btn`). Beide tragen Text (`.header-btn.mit-text`); bis 760 px Breite
+  bleibt nur das Zeichen, damit der Feldname nicht abgeschnitten wird. Die
+  Knöpfe sind neutral gefärbt (`.neutral`) — Rot bleibt Team B, Zerstörendem
+  und der überzogenen Uhr vorbehalten. ⇄ und ✚ sind aus der Kopfzeile ins
+  Menü gewandert.
+- **Mehr-Menü** (`#settings-modal`, drei Ansichten über
+  `zeigeMenueAnsicht('menue' | 'pin' | 'geraet')`):
+  1. **Mehr** (ohne PIN): Abschnitt „Spiel" mit „Ergebnis eintragen …",
+     „Spiel beenden …", „⇄ Seiten / Mannschaften korrigieren",
+     „✚ Verletzung · Behandlung"; Abschnitt „Schiedsrichter" mit
+     „Schiri-Modus: an/aus"; Abschnitt „Gerät" mit „Feld wechseln ·
+     Anzeige …". `renderMenue` **blendet aus**, was gerade nicht geht (kein
+     Spiel, Spielende, gesperrt) — ausgegraute Einträge erklärten nie, warum
+     sie nicht gehen. Ohne einen einzigen Spiel-Eintrag fällt auch die
+     Abschnitts-Überschrift weg.
+  2. **PIN** — nur vor „Gerät". ✕ führt zurück ins Menü, nicht hinaus.
+  3. **Gerät**: Feld wechseln, Anzeige (nur Spielstand), Anordnung, Große
+     Schrift, Vollbild. Solange die PIN verlangt würde, trägt der
+     Menü-Eintrag ein 🔒 (`pinFreigabeAktiv()`; im Demofeld nie).
+- **Schiri-Modus ohne PIN.** Bewusste Entscheidung (15.11.2026): Der Modus
+  verstellt nichts am Gerät und überträgt nichts; die PIN hielt nur
+  Schiedsrichter auf, die sie nicht kannten. Geschützt bleibt, was ein Feld
+  lahmlegen kann — der Feldwechsel und die Anzeige.
+- **Menü schließt vor dem Dialog** (`ausMenue`): Das Menü liegt auf
+  `z-index` 28, die Dialoge („Spiel beenden?", Korrektur, Ergebnis) darunter.
+  Ein Eintrag schließt deshalb erst das Menü und öffnet dann seinen Dialog.
+- **Ein Zurück-Knopf** (`#undo-btn-bottom`, Fußleiste links, Amber). Sein
+  Text sagt, was er tut (`undoText`): „↩ Punkt für Links zurück" (Seite aus
+  `seiteDesLetztenPunkts`: Vergleich des obersten `history`-Schnappschusses
+  mit dem aktuellen Stand **in Team-Koordinaten**, damit ein Seitenwechsel
+  dazwischen nicht die falsche Seite nennt; in der Anordnung „übereinander"
+  „Vorne"/„Hinten" über `seiteWort`), „↩ Korrektur zurücknehmen", „↩
+  Aufstellung ändern" (frisch nach dem Setup) oder — wenn sich die Seite
+  nicht eindeutig ergibt, etwa nach einem Satzende oder einem eingetragenen
+  Zwischenstand — „↩ Letzten Punkt zurück". Bewusst **Seiten, keine Namen**:
+  Zähltafelbediener kennen die Spieler oft nicht.
+- **Fußleiste** (`#fussleiste`): Zurück-Knopf und „📈 Verlauf"; ohne Spiel
+  ausgeblendet. „Ergebnis eintragen …" und „Spiel beenden …" liegen im Menü.
+- **Warte-Ansicht** (`renderWarten`): Feldname groß, darunter „Warte auf das
+  nächste Spiel" mit einem Satz Erklärung. Fehlt die Verbindung länger als
+  `OFFLINE_HINWEIS_MS` (10 s, gemessen ab `ws.onclose` bzw. Seitenstart),
+  steht dort „Keine Verbindung zum Turnier-PC" — vorher sah ein Tablet ohne
+  WLAN genauso aus wie eines, das nur auf ein Spiel wartet. Der Watchdog-Takt
+  frischt die Ansicht auf; im Demofeld gibt es den Hinweis nicht. Gemessen
+  wird die **eigene** Verbindung des Tablets — im Cloud-Modus also die zum
+  Relay. Steht die, während der Turnier-PC selbst offline ist, bleibt es bei
+  „Warte auf das nächste Spiel".
+
+### Tipp-Rückmeldung und Satzpunkt am Stand
+
+Dritter Teil (ebenfalls v0.9.425):
+
+- **Sperre unsichtbar, Ziffer leuchtet.** Der Doppel-Eingabe-Schutz
+  (`SCORE_COOLDOWN_MS`, 700 ms) dimmte die +1-Flächen bisher auf 40 % — nach
+  jedem Punkt sah das wie eine Störung aus. Jetzt nimmt `.plus-btn.cooling`
+  nur noch keine Tipps an. Die Rückmeldung „gezählt" gibt die Ziffer selbst
+  (`zifferLeuchten`, Klasse `.gezaehlt`, 450 ms: kurz größer, amber
+  nachleuchtend; mit `prefers-reduced-motion` nur das Leuchten). Sie
+  leuchtet auf der Seite, auf der der Punkt **jetzt steht** — nach dem
+  Seitenwechsel im Entscheidungssatz also gegenüber; nach einem Satzende
+  (Stand wieder 0:0) gar nicht.
+- **Satz-/Spielpunkt am Stand** (`#punkt-lage`, `renderPunktLage`): eine
+  Marke **an der Stelle** der Satzbezeichnung („Satz 2 · best of 3 · bis
+  21"), in beiden Betriebsarten. Die Bezeichnung behält unsichtbar ihren
+  Platz (`.set-zeile.mit-lage`), die Marke liegt darüber — stünde sie
+  daneben, bräche die Zeile im Hochformat um und das Feld spränge bei jedem
+  Satzpunkt (nachgemessen, Review-Befund). Sie spricht in
+  **Seiten** („Satzpunkt links", übereinander „vorne"/„hinten", sonst
+  „Satzpunkt beide") und trägt die Farbe der Seite; `umpPunktLage()` liefert
+  dafür zusätzlich `seite`. In einer Pause und nach dem Spielende steht sie
+  nicht. Die Regel selbst ist unverändert (`src/io/satzpunkt.mjs`); das
+  Abzeichen in der Schiri-Leiste zeigt nur noch Karten.
+
+### Endstand-Tabelle und Autovervollständigung
+
+Vierter Teil (ebenfalls v0.9.425):
+
+- **Endstand als Tabelle** (`renderEndstand`, `table.endstand#set-summary`):
+  eine Zeile je Mannschaft, die Sätze als Spalten, der Sieger oben und in
+  Gold; je Satz ist die gewonnene Zahl hell (`td.gewonnen`), die verlorene
+  gedämpft. Hell ist nur ein wirklich **gewonnener** Satz
+  (`setWinnerSide`): Bei einer Aufgabe steht der abgebrochene Satz mit in der
+  Tabelle, dessen höhere Zahl bleibt gedämpft. Die Zeile
+  „21:16 · 18:21 · 21:15" musste man im Kopf den Namen zuordnen. Die Namensspalte kürzt mit „…" (der volle Siegername steht im
+  Banner darüber); ohne Aufstellung heißen die Zeilen „Links"/„Rechts", ohne
+  Satz (Kampflos) bleibt die Tabelle weg. Aufgebaut per `textContent`, nie
+  per `innerHTML` — die Namen kommen aus BTP.
+- **Autovervollständigung im Ergebnis-Dialog** (`src/io/satzErgaenzen.mjs`,
+  Inline-Kopie `satzErgaenzen`/`gegenfeldNach`, Test
+  `scripts/test-satz-ergaenzen.mjs`, Drift in
+  `scripts/test-inline-kopien.mjs`): Wer nachträgt, tippt die Punkte des
+  Verlierers — die des Siegers stehen damit fest. Unter „Ziel − 1" bekommt
+  das Gegenfeld das Ziel (11 → 21), bei „Ziel − 1" die Verlängerung
+  (20 → 22, höchstens `satzObergrenze`), ab dem Ziel **nichts** (21 kann
+  21:0 bis 21:19 sein). Der Vorschlag ist gelb hinterlegt (`.es-vorschlag`),
+  folgt der Eingabe („1" → 21, „11" → 21, „20" → 22) und verschwindet, wenn
+  sie keinen mehr hergibt. Ein von Hand gesetzter Wert wird **nie**
+  überschrieben — eine **0 gilt als leer** (neben einem Verlierer-Stand
+  kann sie in einem beendeten Satz nicht stimmen). Der Merker „ist ein
+  Vorschlag" hängt am Satz-Objekt (`SATZ_VORSCHLAG`, eine `WeakMap`), nicht
+  an der Zeile: „+ Satz" baut alle Zeilen neu, und der Vorschlag soll danach
+  weiter der Eingabe folgen. Nur in den
+  Zeilen beendeter Sätze — der laufende Satz im Weiterzählen-Modus ist ja
+  gerade nicht zu Ende — und nicht im Zeitformat (`target ≥ 99`). Die
+  Plausibilitätsprüfung beim Übernehmen bleibt unverändert und gilt auch
+  für Vorschläge. Beim Antippen wird der Feldinhalt markiert, damit die
+  vorbelegte „0" überschrieben statt ergänzt wird.
+
+### Setup: Schrittzähler und Feldbild
+
+Fünfter Teil (ebenfalls v0.9.425), siehe auch „Match-Setup" weiter oben.
+
+- **„Schritt n von m"** (`#setup-schritt`, `setupSchritt()`): Über der Frage
+  steht, wo man ist. Am Spielbeginn und beim Einstieg in ein laufendes Spiel
+  sind es Seite → Aufschläger → Annehmer (Einzel: zwei Schritte). Die
+  Aufschlagwahl je Satz und die Neuabfrage nach „Mannschaften tauschen"
+  beginnen beim Aufschläger (`serveSetupTeam` gesetzt) und zählen
+  „1 von 2". Gibt es nur eine Frage, bleibt der Zähler weg. Vorher wusste
+  niemand, ob nach dem Aufschläger noch etwas kommt.
+- **Feldbild statt Kachelreihe** (`baueSetupFeld`, `.setup-feld`): Aufschläger
+  und Annehmer wählt man auf einem kleinen Feld — jede Mannschaft auf ihrer
+  Hälfte (so wie in Schritt 1 gewählt), dazwischen das Netz, darüber
+  „links"/„rechts" bzw. „vorne"/„hinten". In der Anordnung übereinander liegt
+  die nahe Hälfte unten. Vorher standen vier gleiche Kacheln nebeneinander,
+  und wer zu wem gehört, musste man an der Randfarbe und am Zusatz „mit …"
+  ablesen (`renderPartnerHint` ist entfallen).
+- **Wer nicht wählbar ist, steht trotzdem da** (`.fest`, gestrichelt): Bei der
+  Annehmer-Wahl die aufschlagende Mannschaft — der gewählte Aufschläger gelb
+  hinterlegt mit „schlägt auf" —, bei der Aufschlagwahl je Satz die
+  Mannschaft, die den Satz verloren hat. Das Bild bleibt so vollständig.
+- Aufgebaut per DOM und `textContent`, nie per `innerHTML` — die Namen kommen
+  aus BTP. Die Seitenwahl (Schritt 1) bleibt bei zwei großen Kacheln: Dort
+  steht ja noch niemand auf einer Seite.
+
+### Ein Wort je Sache, Rot nur mit Bedeutung
+
+Sechster Teil (ebenfalls v0.9.425).
+
+- **„Spiel", nicht „Match".** Alle Texte am Tablet sagen „Spiel" (vorher
+  gemischt: „Spiel beenden", aber „Match wieder öffnen", „wer gewinnt das
+  Match?"). Im Code bleibt `match` der Name der Sache.
+- **„Korrektur" heißt nur noch eines:** das ⇄ **Seiten / Mannschaften
+  korrigieren** samt „↩ Korrektur zurücknehmen". Vorher trugen drei
+  verschiedene Handlungen das Wort:
+
+  | bis v0.9.422 | jetzt |
+  |---|---|
+  | „Korrektur — Match wieder öffnen" (Spielende) | „Spiel wieder öffnen" |
+  | „↩ Korrektur — letzter Punkt zurück" (Pause) | derselbe Text wie am Rückgängig-Knopf der Fußleiste (`undoText`): in der Punktepause „↩ Punkt für Links zurück", in der Satzpause „↩ Letzten Punkt zurück" (die Seiten sind dann schon getauscht, ein Seitenwort führte in die Irre) |
+  | „Korrektur nur über die Turnierleitung" (Ergebnis fest) | „Änderung nur über die Turnierleitung" (`src/io/abschlussAnsicht.mjs`) |
+
+- **Rot** steht nur noch für vier Dinge: die **rechte Seite** (`--team-b`:
+  +1-Fläche, Stand, Marke, Rand im Feldbild), **Zerstörendes** („Spiel
+  abbrechen · Aufgabe", „Court übernehmen", Diagnose löschen, rote Karte),
+  eine **überzogene Uhr** (Pause, Einspielzeit, Aufruf) und eine **Störung**
+  (Verbindung weg, Akku ≤ 10 %). „Spiel wieder öffnen" zerstört nichts und
+  ist deshalb neutral umrandet.
+- Im Feldbild des Setups folgt die Randfarbe der **Seite**, nicht der
+  Mannschaft — nach einem Seitenwechsel stünde sonst Rot neben der blauen
+  +1-Fläche.
+
+### Sprache der Bedienoberfläche
+
+Siebter Teil (ebenfalls v0.9.425). Vorher standen einzelne Texte in beiden
+Sprachen zugleich („← Zurück · Back", „Spiel beenden? · End the match?"),
+die meisten nur deutsch. Jetzt spricht die Seite **eine** Sprache, und die
+wählt, wer zählt: **⋯ Mehr → Sprache · Language → Deutsch / English**, ohne
+PIN.
+
+- **Je Gerät.** Die Wahl liegt im `localStorage` (`badhub.tablet.sprache`),
+  nicht am Feld — sie überlebt Feldwechsel, Neuladen und das Demofeld. Der
+  Turnier-PC erfährt davon nichts; es gibt keinen Standard je Turnier.
+- **Ohne Neuladen.** `setzeSprache` zeichnet die Seite neu; ein laufendes
+  Spiel, eine Pause und offene Uhren bleiben, wie sie sind.
+- **Ein Wörterbuch, deutsch als Schlüssel** (`EN` in `tablet.html`):
+  `t('Spiel beenden?')` liefert den englischen Text oder — fehlt er — den
+  deutschen. Platzhalter stehen als `{name}`. Festes HTML trägt `data-t`
+  (bzw. `data-t-title`/`data-t-aria`) und wird von `statischUebersetzen`
+  umgeschrieben. Die Inline-Kopien aus `src/io/` bleiben unberührt; übersetzt
+  wird an der Anzeigestelle (`geparktBand`, `abschlussStatus`, …).
+- **Was deutsch bleibt — bewusst:**
+  - die **Ansagen des Schiri-Modus** samt Karten-Ansagen: Sie werden in der
+    Halle vorgelesen, und das Regelwerk gibt den Wortlaut vor,
+  - der **Ablehnungsgrund vom Turnier-PC** und alles, was aus BTP kommt
+    (Feldname, Klasse, Namen),
+  - die **Diagnose** (für die Turnierleitung und den Support).
+- **Demofeld:** Feldname („Practice court"), Wasserzeichen („PRACTICE", per
+  CSS an `html[lang]`) und die Übungsspiele folgen der Sprache.
+- **Vollständigkeit ist geprüft:** `scripts/test-tablet-sprache.mjs` (CI)
+  verlangt für jeden Text, der durch `t()` oder `data-t` läuft, einen
+  englischen Eintrag, lässt keine verwaisten Einträge zu und vergleicht die
+  Platzhalter. Ein neuer Text ohne Übersetzung macht die CI rot.
+
 ## Akkustand am Tablet (seit v0.9.293)
 
 Im Kiosk fehlt die Android-Statusleiste — den Akkustand eines Tablets
@@ -691,7 +941,9 @@ Schwellen (seit v0.9.343, `kern/AkkuAnzeige.kt`, Drift-Test
 
 ## Meldungen an die Turnierleitung
 
-In der Kopfzeile rechts gibt es zwei Melde-Buttons:
+Zwei Meldungen gehen vom Tablet aus — ✚ über den Eintrag „✚ Verletzung ·
+Behandlung" im Mehr-Menü (bis v0.9.422 ein Knopf in der Kopfzeile), 📣 über
+den Knopf „📣 Turnierleitung" in der Kopfzeile:
 
 - **✚ Verletzung/Behandlung** – unterbricht das Spiel; „Weiterspielen" hebt
   die Behandlungspause auf. Das Feld wird in der bts-light-Felder-Übersicht rot
@@ -715,7 +967,7 @@ In der Kopfzeile rechts gibt es zwei Melde-Buttons:
   Behandlung". Er **löst** die Punkte- bzw. Satzpause ab, ohne sie über
   `endBreak()` zu beenden: keine „bitte spielen"-Ansage, und die
   Aufschlagwahl im Doppel öffnet erst, wenn die Behandlung endet. Nach
-  Spielende ist ✚ gesperrt (das Megafon nicht).
+  Spielende fehlt der ✚-Eintrag im Mehr-Menü (das Megafon bleibt).
 - **Zettel-Ereignisse** (nur wenn der Turnier-PC die Darstellung kennt, also
   `injuryGuideSecs > 0`): ✚ erfasst `injury_start` mit Anker und Phase von
   **vor** dem Pausenwechsel und demselben Zeitstempel wie die Uhr; jedes Ende
@@ -727,7 +979,7 @@ In der Kopfzeile rechts gibt es zwei Melde-Buttons:
 - **Spiel vom Feld während der Behandlung:** Es wird kein Ende erfunden; der
   Zettel zeigt „Dauer offen". Dasselbe gilt, wenn ein Ersatz-Tablet einen
   älteren Stand desselben Spiels übernimmt.
-- **📣 Turnierleitung rufen** – Popup (deutsch/englisch) mit Bestätigung;
+- **📣 Turnierleitung rufen** – Popup mit Bestätigung;
   meldet, dass ein Offizieller ans Feld soll.
 
 Beide Meldungen erscheinen zusätzlich in einer **app-weiten Leiste** in
@@ -746,24 +998,25 @@ Der Abbruch ist ein eigener Undo-Schritt: **„Wieder öffnen"** nimmt nur den
 Abbruch zurück, der letzte Punkt bleibt stehen (früher ging er dabei
 mit verloren).
 
-## „Match beenden" (Dialog: Aufgabe oder Kampflos)
+## „Spiel beenden" (Dialog: Aufgabe oder Kampflos)
 
-Der dezente Button **„Match beenden …"** in der Fußzeile ist **ab 0:0**
-verfügbar (vorher erst ab dem 2. Satz). Ein Tippen öffnet eine zweisprachige
-Rückfrage (**„Spiel beenden? · End the match?"**) mit den Optionen:
+Der Eintrag **„Spiel beenden …"** im Mehr-Menü (bis v0.9.422 „Match beenden …"
+in der Fußzeile) ist **ab 0:0**
+verfügbar (vorher erst ab dem 2. Satz). Ein Tippen öffnet die Rückfrage
+**„Spiel beenden?"** (bis v0.9.422 zweisprachig beschriftet) mit den Optionen:
 
-- **Aufgabe – nur dieses Spiel · Retire (this match)** → Status **Aufgabe**
+- **Aufgabe – nur dieses Spiel** → Status **Aufgabe**
   (`ScoreStatus = 2`). Der laufende Teilstand wird als Satz übernommen. Es
   zählt **nur dieses Spiel**, keine Folgespiele.
-- **Verletzung – auch Folgespiele der Disziplin · Injury** → wie Aufgabe, aber
+- **Verletzung – auch Folgespiele der Disziplin** → wie Aufgabe, aber
   zusätzlich wird für die **restlichen Spiele der Disziplin** ein Walkover-
   Vorschlag hinterlegt (echte Verletzung, Spieler fällt aus). Siehe
   [walkover.md](walkover.md).
-- **Kampflos · Walkover** → Status **Kampflos** (`ScoreStatus = 1`). Das Spiel
+- **Kampflos** → Status **Kampflos** (`ScoreStatus = 1`). Das Spiel
   wird **ohne Sätze** gewertet (z. B. Nichtantritt), die Satzliste wird verworfen.
-- **Regulär beenden · Finish normally** → nur sichtbar, wenn schon Sätze
+- **Regulär beenden** → nur sichtbar, wenn schon Sätze
   gespielt wurden; beendet wie der frühere Button manuell anhand der Sätze.
-- **Abbrechen · Cancel**.
+- **Abbrechen**.
 
 Bei Aufgabe **und** Kampflos wählt der Schiedsrichter danach im Match-Ende-
 Overlay den Sieger; erst dann lässt sich das Ergebnis übermitteln. Der Status
@@ -774,8 +1027,8 @@ weist beide gesetzten Flags ab.
 
 ## Ergebnis direkt eintragen (niemand hat gezählt)
 
-Der ebenfalls dezente Button **„Ergebnis eintragen …"** in der Fußzeile
-(offen sichtbar — ein Spieler muss ihn zur Not selbst bedienen können)
+Der Eintrag **„Ergebnis eintragen …"** im Mehr-Menü (bis v0.9.422 in der
+Fußzeile; ohne PIN — ein Spieler muss ihn zur Not selbst bedienen können)
 öffnet einen Dialog, in dem die **Satzstände** direkt eingetippt werden.
 Anwendungsfall: Es hat niemand live am Tablet gezählt, das reguläre
 Ergebnis soll trotzdem übermittelt werden.
@@ -784,6 +1037,9 @@ Ergebnis soll trotzdem übermittelt werden.
   beschriftet; „+ Satz" ergänzt eine Zeile (bis zur Satzanzahl des
   Formats). Der aktuelle Stand ist vorbelegt, falls doch schon gezählt
   wurde.
+- **Autovervollständigung** (seit v0.9.425): Stehen die Punkte des
+  Verlierers, füllt der Dialog das Gegenfeld selbst aus (11 → 21, 20 → 22) —
+  Regel und Grenzen unter „Endstand-Tabelle und Autovervollständigung".
 - **Plausibilität clientseitig:** Jeder Satz muss regulär zu Ende gespielt
   sein (`setWinnerSide` gegen Ziel/Cap der BTP-Zählweise; im **Zeitformat**
   `target ≥ 99` genügt ein Satz, sobald er **nicht unentschieden** ist),
@@ -805,10 +1061,10 @@ Ergebnis soll trotzdem übermittelt werden.
 - „Übernehmen" füllt die Sätze, markiert das Match als beendet und öffnet
   das **normale Match-Ende-Overlay** (Sieger + „Ergebnis übermitteln") —
   ab da läuft alles über den bewährten, gegen Netzausfälle abgesicherten
-  Sende-/Retry-Weg wie beim Live-Zählen. „Korrektur — Match wieder
-  öffnen" macht die Eingabe rückgängig.
+  Sende-/Retry-Weg wie beim Live-Zählen. „Spiel wieder öffnen" macht die Eingabe
+  rückgängig.
 
-Für Kampflos/Aufgabe ist weiterhin der Dialog **„Match beenden"** da.
+Für Kampflos/Aufgabe ist weiterhin der Dialog **„Spiel beenden"** da.
 
 ### Mitten im Spiel einsteigen und weiterzählen (Plan 12b)
 
@@ -838,8 +1094,8 @@ Findet sich erst mitten im Spiel jemand zum Zählen, schaltet der Haken
 Intervall-Schwelle (z. B. 11), gilt die 60-s-Pause als bereits erledigt
 (Schutz gegen Doppel-Pause; im Grenzfall eine Annahme). Ein **Fehlgriff
 in der Aufstellung** (falsche Seite/Aufschläger) lässt sich am einfachsten
-korrigieren, indem man den kurzen Assistenten zu Ende führt und dann im
-Match-Ende- bzw. über „Korrektur" neu ansetzt — ein Rückschritt aus der
+korrigieren, indem man den kurzen Assistenten zu Ende führt und danach über
+⇄ „Seiten / Mannschaften korrigieren" neu ansetzt — ein Rückschritt aus der
 Seitenwahl heraus gibt es (wie beim normalen Spielstart) nicht.
 
 ## Kampflose Wertung nach Aufgabe
@@ -1051,9 +1307,10 @@ Server verwirft zusätzlich einen Score für ein bereits finalisiertes Match
 
 Dasselbe Flag kommt auch nach dem **eigenen** Ergebnis zurück, sobald BTP es
 angenommen hat. Seit v0.9.291 sperrt die Beendet-Ansicht dann **beide**
-Knöpfe — „Ergebnis übermitteln" und „Korrektur — Match wieder öffnen" — und
-sagt „✓ Ergebnis steht in BTP fest — Korrektur nur über die Turnierleitung."
-Vorher blieb die Korrektur offen, und das Gate schluckte jeden weiteren
+Knöpfe — „Ergebnis übermitteln" und „Spiel wieder öffnen" (bis v0.9.422
+„Korrektur — Match wieder öffnen") — und
+sagt „✓ Ergebnis steht in BTP fest — Änderung nur über die Turnierleitung."
+Vorher blieb das Wieder-Öffnen offen, und das Gate schluckte jeden weiteren
 Sendeversuch ohne ein Wort (Turnier 12./13.09.2026, Feld 11: 23-mal
 `submit_suppressed_finalized` in 90 s). Die Regel dazu ist
 `abschlussLage` (`src/io/abschlussAnsicht.mjs`, Test
@@ -1141,8 +1398,8 @@ ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)). Die
 Hülle `anzeige.html` bettet eine der Anzeige-Seiten in einem seitenfüllenden
 Rahmen ein und liefert die Tablet-Bedienung dazu.
 
-- **Einstiege:** im Zahnrad-Menü des Zähl-Tablets „Anzeige (nur Spielstand)"
-  (hinter der PIN) und im Belegt-Overlay eines schon gezählten Feldes „Nur
+- **Einstiege:** am Zähl-Tablet unter „⋯ Mehr → Feld wechseln · Anzeige …"
+  der Eintrag „Anzeige (nur Spielstand)" (hinter der PIN) und im Belegt-Overlay eines schon gezählten Feldes „Nur
   Spielstand anzeigen" (ohne PIN — die Anzeige-Seiten sind ohnehin frei
   erreichbar, das Zählen bleibt durch das Overlay geschützt). Beide öffnen
   `…/anzeige?layout=tafel&court=<Feld>`.
