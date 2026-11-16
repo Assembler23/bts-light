@@ -107,3 +107,5 @@ hier eintragen.
 | [0096](0096-tp-pfad-aus-den-handles-von-btp.md) | TP-Pfad aus den Datei-Handles von `btp.exe`: Durchprobieren mit `DuplicateHandle`, read-only, Frist und Hänger-Deckel, nur lokaler BTP | accepted |
 | [0097](0097-tp-automatik-kennung-nur-bei-gleichheit-oder-leer.md) | TP-Automatik: Kennung still nur bei Gleichheit oder leerem Feld, sonst Rückfrage; Nein schaltet die Automatik ab (ändert „nie still“) | accepted |
 | [0098](0098-tp-automatik-schreibpfad-mit-schreibzaehler.md) | TP-Automatik schreibt außerhalb des Setups über `mutate_config`, Schreibzähler schützt vor veraltetem Formular, Pfad je PC | accepted |
+| [0102](0102-vertrauensmodell-pi-fernupdate.md) | Vertrauensmodell des Pi-Fernupdates: eigenes Ed25519-Paar (aktiv + Reserve), Signatur über das Manifest, nur höhere Paketnummer, Auftrag und PC-Adresse unauthentisiert | accepted |
+| [0103](0103-pi-paketmodell-und-rueckfall.md) | Pi-Paketmodell und Rückfall: eine Quelle `pi/paket/`, Versionsverzeichnisse mit Symlink-Wechsel, fester Kern im Image, Probe über Prozesse, Sperre zurückgefallener Nummern | accepted |

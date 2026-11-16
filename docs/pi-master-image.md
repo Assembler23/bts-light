@@ -146,7 +146,9 @@ am Pi ändern (Tastatur anschließen).
 
 Das Image wird **emuliert** gebaut (Docker, ARM-Emulation) mit
 `pi/build-image-docker.sh` — dieselben Schritte wie am echten Pi:
-`setup-monitor.sh` als `badhub`, dann `build-master-image.sh`
+`setup-monitor.sh` als `badhub`, dann `build-master-image.sh`. Die Dateien
+für den Pi (Kiosk-Skript, CEC-Dienst, Hinweisseite) nimmt der Bau aus
+`pi/paket/` des Standes, aus dem er läuft — er lädt nichts aus dem Netz nach
 (`WLAN_PSK='…' bash pi/build-image-docker.sh <ordner>`, Dauer gut zehn
 Minuten). Hochladen nach `download/bts-light/pi-image/` per `scp` auf den
 badhub-Server, das Vorgänger-Image vorher umbenennen. Weil es dabei nie auf einem Pi läuft, gehört nach
@@ -197,7 +199,7 @@ dann im Ansage-Modus „Ton gesperrt …" und bleiben stumm, die Anzeige selbst
 läuft unverändert. Für Hallen mit Ansage am TV das Master-Image neu bauen (auf dem Master-Pi
 das aktuelle `setup-monitor.sh` ausführen, dann `pi/build-master-image.sh`)
 oder auf den betroffenen Pis `setup-monitor.sh` erneut ausführen.
-<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/setup-monitor.sh -->
+<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/paket/bin/bts-monitor.sh -->
 
 **Ebenso der CEC-Dienst (November 2026):** Der Pi schaltet den TV beim Start
 per HDMI-CEC ein und auf seinen Eingang (`bts-cec.service`). Ältere Images
@@ -237,7 +239,7 @@ lässt. Der Pi-OS-Wrapper hat dafür eine eigene Option `--no-memcheck`,
 die genau diese Splash überspringt.
 
 **Fix in v0.9.19:** `--no-memcheck` ist jetzt dauerhaft im
-Chromium-Aufruf in `pi/setup-monitor.sh`. Auf Pis ≥ 1 GB ist die Option
+Chromium-Aufruf im Kiosk-Skript (`pi/paket/bin/bts-monitor.sh`). Auf Pis ≥ 1 GB ist die Option
 ein No-Op.
 
 ### Stolperstein 2 — SSH-Hostkeys nach `dd`-Klon
@@ -329,7 +331,8 @@ Einzelgerät aufgesetzt wird:
 3. Karte ins Pi, booten, in der Fritzbox die IP suchen.
 4. Im Host-Terminal: `ssh-copy-id badhub@<ip>` — Pi Imager überträgt
    den Pubkey unzuverlässig, deshalb manuell nachholen.
-5. `scp pi/setup-monitor.sh badhub@<ip>:~/` und dann per SSH:
+5. `scp -r pi/setup-monitor.sh pi/paket badhub@<ip>:~/` (ohne den Ordner
+   `paket` lädt das Skript ihn aus dem Repository nach) und dann per SSH:
    `echo "badhub" | sudo -S -v && BTS_MONITOR_URL=http://bts-light.local:8088/monitor bash setup-monitor.sh`.
 6. `sudo reboot` → der Pi steht als Kiosk.
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=bts-light: TV per HDMI-CEC einschalten und auf den Pi-Eingang holen
+Documentation=https://github.com/Assembler23/bts-light/blob/main/docs/pi-setup.md
+After=local-fs.target
+
+[Service]
+ExecStart=/usr/local/bin/bts-cec.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+# Dateien, die auf dem Pi landen: <Rechte> <Pfad unter pi/paket/>.
+# Einzige Quelle für das Image (pi/setup-monitor.sh kopiert genau diese
+# Liste) und für das Fernupdate-Paket (Spec docs/features/pi-fernupdate.md).
+# Die Rechte stehen hier und nicht im Dateisystem, weil Ausführbits auf
+# einem Windows-Rechner verloren gehen. scripts/test-pi-quelle.mjs hält
+# Liste, Ordner und setup-monitor.sh beieinander.
+755 bin/bts-cec.sh
+755 bin/bts-monitor.sh
+644 share/no-url.html
+644 units/bts-cec.service
+755 xinitrc
