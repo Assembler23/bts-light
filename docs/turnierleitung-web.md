@@ -69,7 +69,7 @@ LAN+Cloud voraus.
   Aufruf bleibt der letzte *reguläre*: Sein Knopf heißt weiter „Letzter
   Aufruf", auch wenn danach „Erneut aufrufen" möglich ist.
 - **Spiel komplett ansagen** (seit v0.9.370): Im ⋯-Menü jeder belegten
-  Feld-Kachel steht **immer** „📣 Spiel komplett ansagen" — egal, ob das
+  Feld-Kachel steht **immer** „Spiel komplett ansagen" — egal, ob das
   Spiel schon läuft, ob der letzte Aufruf gesprochen ist oder die
   Aufruf-Knöpfe gerade fehlen. Es erklingt noch einmal die vollständige
   Ansage wie beim ersten Aufruf (Feld, Disziplin, Paarung und — je nach
@@ -90,7 +90,7 @@ LAN+Cloud voraus.
   mit Stufenwort. Das ist **kein** Spieler-Aufruf: Die Aufruf-Zählung der
   Spieler bleibt stehen. Ohne zugewiesene Bedienung gibt es den Knopf nicht.
 - **In Vorbereitung rufen:** der oberste Eintrag im **⋮-Menü** der Zeile,
-  **📣 In Vorbereitung rufen**. Ist das Spiel gerufen, heißt derselbe
+  **In Vorbereitung rufen**. Ist das Spiel gerufen, heißt derselbe
   Eintrag **📣 Aufruf zurücknehmen**; an der Zeile steht dann die Marke
   „gerufen". Bis v0.9.323 war das ein Megafon-Knopf direkt an der Zeile.
   Seit v0.9.331 wird jeder neue Aufruf **angesagt** („In Vorbereitung …
@@ -107,28 +107,45 @@ LAN+Cloud voraus.
   **⋮-Menü**, links der Zieh-Griff ⠿. Mit dem Profil-Schalter
   „Verschiebe-Knöpfe" kommen die vier Knöpfe ⤒ ↑ ↓ ⤓ vor das Menü (siehe
   [Spiele in der Warteliste umsortieren](#spiele-in-der-warteliste-umsortieren)).
-- **Das ⋮-Menü an einer Wartelisten-Zeile:** Ganz oben stehen die beiden
-  häufigsten Handgriffe, **📣 In Vorbereitung rufen** und **↑ An den Anfang
-  der Spielliste**, danach — im Schiedsrichter-Betrieb — **Schiedsrichter
-  einteilen** (siehe [Schiedsrichter einteilen](#schiedsrichter-einteilen)),
-  „Ergebnis eintragen", **🖨 Zettel (leer)**, der
-  **Auto-Vergabe**-Umschalter, der **Hallen-Wähler**, das **Wunschfeld**,
-  **Hervorheben** (Zeilenfarbe wie in BTP) und — an einem gerufenen Spiel —
-  **Nachruf** (beide Parteien oder nur eine; dazu **Erste Ansage
-  wiederholen**, siehe unten). An der Zeile selbst steht so
-  wenig wie möglich; so passt eine Zeile auch auf einem schmalen Tablet in
-  eine Zeile statt in vier.
-  <!-- pruef: "↑ An den Anfang der Spielliste" in src-tauri/assets/tl.html -->
+- **Das ⋮-Menü an einer Wartelisten-Zeile** ist in Gruppen gegliedert (seit
+  v0.9.427): Ganz oben, ohne Überschrift, stehen die beiden häufigsten
+  Handgriffe, **In Vorbereitung rufen** und **An den Anfang der
+  Spielliste**. An einem gerufenen Spiel folgen **Meetingpoint** (je Person
+  ein Umschalter) und **Nachruf** (ein Eintrag für beide Parteien, darunter
+  die schmale Zeile „nur:" mit je einem Knopf je Partei; dazu **Erste Ansage
+  wiederholen**, siehe unten). Dann **Spiel** — im Schiedsrichter-Betrieb
+  **Schiedsrichter einteilen** (siehe
+  [Schiedsrichter einteilen](#schiedsrichter-einteilen)), „Ergebnis
+  eintragen", **Zettel (leer) drucken** —, **Feldvergabe** (von der Automatik
+  ausnehmen, **Spielort**, **Wunschfeld**) und zuletzt **Hervorheben**
+  (Zeilenfarbe wie in BTP). An der Zeile selbst steht so wenig wie möglich;
+  so passt eine Zeile auch auf einem schmalen Tablet in eine Zeile statt in
+  vier.
+  <!-- pruef: "An den Anfang der Spielliste" in src-tauri/assets/tl.html -->
+  <!-- pruef: "Zettel (leer) drucken" in src-tauri/assets/tl.html -->
+  <!-- pruef: "Feldvergabe" in src-tauri/assets/tl.html -->
+- **Das ⋯-Menü an einer Feldkachel** hat drei Gruppen: **Ansagen** (Aufruf —
+  für beide Parteien oder über „nur:" für eine —, Spiel komplett ansagen,
+  Bitte anfangen, Schiedsrichter ansagen, Bedienung nachrufen), **Spiel**
+  (Schiedsrichter einteilen, Ergebnis eintragen, Punktverlauf, Zettel
+  drucken) und **Feld** (Vom Feld nehmen, Feld sperren/freigeben). Einträge,
+  die gerade nichts bewirken können, fehlen.
+  <!-- pruef: "Zettel drucken" in src-tauri/assets/tl.html -->
 - **Das Menü schließt nach der Wahl von selbst** (seit v0.9.324) — an der
   Wartelisten-Zeile, an der Feldkachel (⋯) und am beendeten Spiel. Ein Tipp
   auf einen Eintrag führt die Aktion aus und klappt das Menü zu; eine
   Aktion kostet damit genau zwei Tipps: Menü auf, Eintrag. Offen bleibt es
-  nur, solange die Wahl noch nicht getroffen ist: Beim **Hallen-Wähler**
+  nur, solange die Wahl noch nicht getroffen ist: Beim **Spielort**
   und beim **Wunschfeld** schließt es erst, wenn ein Feld bzw. eine Halle
   ausgewählt ist, nicht schon beim Aufklappen der Liste. Eine Farbe unter
   **Hervorheben** ist mit einem Tipp gewählt und schließt sofort. Ein Tipp
-  auf eine Überschrift oder freie Fläche im Menü schließt nicht; ein Tipp
-  auf ⋮ (oder ein anderes Menü) schließt wie bisher.
+  auf eine Überschrift oder freie Fläche im Menü schließt nicht.
+- **Ein Tipp daneben schließt das Menü** (seit v0.9.427) — irgendwo auf der
+  Seite, nicht nur auf ⋮; ebenso die Escape-Taste. Der Tipp wirkt dabei
+  normal weiter: Wer bei offenem Menü ein anderes Spiel antippt, wählt es.
+- **Ausnahme Meetingpoint:** Die Personen-Umschalter (und „Ohne
+  Schiedsrichter") lassen das Menü **offen** — so lassen sich mehrere
+  Personen nacheinander einchecken, ohne es jedes Mal neu zu öffnen.
 - **Hervorheben** (seit v0.9.277, Spec
   [`features/tl-zeilenfarbe.md`](features/tl-zeilenfarbe.md)): Im ⋮-Menü
   einer Zeile stehen **„keine" und sechs Farbfelder** — Gelb, Pink, Orange,
@@ -153,7 +170,7 @@ LAN+Cloud voraus.
   gelb. Eine von Hand gesetzte andere Farbe (Pink, Orange, Blau, Grün, Lila)
   bleibt stehen; dort sagt weiterhin das Abzeichen „✓ spielbereit", dass die
   Partie komplett ist.
-- **🖨 Zettel (leer)** druckt den **Vorabzettel** des Spiels: derselbe
+- **Zettel (leer) drucken** druckt den **Vorabzettel** des Spiels: derselbe
   Bogen wie der Archivzettel, aber mit leerem Raster — zum Mitgeben an
   den Schiedsrichter, der ihn von Hand führt. Kopf, Namen und Verein sind
   vorgedruckt; Feld, Halle und Besetzung nur, soweit sie schon feststehen.
@@ -246,11 +263,11 @@ LAN+Cloud voraus.
   (Default 60). `0` schaltet die Warnung ganz ab — der Rückzugsweg, falls sie
   im laufenden Turnier zu oft danebenliegt.
 - **Vom Feld nehmen im ⋯-Menü** (seit v0.9.280): Ein belegtes Feld bietet in
-  seinem ⋯-Menü **„↩ Vom Feld nehmen"** — derselbe Befehl wie im Band nach dem
+  seinem ⋯-Menü **„Vom Feld nehmen"** — derselbe Befehl wie im Band nach dem
   Antippen der Kachel, nur ohne vorherige Auswahl. Läuft dort schon ein
   Spielstand, fragt die Seite nach, weil er verloren geht.
 - **Felder sperren und freigeben** (seit v0.9.258): Im ⋯-Menü einer
-  Feld-Kachel steht **„🔒 Feld sperren"**. Ein gesperrtes Feld bekommt von der
+  Feld-Kachel steht **„Feld sperren"**. Ein gesperrtes Feld bekommt von der
   automatischen Vergabe kein Spiel mehr — für ein kaputtes Netz, ein
   reserviertes Feld oder eine Halle, die gegen Abend verkleinert wird. Es ist
   dieselbe Sperre wie am Turnier-PC, nicht eine zweite.
@@ -260,7 +277,7 @@ LAN+Cloud voraus.
   ungestört zu Ende, erst danach bleibt das Feld leer. Wer es sofort räumen
   will, nimmt das Spiel zusätzlich von Hand herunter.
 
-  **„🔓 Feld freigeben"** fragt nach, bevor es wirkt. Das ist Absicht: Sperren
+  **„Feld freigeben"** fragt nach, bevor es wirkt. Das ist Absicht: Sperren
   kann man gefahrlos zurücknehmen, aber ein versehentlich freigegebenes Feld
   bekommt sofort wieder ein Spiel — und wer die Sperre nicht selbst gesetzt
   hat, sieht ihr nicht an, ob dort etwas kaputt ist.
@@ -455,7 +472,7 @@ er **an**, auch an Geräten, die es schon vor diesem Update gab.
 ### Spiele in der Warteliste umsortieren
 
 **Der schnellste Weg — „ganz nach vorn":** im **⋮-Menü** der Zeile der
-zweite Eintrag, **↑ An den Anfang der Spielliste**. Ein Tipp, und das Spiel
+zweite Eintrag, **An den Anfang der Spielliste**. Ein Tipp, und das Spiel
 steht an der Spitze der umsortierbaren Liste; das Menü schließt dabei von
 selbst. Kein Ziehen, kein Scrollen, egal wie lang die Liste ist. Der
 Eintrag fehlt an einem Spiel, das schon vorn steht oder bereits gerufen ist
@@ -487,9 +504,11 @@ v0.9.347). Diese Reihenfolge lässt sich ändern:
 
 - am **Griff** (⠿) einer gerufenen Zeile ziehen. Wer auf eine wartende
   Zeile ablegt, schiebt das Spiel ans Ende der Gerufenen;
-- im **⋮-Menü** der Zeile: **⤒ An den Anfang der Gerufenen**,
-  **↑ Eine Position nach oben**, **↓ Eine Position nach unten**;
-<!-- pruef: "⤒ An den Anfang der Gerufenen" in src-tauri/assets/tl.html -->
+- im **⋮-Menü** der Zeile: die Zeile **Reihenfolge der Gerufenen** mit drei
+  Pfeil-Knöpfen — an den Anfang der Gerufenen, eine Position nach oben, eine
+  nach unten (nur die, die etwas bewirken);
+<!-- pruef: "Reihenfolge der Gerufenen" in src-tauri/assets/tl.html -->
+<!-- pruef: "An den Anfang der Gerufenen" in src-tauri/assets/tl.html -->
 - mit eingeschalteten Verschiebe-Knöpfen (Profil) auch direkt an der Zeile.
 
 Im Mehr-Hallen-Turnier gilt die Reihenfolge je Halle: Verschoben wird nur
@@ -553,8 +572,9 @@ spürbar breiter.
 
 ### Ein Spiel von der automatischen Feldvergabe ausnehmen
 
-Im **⋮-Menü** jeder Wartelisten-Zeile steht ein Pause-Umschalter
-(⏸ Auto-Vergabe). Gedrückt heißt: Dieses Spiel wird von der
+Im **⋮-Menü** jeder Wartelisten-Zeile steht in der Gruppe **Feldvergabe** der
+Eintrag **Von der Automatik ausnehmen**. Ist er eingefärbt („Ausgenommen —
+wieder aufnehmen"), heißt das: Dieses Spiel wird von der
 **automatischen** Feldvergabe übersprungen, solange die Ausnahme aktiv ist
 — ein Abzeichen „⏸ Auto-Vergabe aus" markiert die Zeile zusätzlich. Praktisch,
 wenn ein Spieler kurzfristig nicht greifbar ist, das Spiel aber nicht
@@ -875,7 +895,7 @@ Details: [features/tl-spielersuche.md](features/tl-spielersuche.md).
 
 ### Punktverlauf ansehen
 
-Der **📈-Knopf** im ⋮-Menü einer belegten Feldkachel (seit 17.08.2026
+Der Eintrag **Punktverlauf** im ⋯-Menü einer belegten Feldkachel (seit 17.08.2026
 dort statt auf der Kachel — eine Fläche weniger) und im ⋮-Menü der
 Beendet-Zeilen öffnet den **Punktverlauf** des Spiels: je Satz ein
 Liniendiagramm (x = Ballwechsel, y = Punkte, eine Linie je Partei).
@@ -885,7 +905,7 @@ Verlauf. Details: [punktverlauf.md](punktverlauf.md).
 
 ### Schiedsrichterzettel abrufen
 
-Der **🖨-Knopf** im ⋮-Menü öffnet den **Schiedsrichterzettel** — sowohl an
+Der Eintrag **Zettel drucken** im Menü öffnet den **Schiedsrichterzettel** — sowohl an
 einer belegten Feldkachel als auch (seit v0.9.246) an jeder Zeile der
 Beendet-Liste, wo er am meisten Sinn ergibt: Das Spiel ist abgeschlossen,
 der Zettel vollständig. Er erscheint als druckfertiges Dokument im Fenster,
@@ -1326,8 +1346,8 @@ eine Wort schaltet ab.
 Spec: [features/schiedsrichterzettel-druck.md](features/schiedsrichterzettel-druck.md) ·
 ADR 0037/0038/0039.
 
-Im Kebab-Menü einer belegten Feldkachel steht neben „📈 Punktverlauf" jetzt
-**„🖨 Zettel"** — unter derselben Schranke: nur, wenn das Tablet wirklich etwas
+Im Kebab-Menü einer belegten Feldkachel steht neben „Punktverlauf" jetzt
+**„Zettel drucken"** — unter derselben Schranke: nur, wenn das Tablet wirklich etwas
 aufgezeichnet hat. Ein Papier-Ergebnis bekommt bewusst keinen Zettel; ein halb
 ausgefüllter Bogen wäre irreführender als keiner.
 
@@ -1362,8 +1382,9 @@ Ist der Meetingpoint am Turnier-PC eingeschaltet ([meetingpoint.md](meetingpoint
   das Grün und zeigt wieder ihre Farbe aus BTP (in aller Regel das
   Aufruf-Gelb). Details unter **Hervorheben** weiter oben.
 <!-- pruef: ".row.spielbereit { --hl: #86efac;" in src-tauri/assets/tl.html -->
-- Im ⋮-Menü der Zeile steht die Gruppe **Meetingpoint**: je Person ein Knopf
-  zum Ein-/Auschecken von Hand (`meetingpoint_set`), bei SR-Pflicht dazu
+- Im ⋮-Menü der Zeile steht die Gruppe **Meetingpoint**: je Person ein
+  Umschalter zum Ein-/Auschecken von Hand (`meetingpoint_set`; Partei 1
+  links, Partei 2 rechts, das Menü bleibt dabei offen), bei SR-Pflicht dazu
   **Ohne Schiedsrichter** (setzt die vorhandene Aktion `official_clear`).
 - Oben neben den Hallen schaltet **✓ nur spielbereite** die Spielliste auf
   eingecheckte Partien (je Gerät gemerkt).

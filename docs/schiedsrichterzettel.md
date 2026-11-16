@@ -216,7 +216,7 @@ vollständiges Blatt. An der Route hängt dafür `?vorab=1`.
 
 - **Turnier-PC**, Tab „In Vorbereitung": Spiele anhaken, dann **🖨 Zettel**
   neben „Aufrufen" — ein Blatt je ausgewähltem Spiel, höchstens 40 je Auftrag.
-- **TL-Web**, Spielliste: im ⋮-Menü jeder Zeile **🖨 Zettel (leer)**. Gedruckt
+- **TL-Web**, Spielliste: im ⋮-Menü jeder Zeile **Zettel (leer) drucken**. Gedruckt
   wird über das Gerät, auf dem TL-Web läuft.
 - **Aus der Vorschau heraus:** Wurde zu einem Spiel nichts gezählt, meldet das
   Fenster „Zu diesem Spiel wurde nichts gezählt" und bietet den Knopf
