@@ -104,6 +104,44 @@ fn aufbau_vorgewaermt() -> Aufbau {
     a
 }
 
+/// So lange läuft die gespielte alte App, bevor getauscht wird.
+const LAUFZEIT_VOR_DEM_TAUSCH: Duration = Duration::from_secs(6);
+
+/// Ein Umbenennen mit Messung: Dauer und Zahl der Versuche. Wiederholt in
+/// kurzem Takt bis zu 60 s — die Sonde will wissen, WIE LANGE eine Sperre
+/// hält, nicht an der Geduld der App scheitern.
+fn umbenennen_messen(von: &Path, nach: &Path) -> Result<(Duration, u32), std::io::Error> {
+    let start = Instant::now();
+    let mut versuche = 0;
+    loop {
+        versuche += 1;
+        match std::fs::rename(von, nach) {
+            Ok(()) => return Ok((start.elapsed(), versuche)),
+            Err(e) if start.elapsed() > Duration::from_secs(60) => return Err(e),
+            Err(_) => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+}
+
+/// Der Tausch in seinen zwei Schritten, einzeln gemessen: erst die laufende
+/// Datei beiseite, dann die neue an ihre Stelle. Dieselbe Reihenfolge wie
+/// `tausch::tauschen`.
+#[allow(clippy::type_complexity)]
+fn tausch_messen(
+    pfade: &Pfade,
+) -> (
+    Result<(Duration, u32), std::io::Error>,
+    Result<(Duration, u32), std::io::Error>,
+) {
+    let _ = std::fs::remove_file(&pfade.vorher);
+    let schritt1 = umbenennen_messen(&pfade.aktiv, &pfade.vorher);
+    let schritt2 = match &schritt1 {
+        Ok(_) => umbenennen_messen(&pfade.neu, &pfade.aktiv),
+        Err(_) => Err(std::io::Error::other("übersprungen")),
+    };
+    (schritt1, schritt2)
+}
+
 /// Zeit zwischen zwei Zeilen im Protokoll des Wächters (Millisekunden).
 fn zwischen(protokoll: &str, von: &str, bis: &str) -> Option<u64> {
     let zeit = |muster: &str| -> Option<u64> {
@@ -248,25 +286,38 @@ fn uebergabe_probe() {
         "MESSWERT erster-start-der-aktiven-kopie-ms {}",
         aktiv_erster.as_millis()
     );
+    // Prüfsumme VOR dem Start nehmen: Das Lesen der ganzen Datei unmittelbar
+    // vor dem Umbenennen könnte selbst eine Prüfung auslösen und die Messung
+    // verfälschen.
+    let original = sha256(&a.pfade.aktiv);
     let mut laeuft = Command::new(&a.pfade.aktiv)
         .args([ARG_PROBE, "kind-haengt"])
         .stdin(Stdio::null())
         .spawn()
         .expect("aktive Datei starten");
-    std::thread::sleep(Duration::from_millis(300));
-    let original = sha256(&a.pfade.aktiv);
-    let start = Instant::now();
-    let tausch_ergebnis = tausch::tauschen(&a.pfade);
-    let tausch_dauer = start.elapsed();
+    // Die App läuft beim Wechsel seit Stunden, nicht seit Augenblicken.
+    // Einige Sekunden Vorlauf, damit nicht der Programmstart gemessen wird.
+    std::thread::sleep(LAUFZEIT_VOR_DEM_TAUSCH);
+    let (schritt1, schritt2) = tausch_messen(&a.pfade);
     let _ = laeuft.kill();
     let _ = laeuft.wait();
-    tausch_ergebnis.expect(
+    let (dauer1, versuche1) = schritt1.expect(
         "ANNAHME 1 VERLETZT: Die laufende Programmdatei ließ sich nicht umbenennen — \
          dann bleibt der Kernwechsel beim Installer-Weg",
     );
+    let (dauer2, versuche2) =
+        schritt2.expect("die neue Datei ließ sich nicht an die Stelle der alten setzen");
+    println!(
+        "MESSWERT tausch-laufende-datei-beiseite-us {} ({versuche1} Versuch(e))",
+        dauer1.as_micros()
+    );
+    println!(
+        "MESSWERT tausch-neue-datei-einsetzen-us {} ({versuche2} Versuch(e))",
+        dauer2.as_micros()
+    );
     println!(
         "MESSWERT tausch-bei-laufender-datei-us {}",
-        tausch_dauer.as_micros()
+        (dauer1 + dauer2).as_micros()
     );
     assert_eq!(sha256(&a.pfade.vorher), original, "vorher = die alte Datei");
     assert!(!a.pfade.neu.exists());
@@ -414,6 +465,33 @@ fn uebergabe_probe() {
         .grund
         .unwrap_or_default()
         .contains("meldete sich nicht"));
+
+    // ── 5b. Gegenprobe: Tausch unmittelbar nach dem Programmstart ────────
+    // So maßen die früheren Läufe (300 ms nach dem Start) und fanden rund
+    // 2 s. Der Vergleich mit Schritt 2 zeigt, ob die Sperre am frischen
+    // Start hängt oder an der laufenden Datei überhaupt.
+    let d = aufbau_vorgewaermt();
+    let mut laeuft = Command::new(&d.pfade.aktiv)
+        .args([ARG_PROBE, "kind-haengt"])
+        .stdin(Stdio::null())
+        .spawn()
+        .expect("aktive Datei starten");
+    std::thread::sleep(Duration::from_millis(300));
+    let (schritt1, schritt2) = tausch_messen(&d.pfade);
+    let _ = laeuft.kill();
+    let _ = laeuft.wait();
+    match (schritt1, schritt2) {
+        (Ok((d1, v1)), Ok((d2, v2))) => println!(
+            "MESSWERT gegenprobe-tausch-300ms-nach-start-us beiseite {} ({v1} Versuch(e)), einsetzen {} ({v2} Versuch(e))",
+            d1.as_micros(),
+            d2.as_micros()
+        ),
+        (e1, e2) => println!(
+            "MESSWERT gegenprobe-tausch-300ms-nach-start gescheitert: {:?} / {:?}",
+            e1.err(),
+            e2.err()
+        ),
+    }
 
     // ── 6. Die installierte App (nur lesen und Schreibtest) ──────────────
     installation_ansehen();
