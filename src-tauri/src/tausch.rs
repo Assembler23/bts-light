@@ -152,11 +152,14 @@ fn entferne_wenn_da(pfad: &Path) -> std::io::Result<()> {
 }
 
 /// Umbenennen mit Geduld: Unter Windows hält ein Virenscanner eine frisch
-/// geschriebene oder eben gestartete Programmdatei oft für Augenblicke
+/// geschriebene oder eben gestartete Programmdatei oft sekundenlang
 /// fest. Ein einzelner Versuch scheiterte dann an einer Sperre, die gleich
 /// wieder weg ist. „Datei fehlt" wird nicht wiederholt.
 fn umbenennen(von: &Path, nach: &Path) -> std::io::Result<()> {
-    const VERSUCHE: u32 = 10;
+    // Rund 6 s Geduld. Gemessen am 16.11.2026: Eine eben gestartete,
+    // frische Programmdatei ließ sich unter Schutzsoftware erst nach 2,4 s
+    // umbenennen — mit den früheren 2 s wäre das knapp gescheitert.
+    const VERSUCHE: u32 = 30;
     let mut letzter = None;
     for versuch in 0..VERSUCHE {
         match std::fs::rename(von, nach) {
@@ -869,7 +872,6 @@ pub fn waechter_hauptprogramm(args: &WaechterArgs) -> i32 {
         }
     };
 
-    let start = Instant::now();
     let grund = match Command::new(&pfade.aktiv)
         .args(&args.kind_args)
         .stdin(Stdio::null())
@@ -879,6 +881,13 @@ pub fn waechter_hauptprogramm(args: &WaechterArgs) -> i32 {
     {
         Err(e) => format!("die neue Version ließ sich nicht starten ({e})"),
         Ok(mut kind) => {
+            // Die Frist läuft ERST AB HIER. Der Start selbst kann lange
+            // dauern — unter einem Virenscanner blockiert schon das
+            // Erzeugen des Prozesses, bis die Datei geprüft ist (gemessen
+            // am 16.11.2026: bis zu 9 s). Zählte diese Zeit mit, wäre die
+            // Frist abgelaufen, bevor die neue Version eine Zeile Code
+            // ausgeführt hat, und ein gutes Update würde zurückgerollt.
+            let start = Instant::now();
             protokoll(daten, "neue Version gestartet");
             let ende = if ueberwacht {
                 warte_auf_ankunft(

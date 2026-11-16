@@ -154,7 +154,7 @@ Was daraus folgt:
   läuft im Hintergrund vor dem Angebot und kostet keine Lücke — und er
   erledigt die Prüfung, bevor jemand klickt. Er ist damit nicht nur Test,
   sondern Vorwärmen.
-- **Offen und entscheidend:** Bleibt die Datei „bekannt", nachdem sie von
+- **Entscheidend (inzwischen beantwortet, siehe „Voller Lauf"):** Bleibt die Datei „bekannt", nachdem sie von
   `bts-light.neu.exe` in `bts-light.exe` **umbenannt** wurde? Wenn ja,
   startet die neue Version nach dem Tausch in Sekundenbruchteilen und die
   Wächter-Frist von 15 s hat reichlich Luft. Wenn nein, kostet der Wechsel
@@ -169,6 +169,57 @@ Was daraus folgt:
 Die Sonde misst seither mit einer Obergrenze von 300 s, statt abzubrechen,
 misst zusätzlich den Start der schon vorhandenen Datei und richtet die
 Fristen der folgenden Schritte am Gemessenen aus.
+
+### Voller Lauf der Sonde auf demselben Rechner (16.11.2026)
+
+Windows 11, Unternehmens-Schutzsoftware, bts-light per-user installiert,
+Debug-Build der Sonde:
+
+| Messwert | Ergebnis |
+|---|---|
+| Start der vorhandenen (eben gebauten) Datei | 14,1 s |
+| erster Start der frisch abgelegten Datei | 13,3 s |
+| zweiter Start | 0,19 s |
+| Tausch bei laufender Datei | **gelingt**, aber erst nach 2,35 s |
+| Ende der alten App → neue Version angekommen | **1,4 s** |
+| Installationsverzeichnis (`%LOCALAPPDATA%\BTS Light`) | **beschreibbar** |
+
+**Die drei Annahmen halten auch hier:** Die laufende Programmdatei lässt
+sich umbenennen, der Wächter überlebt das Ende der App, das
+Installationsverzeichnis ist beschreibbar.
+
+**Die entscheidende Frage ist beantwortet:** Eine Datei, die ihren Probelauf
+hinter sich hat, bleibt nach dem **Umbenennen** bekannt. Die neue Version kam
+1,4 s nach dem Ende der alten an — davon 0,4 s Nachlauf des Wächters und
+0,3 s gespielte Startzeit. Der Wechsel kostet auf diesem Rechner also nicht
+die 13 s der Erstprüfung, sondern Sekundenbruchteile über dem, was die CI
+misst (0,76 s). Der Probelauf vor dem Angebot ist damit nicht nur Test,
+sondern die Voraussetzung dafür.
+
+**Zwei Dinge hat der Lauf aufgedeckt:**
+
+- **Fehler im Wächter, behoben:** Die Frist lief ab dem *Versuch*, die neue
+  Version zu starten. Unter der Schutzsoftware blockiert schon das Erzeugen
+  des Prozesses, bis die Datei geprüft ist — im Lauf bis zu 9 s. Im
+  Hänger-Fall war die Frist (1,5 s) deshalb abgelaufen, bevor die neue
+  Version eine Zeile ausgeführt hatte; der Rückfall kam 9 ms nach ihrem
+  Start. Mit einer ungeprüften Datei hätte das ein gutes Update
+  zurückgerollt. Die Frist zählt jetzt ab dem gelungenen Start; die Sonde
+  prüft das.
+- **Umbenennen braucht mehr Geduld:** Die eben gestartete, frische Datei
+  ließ sich erst nach 2,35 s umbenennen — die Geduld von 2 s hätte knapp
+  nicht gereicht. Sie steht jetzt bei rund 6 s. Im Betrieb läuft die alte
+  Datei seit Stunden und die neue ist geprüft; dort ist die Sperre nicht zu
+  erwarten, aber der Spielraum kostet nichts.
+
+**Nicht aussagekräftig in diesem Lauf** waren die Zeiten für Fehlstart
+(21,9 s) und Hänger (16,1 s): Die Sonde legte dafür frische, ungeprüfte
+Dateien ab und maß vor allem deren Erstprüfung. Sie wärmt die Dateien
+seither vor, wie es im Betrieb der Probelauf tut.
+
+**Offen bleibt:** die ausgelieferte Programmdatei (33,8 MB statt des
+Debug-Builds), ein Rechner, wie er in der Halle steht, und die volle App mit
+Fenster und Einzelinstanz-Sperre.
 
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
 
