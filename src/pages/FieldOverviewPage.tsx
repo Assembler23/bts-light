@@ -50,6 +50,7 @@ import { CallTimerBadge } from "../components/CallTimerBadge";
 import { HallFilter } from "../components/HallFilter";
 import { ScoresheetOverlay } from "../components/ScoresheetOverlay";
 import { TimelineChart } from "../components/TimelineChart";
+import { TlWebKnopf } from "../components/TlWebKnopf";
 import { announceCourt } from "../io/announceCourt";
 import { gamePointKind } from "../io/gamePoint.mjs";
 import { gridPositions } from "../io/hallGrid.mjs";
@@ -104,6 +105,8 @@ export function FieldOverviewPage({
   manageScorekeepers,
   hallLayouts,
   unlimitedCalls,
+  running,
+  slaveMode,
   onConfigSaved,
 }: {
   callTimer: CallTimerConfig;
@@ -121,6 +124,12 @@ export function FieldOverviewPage({
   manageScorekeepers: boolean;
   /** Raster-Anordnung je Halle (leer = Fließ-Darstellung), Host-Einstellung. */
   hallLayouts: HallLayoutConfig[];
+  /** Läuft die Übertragung? Nur dann gibt es die Turnierleitungs-Oberfläche,
+   *  die der Knopf im Seitenkopf öffnet. */
+  running: boolean;
+  /** Ferne Halle: Sie hat keine eigene Turnierleitungs-Oberfläche, der Knopf
+   *  entfällt. */
+  slaveMode: boolean;
   /** Neue Konfiguration nach `setHallLayout`/`removeHallLayout` zurückspielen
    *  (gleicher Weg wie z. B. `Dashboard`/`TlWebPanel`). */
   onConfigSaved: (c: AppConfig) => void;
@@ -546,13 +555,24 @@ export function FieldOverviewPage({
 
   return (
     <main className="mx-auto flex min-h-full max-w-6xl flex-col gap-4 p-6 text-slate-800">
-      <header>
-        <h1 className="text-2xl font-semibold leading-tight">Spielübersicht</h1>
-        <p className="text-sm text-slate-500">
-          Oben die Felder, darunter die nicht zugewiesenen und die
-          abgeschlossenen Spiele. Ein offenes Spiel auf ein freies Feld ziehen
-          (oder anklicken + Feld tippen) → schreibt nach BTP.
-        </p>
+      <header className="flex items-start gap-4">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-semibold leading-tight">Spielübersicht</h1>
+          <p className="text-sm text-slate-500">
+            Oben die Felder, darunter die nicht zugewiesenen und die
+            abgeschlossenen Spiele. Ein offenes Spiel auf ein freies Feld ziehen
+            (oder anklicken + Feld tippen) → schreibt nach BTP.
+          </p>
+        </div>
+        {/* Dieselbe Arbeit im Browser: die Turnierleitungs-Oberfläche, mit
+            einem Klick und ohne Koppeln. */}
+        {!slaveMode && (
+          <TlWebKnopf
+            label="Turnierleitung öffnen"
+            running={running}
+            onConfigSaved={onConfigSaved}
+          />
+        )}
       </header>
 
       {error && (

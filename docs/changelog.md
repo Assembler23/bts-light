@@ -4,6 +4,29 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.430
+
+- **Turnierleitungs-Oberfläche mit einem Klick am Turnier-PC.** In der
+  Kopfzeile steht neben Start/Stopp der Knopf **Turnierleitung**, in der
+  Spielübersicht oben rechts **Turnierleitung öffnen**. Ein Klick öffnet die
+  Oberfläche angemeldet im Browser dieses PCs — ohne Freischalten, Koppeln
+  und Adresse kopieren. Beim ersten Mal legt bts-light dafür den Zugang
+  „Dieser PC" an (sichtbar und entziehbar in der Geräteliste) und schaltet
+  die Oberfläche frei, falls sie aus war.
+- **Kein zweiter Tab beim zweiten Klick.** Ist die Oberfläche schon offen,
+  räumen die Seiten selbst auf: Ein verdeckter alter Tab schließt sich, ein
+  sichtbarer bleibt und der neue geht wieder. Ein Tab, in dem gerade etwas
+  offen ist (Dialog, Suche, gewählte Partie, angefangene Eingabe), schließt
+  sich nie. Gilt in Chrome und Edge; Firefox erlaubt das nicht, dort bleiben
+  zwei Tabs. Über das Internet wirkt das nach dem Relay-Deploy.
+- **Wunschfeld: Felder stehen unter ihrer Halle.** Bei mehreren Hallen zeigt
+  der Wähler im ⋯-Menü die Felder nach Halle geordnet, und die Bestätigung
+  nennt Feld und Halle — „Feld 1" gibt es in jeder. Bindet eine Hallen-Regel
+  das Spiel, bietet die Liste nur noch die Felder dieser Halle an (bisher
+  standen alle da, und der Turnier-PC lehnte die falschen erst nach der Wahl
+  ab). Behebt einen Fehler seit v0.9.262: Der Wähler prüfte die Halle an
+  einem Feld, das es nicht gab.
+
 ## v0.9.429
 
 - **TL-Web: „Aufgaben" aus der Standardansicht.** Das Panel mit den

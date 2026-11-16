@@ -697,3 +697,48 @@ neuen Nutzereingaben-Pfad **und** Authentifizierung.
 
 **Nicht vergessen:** `.github/workflows/relay-deploy.yml` um die neuen
 Asset-Pfade erweitern — sonst wird die Seite nie ausgeliefert.
+
+## Nachtrag 16.11.2026: Ein-Klick-Zugang am Turnier-PC (v0.9.430)
+
+Kleine Ergänzung ohne eigene Spec. Der Knopf in Kopfzeile und Spielübersicht
+(`components/TlWebKnopf.tsx`) ruft `tl_web_open_local`; die Logik steht in
+`src-tauri/src/tl_lokal.rs`.
+
+- **Kein Sonderweg an der Anmeldung vorbei.** Der Turnier-PC bekommt einen
+  gewöhnlichen Geräteeintrag (`tl-dieser-pc`, „Dieser PC") mit zufälligem
+  Zugang — sichtbar, zählbar, entziehbar wie jedes andere Gerät (ADR 0012
+  bleibt unberührt). Eine Ausnahme „von 127.0.0.1 ohne Token" gäbe jedem
+  Programm auf dem PC die Oberfläche und hätte im Cloud-Modus kein Gegenstück.
+- **Die Adresse baut der Kern.** Die Adresse mit `#t=…` entsteht in Rust,
+  geht direkt ans Betriebssystem und steht in keinem Log. Mehr ist damit
+  nicht zugesagt: Die Konfiguration samt Gerätezugängen kennt die
+  Desktop-Oberfläche ohnehin, und der Browser bekommt die Adresse beim Start
+  zu sehen (Kommandozeile, womöglich Verlauf) — wie bei jedem Koppel-Link.
+  Der Command liefert die neue Konfiguration nur zurück, wenn er etwas
+  gespeichert hat; die Oberfläche muss sie dann übernehmen, sonst trüge das
+  nächste Speichern den alten Stand zurück (`keep_host_managed_fields`).
+  Der Setup-Assistent liest `tl_web` erst beim Speichern aus der aktuellen
+  Konfiguration — ein Klick bei offenen Einstellungen geht deshalb nicht
+  verloren.
+- **Weg:** Mit eingebettetem Server `http://127.0.0.1:8088/tl`, sonst die
+  Relay-Adresse. Im reinen Cloud-Modus wartet der erste Klick 2,5 s, weil der
+  Relay die Zugänge im 2-s-Takt gespiegelt bekommt.
+- **Der Klick schaltet die Oberfläche frei**, falls sie aus war. Das ist die
+  ausdrückliche Absicht des Klicks; ohne das bliebe der Knopf eine Sackgasse.
+- **Ein Tab statt zwei** (`src/io/einTab.mjs`, Inline-Kopie in `tl.html`,
+  `scripts/test-ein-tab.mjs`): Die Adresse trägt die Marke `app=1`. Die
+  Seiten sprechen sich über einen `BroadcastChannel` ab; je nach Lage
+  schließt sich der alte oder der neue Tab per `window.close()`. Das ist
+  Best-Effort — verweigert der Browser es (Firefox), bleiben zwei Tabs. Ein
+  Tab, in dem etwas offen ist (`einTabBeschaeftigt`: Dialog, Überlagerung,
+  Trefferliste der Suche, gewählte Partie, laufender Zug, angefangene
+  Eingabe), schließt sich nie, und Meldungen älter als 5 s gelten nicht (ein
+  aufwachender Hintergrund-Tab soll nichts mehr schließen).
+  Der Relay liefert dieselbe `tl.html` aus — die Cloud-Seite kennt die
+  Absprache erst nach dem Relay-Deploy; bis dahin stört die Marke nicht.
+- **Bewusst hingenommen** (Sicherheits-Review 16.11.2026): Ein fremder Link
+  auf `/tl#app=1` kann einen verdeckten, unbeschäftigten Tab schließen —
+  reine Störung, der Zugang bleibt im Browser gespeichert. Und belegt ein
+  fremdes Programm auf dem PC den Port 8088, bekäme dessen Seite den Zugang
+  im Fragment; ein solches Programm könnte aber ebenso die `config.json`
+  lesen.
