@@ -1110,6 +1110,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Räumen-Knopf — dieselbe unaufdringliche Optik wie „Reihenfolge
    zurücksetzen" daneben. */
 .prefill-box { display: inline-flex; align-items: center; gap: 6px; }
+/* `display` oben sticht die UA-Regel `[hidden] { display: none; }` aus —
+   ohne diese Zeile blieb der Cluster bei nur EINER Halle als leere Knöpfe
+   stehen, obwohl `renderHallPrefill` ihn versteckt. */
+.prefill-box[hidden] { display: none; }
 .prefill-x {
   width: 4.2rem; font: inherit; font-size: .8rem; padding: 3px 6px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--card);

@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.438
+
+- **Turnierleitungs-Oberfläche: keine leeren Hallen-Knöpfe bei nur einer
+  Halle.** Im Kopf der Spielliste standen bei Turnieren mit einer einzigen
+  Halle ein leerer Knopf, ein leeres Zahlenfeld und „Auto-Hallen räumen" —
+  die Bedienung der Hallen-Vorverteilung, die es dort gar nicht braucht. Sie
+  sollte schon immer ausgeblendet sein, eine Stilregel hat das Ausblenden
+  aber überstimmt. Bei mehreren Hallen ändert sich nichts.
+
 ## v0.9.437
 
 - **Intern: Messwerkzeug für den Wechsel ohne Installer.** bts-light kennt
