@@ -238,6 +238,16 @@ fn uebergabe_probe() {
     );
 
     // ── 2. Laufende Programmdatei umbenennen ─────────────────────────────
+    // Die aktive Datei erst einmal laufen lassen: Im Betrieb läuft die alte
+    // App seit Stunden, ihre Datei ist längst geprüft. Eine frische Kopie
+    // hält der Virenscanner beim ersten Start sekundenlang fest — und so
+    // lange lässt sie sich nicht umbenennen (gemessen am 16.11.2026: 11 s).
+    // Das wäre die Erstprüfung, nicht der Tausch.
+    let aktiv_erster = messen("aktive Kopie", &a.pfade.aktiv);
+    println!(
+        "MESSWERT erster-start-der-aktiven-kopie-ms {}",
+        aktiv_erster.as_millis()
+    );
     let mut laeuft = Command::new(&a.pfade.aktiv)
         .args([ARG_PROBE, "kind-haengt"])
         .stdin(Stdio::null())

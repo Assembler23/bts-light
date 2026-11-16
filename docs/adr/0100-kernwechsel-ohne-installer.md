@@ -221,6 +221,38 @@ seither vor, wie es im Betrieb der Probelauf tut.
 Debug-Builds), ein Rechner, wie er in der Halle steht, und die volle App mit
 Fenster und Einzelinstanz-Sperre.
 
+### Zweiter voller Lauf, nach den Korrekturen (16.11.2026)
+
+Derselbe Rechner, Stand `a19285e` (Frist ab dem Start, vorgewärmte Dateien
+für Fehlstart und Hänger):
+
+| Messwert | Ergebnis |
+|---|---|
+| erster Start der frisch abgelegten Datei | 14,4 s |
+| zweiter Start | 0,20 s |
+| Ende der alten App → neue Version angekommen | 1,34 s |
+| Wächter gestartet → neue Version läuft | 1,46 s (davon 0,8 s gespielter Nachlauf der alten App, 0,4 s Nachlauf des Wächters) |
+| Fehlstart → alte Version wieder aktiv | **2,0 s** |
+| Hänger: Start der neuen Version → Rückfall | **1533 ms** bei 1500 ms Frist |
+| Hänger insgesamt | 3,1 s |
+| Installationsverzeichnis | beschreibbar |
+
+- **Die Korrektur der Frist ist belegt:** Der Wächter wartete 1533 ms auf
+  die neue Version (vorher 9 ms).
+- **Mit geprüften Dateien ist auch der Rückfall schnell:** 2,0 s nach einem
+  Fehlstart läuft die alte Version wieder (im ersten Lauf, mit ungeprüften
+  Dateien, 21,9 s).
+- **Das Erzeugen des Prozesses** einer geprüften Datei dauert rund 0,2 s.
+
+**Eine Zahl war noch ein Artefakt der Sonde:** Der Tausch bei laufender
+Datei dauerte 11,2 s. Die Sonde startete dafür eine frische, nie gelaufene
+Kopie und benannte sie um, während der Virenscanner sie noch prüfte — so
+lange hält er die Datei fest. Im Betrieb läuft die alte App seit Stunden.
+Die Sonde lässt die aktive Kopie seither erst einmal laufen und misst dann.
+Für den Anschluss (PR 7b) folgt daraus trotzdem eine Regel: **Getauscht wird
+nur mit einer Datei, deren Probelauf abgeschlossen ist**, nie während er
+läuft.
+
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
 
 - **Der Wächter wartet auf das Ende des Prozesses, nicht nur auf das
