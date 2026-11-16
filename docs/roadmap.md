@@ -630,6 +630,18 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Hotfix ohne Neustart** — Spec:
+  [features/hotfix-ohne-neustart.md](features/hotfix-ohne-neustart.md)
+  (freigegeben 16.11.2026, ADR 0099–0101). Zwei Wege, einen Fix im laufenden
+  Turnier einzuspielen: Geräte-Seiten zur Laufzeit durch ein signiertes Paket vom
+  Hotfix-Zweig tauschen (keine Lücke, nur LAN, jeder PC für sich) und Kernwechsel ohne Installer (Umbenennen-Tausch, Ziel
+  Median ≤ 3 s, Start-Wächter stellt die alte Version wieder her). Dazu ein
+  Ein-Klick-Rückweg: Seiten immer, Kern nur bei „rückwärts lesbar". Neun PRs; Weg 1
+  (PR 1–4) ohne Windows lieferbar, vor dem scharfen Kernwechsel eine Messung am
+  Windows-PC. Vorab vom Admin: Environment `seiten-hotfix` und Schreibrecht auf
+  `hotfix/v*`. Nebenbefund für später: `latest.json` ist unsigniert und
+  `require_signed_version` nicht gesetzt.
+
 - **Stream-Werbung (zweite OBS-Ebene)** — Spec:
   [features/stream-werbung.md](features/stream-werbung.md)
   (freigegeben 12.11.2026, ADR 0092). Transparente Sponsoren-Ebene für OBS unter

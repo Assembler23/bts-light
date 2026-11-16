@@ -107,3 +107,6 @@ hier eintragen.
 | [0096](0096-tp-pfad-aus-den-handles-von-btp.md) | TP-Pfad aus den Datei-Handles von `btp.exe`: Durchprobieren mit `DuplicateHandle`, read-only, Frist und Hänger-Deckel, nur lokaler BTP | accepted |
 | [0097](0097-tp-automatik-kennung-nur-bei-gleichheit-oder-leer.md) | TP-Automatik: Kennung still nur bei Gleichheit oder leerem Feld, sonst Rückfrage; Nein schaltet die Automatik ab (ändert „nie still“) | accepted |
 | [0098](0098-tp-automatik-schreibpfad-mit-schreibzaehler.md) | TP-Automatik schreibt außerhalb des Setups über `mutate_config`, Schreibzähler schützt vor veraltetem Formular, Pfad je PC | accepted |
+| [0099](0099-geraete-seiten-zur-laufzeit-tauschen.md) | Geräte-Seiten zur Laufzeit tauschen: signiertes Ein-Datei-Paket vom Hotfix-Zweig ab dem Tag, an genau eine Kern-Version gebunden, Marke wechselt atomar mit, Signatur erst nach Maintainer-Freigabe | accepted |
+| [0100](0100-kernwechsel-ohne-installer.md) | Kernwechsel ohne Installer: Umbenennen-Tausch am Ort, signierter Kopf plus Hash, Probelauf, Wächter aus dem alten Image, Wiederanlauf im Kern (ergänzt ADR 0057) | accepted |
+| [0101](0101-rueckweg-und-datenformat-regel.md) | Rückweg mit einem Klick: genau eine Vorversion, „rückwärts lesbar ab" im signierten Kopf, Abdruck-Wächter in der CI, Sperre zurückgenommener Stände | accepted |
