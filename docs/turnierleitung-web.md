@@ -373,7 +373,7 @@ Skala — man muss sich nicht je Abzeichen merken, was seine Farbe bedeutet:
 | Stufe | Sieht so aus | Was da steht |
 |---|---|---|
 | **Info** | ruhig, nur umrandet | „Satzpunkt", „Spielpunkt", „manuell einsortiert" — Planungshilfe, nichts zu tun |
-| **Warnung** | gelb-orange gefüllt | „⏸ Auto-Vergabe aus", Schiedsrichter-Konflikt — bewusst gesetzt oder nachsehen |
+| **Warnung** | gelb-orange gefüllt | „⏸ Auto-Vergabe aus", Schiedsrichter-Konflikt, 📵 (am belegten Feld ist kein Tablet verbunden — nur als Sinnbild, der Wortlaut steht im Tooltip) — bewusst gesetzt oder nachsehen |
 | **Alarm** | rot gefüllt | überfällig, gesperrt, Verletzung, „TL gerufen" — da muss jemand hin |
 
 Info-Abzeichen sind bewusst nur **umrandet** statt ausgefüllt: „Spielpunkt"

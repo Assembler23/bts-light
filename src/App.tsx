@@ -76,7 +76,7 @@ function defaultConfig(): AppConfig {
       voice_de: "",
       voice_en: "",
       rate: 0.8,
-      gong: true,
+      gong: false,
       name_overrides: [],
       name_overrides_enabled: true,
       announce_hall: "",

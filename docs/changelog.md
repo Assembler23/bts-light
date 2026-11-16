@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.428
+
+- **Gong vor der Ansage ist voreingestellt aus.** Bisher wollte ihn kein
+  Verein, also musste ihn jeder erst abschalten. Neue Installationen starten
+  ohne Gong; wer ihn möchte, setzt das Häkchen auf der Seite **Ansagen**.
+  Bestehende Installationen behalten ihre gespeicherte Einstellung.
+- **„Kein Tablet" im TL-Web nur noch als Sinnbild.** An einer belegten
+  Feldkachel ohne verbundenes Tablet steht statt des Wortes ein kleines 📵 —
+  die Angabe wird selten gebraucht und nahm zu viel Platz weg. Der Wortlaut
+  steht im Tooltip.
+
 ## v0.9.427
 
 - **Aufgeräumte ⋮-Menüs im TL-Web.** Die Menüs an Feldkachel, Wartelisten-

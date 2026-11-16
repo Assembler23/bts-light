@@ -608,7 +608,7 @@ dem Turnier einmal die Test-Ansage drücken.
 | `language_mode` | `de` · `en` · `auto` |
 | `voice_de` / `voice_en` | bevorzugte Stimme je Sprache (`voiceURI`), leer = Browser-Standard |
 | `rate` | Sprech-Geschwindigkeit 0,5–1,5 (Default 0,8). Gilt seit v0.9.335 **auch für Azure** (`<prosody rate>`, 0,8 = „-20%“); vorher sprach Azure immer im Normaltempo. |
-| `gong` | Gong vor der Ansage (Default an) |
+| `gong` | Gong vor der Ansage (Default **aus** – bisher wollte ihn kein Verein; bestehende Installationen behalten ihre gespeicherte Einstellung) |
 | `name_overrides` | Phonetische Aussprache-Korrekturen (Nutzer), Liste `{ name, say }` (Default leer) |
 | `name_overrides_enabled` | Korrekturen anwenden (Basis-Wörterbuch + Nutzer)? Default `true` |
 | `announce_hall` | Mehr-Hallen: nur Spiele dieser Halle (BTP-Location-Name) ansagen; leer = alle (Default). Am Master filtert die Zustellung der Aufträge (`announce_jobs_since`), am LAN-Slave der `MatchAnnouncer` neue Feldbelegungen auf `court.location`. Siehe [multi-hall.md](multi-hall.md). |

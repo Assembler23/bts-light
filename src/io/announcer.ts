@@ -94,7 +94,7 @@ export interface AnnounceOptions {
   rate?: number;
   /** Voice-URI der gewünschten Stimme; sonst OS-Default für die Sprache. */
   voiceURI?: string;
-  /** Gong vor der Ansage abspielen? Default true. */
+  /** Gong vor der Ansage abspielen? Fehlt das Feld, erklingt er; der Standard der Einstellung ist seit v0.9.428 aus. */
   gong?: boolean;
   /** Phonetische Aussprache-Korrekturen des Nutzers (Vorrang vor der Basis). */
   nameOverrides?: NameOverride[];
