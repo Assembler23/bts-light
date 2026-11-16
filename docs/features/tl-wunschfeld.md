@@ -174,6 +174,46 @@ verschöben. Dieselbe Behandlung wie bei ausgenommenen Spielen.
 (Vergabe/Kaskade) · `docs/cloud-relay.md` (Wire) · `docs/changelog.md` ·
 CLAUDE.md-Tabelle · Versions-Trippel.
 
+## Nachtrag: Welche Felder der Wähler anbietet (v0.9.430)
+
+Der Wähler im ⋯-Menü sollte von Anfang an nur Felder anbieten, die der
+Turnier-PC auch annimmt. Er fragte dafür `c.hall` ab — ein Feld, das es an
+`TlCourt` nie gab (die Halle heißt dort `location`). Der Filter griff also
+nie, und es fiel nicht auf, weil „alle Felder" plausibel aussieht.
+
+Den Feldnamen einfach zu berichtigen, wäre der zweite Fehler gewesen: Der
+Filter verglich mit der **aktuellen** Halle des Spiels, gleich woher sie
+stammt. Scharf geschaltet, hätte er genau das verboten, wofür es das
+Wunschfeld gibt — das Endspiel aus der vorverteilten Halle B aufs Hauptfeld
+in Halle A zu holen („Die Halle folgt dem Feld"). Und nach dem ersten Wunsch
+ist die Halle des Spiels die des Wunschfelds; der Wähler hätte danach nur
+noch diese eine Halle gezeigt.
+
+Die Regel steht jetzt in `src/io/wunschfeld.mjs` (Inline-Kopie in `tl.html`,
+Gleichlauf in `scripts/test-wunschfeld.mjs`):
+
+- **Eingeschränkt wird nur bei `hall_source` = `rule`.** Das ist exakt der
+  Fall, den der Kern ablehnt (`hall_allows_match`): Die Regel steht in der
+  Kaskade vorn, eine Regel nennt genau eine Halle, und `hall` ist dann diese
+  Halle. Jede andere Quelle (`manual`, `btp`, `call`, `auto`, `none`) ist nur
+  der bisherige Stand und wird vom Wunsch überschrieben.
+- **Felder ohne Halle bleiben wählbar** — der Kern blockt sie nicht.
+- **Das schon gewählte Feld bleibt in der Liste**, auch wenn eine später
+  angelegte Regel es ausschlösse. Sonst zeigte der Wähler „–", obwohl ein
+  Wunsch gilt.
+- **Gesperrte Felder bleiben sichtbar** (mit „(gesperrt)"); der Kern lehnt
+  sie mit einer Meldung ab, die den Grund erklärt.
+- **Bei mehr als einer Halle** stehen die Felder unter ihrer Halle
+  (`<optgroup>`), und die Bestätigung nennt Feld **und** Halle — Feldnamen
+  wiederholen sich über Hallen hinweg.
+
+Der Vergleich der Hallennamen ist getrimmt und ohne Groß-/Kleinschreibung.
+Eine Unschärfe bleibt: Der Kern setzt nur bei den Buchstaben A–Z groß und
+klein gleich (`eq_ignore_ascii_case`), die Seite auch bei Umlauten
+(`toLowerCase`). Unterscheiden sich Regel und Feld allein in „Ä" gegen „ä",
+zeigt die Liste ein Feld, das der Kern ablehnt — die Absage kommt dann als
+Meldung. Am Kern ändert dieser Nachtrag nichts.
+
 ## Nachtrag: strikter Meetingpoint-Modus (v0.9.330, ADR 0073)
 
 Ist „Automatische Feldvergabe nur für spielbereite Partien" an, hält ein

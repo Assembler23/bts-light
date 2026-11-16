@@ -1847,6 +1847,87 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 </div>
 
 <script type="module">
+// ── Ein Tab statt zwei ────────────────────────────────────────────────
+// Inline-Kopie von src/io/einTab.mjs (die Seite wird ohne Build-Schritt
+// ausgeliefert); `scripts/test-ein-tab.mjs` hält beide gleich.
+//
+// Der Knopf „Turnierleitung" in bts-light öffnet diese Seite im Browser des
+// Turnier-PCs. Von außen lässt sich ein schon offener Tab nicht ansteuern —
+// der Browser macht für die Adresse immer einen neuen auf. Aufräumen können
+// nur die Seiten selbst: Sie sprechen sich ab, und eine von beiden schließt
+// sich. Erlaubt der Browser das Schließen nicht (Firefox), bleiben zwei Tabs
+// stehen — beide funktionieren.
+const EIN_TAB_KANAL = "bts-light-tl-ein-tab";
+const EIN_TAB_FRIST_MS = 5000;
+function vonAppGeoeffnet(hash) {
+  return /(?:^|[#&])app=1(?:&|$)/.test(String(hash || ""));
+}
+function einTabSchritt(nachricht, lage) {
+  if (!nachricht || typeof nachricht !== "object" || !lage) return "nichts";
+  if (!nachricht.von || nachricht.von === lage.ich) return "nichts";
+  if (nachricht.typ === "neu") {
+    const alter = lage.jetzt - nachricht.um;
+    if (!(alter >= -EIN_TAB_FRIST_MS && alter <= EIN_TAB_FRIST_MS)) return "nichts";
+    if (lage.sichtbar) return "melden";
+    return lage.beschaeftigt ? "nichts" : "schliessen";
+  }
+  if (nachricht.typ === "bleibe") {
+    // Nur die Antwort auf die EIGENE Meldung zählt, und nur kurz danach.
+    if (nachricht.an !== lage.ich || !lage.gemeldetUm) return "nichts";
+    const seit = lage.jetzt - lage.gemeldetUm;
+    return seit >= 0 && seit <= EIN_TAB_FRIST_MS ? "schliessen" : "nichts";
+  }
+  return "nichts";
+}
+// Die Marke steht im Fragment neben dem Zugang — sie muss gelesen sein,
+// BEVOR `readToken` das Fragment aus der Adresszeile räumt.
+const VON_APP = vonAppGeoeffnet(location.hash);
+/** Ist hier gerade etwas offen, das beim Schließen verloren ginge? Ein
+ *  solcher Tab schließt sich nie — lieber zwei Tabs als eine verlorene
+ *  Eingabe. Gemeint sind: Dialoge und Überlagerungen (Ergebnis,
+ *  Schiedsrichter, Profile, Punktverlauf, Zettel), die Trefferliste der
+ *  Suche, eine gewählte Partie, die auf ihr Feld wartet, ein Auftrag, der
+ *  noch unterwegs ist, ein laufender Zug in der Liste — und jedes Textfeld,
+ *  in dem der Zeiger sitzt und schon etwas steht. */
+function einTabBeschaeftigt() {
+  if (document.querySelector(
+    "dialog[open], .graph-overlay:not([hidden]), .such-overlay:not([hidden])")) return true;
+  if (picked || pending || reorderDragPending) return true;
+  const feld = document.activeElement;
+  return !!(feld
+    && feld.matches("textarea, input:not([type=checkbox]):not([type=radio]):not([type=button])")
+    && feld.value !== "");
+}
+function einTabStarten() {
+  // Ohne den Kanal (sehr alter Browser, gesperrter Speicher) bleibt es beim
+  // bisherigen Verhalten: jeder Klick ein neuer Tab.
+  let kanal;
+  try { kanal = new BroadcastChannel(EIN_TAB_KANAL); } catch (_) { return; }
+  const ich = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  let gemeldetUm = 0;
+  kanal.onmessage = (ev) => {
+    const schritt = einTabSchritt(ev.data, {
+      ich,
+      jetzt: Date.now(),
+      sichtbar: document.visibilityState === "visible",
+      beschaeftigt: einTabBeschaeftigt(),
+      gemeldetUm,
+    });
+    if (schritt === "melden") {
+      kanal.postMessage({ typ: "bleibe", von: ich, an: ev.data.von });
+      toast("Die Turnierleitung ist hier schon offen.");
+    } else if (schritt === "schliessen") {
+      // Verweigert der Browser das, passiert schlicht nichts.
+      window.close();
+    }
+  };
+  if (VON_APP) {
+    gemeldetUm = Date.now();
+    kanal.postMessage({ typ: "neu", von: ich, um: gemeldetUm });
+  }
+}
+einTabStarten();
+
 // ── Zugang ────────────────────────────────────────────────────────────
 // Der Zugang steht im Fragment der Adresse (`…/tl#t=…`). Ein Fragment wird
 // NIE an den Server gesendet — es landet also in keinem Zugriffsprotokoll.
@@ -5672,14 +5753,24 @@ function queueRow(m, topMatchId) {
   // Wähler, dessen Wirkung im Nichts verpufft, und die Turnierleitung glaubte,
   // das Endspiel sei gesteuert (dieselbe Versions-Schere wie beim Sperren).
   if (state.can_set_wish_court) {
-    // Nur Felder, die zur Halle des Spiels passen — ein Wunsch in die falsche
-    // Halle lehnt der Turnier-PC ohnehin ab. Ohne Hallenzuordnung: alle.
-    const passend = (state.courts || []).filter(
-      (c) => !m.hall || !c.hall || c.hall === m.hall);
+    // Welche Felder zur Wahl stehen, entscheidet `wunschfelder`: Nur eine
+    // Hallen-Regel schränkt ein — jede andere Hallenangabe legt das
+    // Wunschfeld selbst neu fest („die Halle folgt dem Feld").
+    //
+    // Bei mehreren Hallen stehen die Felder unter ihrer Halle: Feldnamen
+    // wiederholen sich („1" gibt es in jeder), und die Wahl verlegt das
+    // Spiel in die Halle des Felds.
+    const gruppen = wunschfeldGruppen(wunschfelder(state.courts, m));
+    const eintrag = (c) =>
+      `<option value="${c.court_id}"${c.court_id === m.wish_court ? " selected" : ""}>`
+      + `${esc(c.court)}${c.locked ? " (gesperrt)" : ""}</option>`;
     const optionen = ['<option value="" title="kein Wunschfeld">–</option>']
-      .concat(passend.map((c) =>
-        `<option value="${c.court_id}"${c.court_id === m.wish_court ? " selected" : ""}>`
-        + `${esc(c.court)}${c.locked ? " (gesperrt)" : ""}</option>`));
+      .concat(gruppen.map((g) => {
+        const felder = g.felder.map(eintrag).join("");
+        return gruppen.length > 1 && g.halle
+          ? `<optgroup label="${esc(g.halle)}">${felder}</optgroup>`
+          : felder;
+      }));
     vergabe.push(`<label class="kebab-feld" title="Die Automatik legt das Spiel nur auf dieses Feld und hält es dafür frei">
         ${mi("wunsch")}<span>Wunschfeld<small>die Automatik hält es frei</small></span>
         <select class="hallwahl${m.wish_court ? " gesetzt" : ""}"
@@ -5728,6 +5819,34 @@ function queueRow(m, topMatchId) {
 function spielbereitGruen(m) {
   if (!m || !m.prep_call || !m.meetingpoint || !m.meetingpoint.bereit) return false;
   return (m.highlight || 0) <= 1;
+}
+
+// ── Inline-Kopie von src/io/wunschfeld.mjs ──────────────────────────────
+// Kanonische Fassung samt Begründung und Tests im Modul;
+// `scripts/test-wunschfeld.mjs` vergleicht das Verhalten. Die Halle eines
+// Felds heißt `location` — ein Feld `hall` gibt es an `TlCourt` nicht.
+function gleicheHalle(a, b) {
+  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+}
+function wunschfelder(courts, m) {
+  const alle = (courts || []).filter(Boolean);
+  if (!m) return alle;
+  const halle = String(m.hall || "").trim();
+  if (m.hall_source !== "rule" || !halle) return alle;
+  return alle.filter((c) =>
+    !String(c.location || "").trim()
+    || gleicheHalle(c.location, halle)
+    || c.court_id === m.wish_court);
+}
+function wunschfeldGruppen(felder) {
+  const gruppen = [];
+  for (const c of felder || []) {
+    const halle = String(c.location || "").trim();
+    let g = gruppen.find((x) => gleicheHalle(x.halle, halle));
+    if (!g) gruppen.push((g = { halle, felder: [] }));
+    g.felder.push(c);
+  }
+  return gruppen;
 }
 
 // ── Meetingpoint (Spec meetingpoint-spielbereit) ─────────────────────────
@@ -5958,7 +6077,8 @@ function wireQueue(box) {
           ? { action: "set_wish_court", matchId, courtId }
           : { action: "set_wish_court", matchId },
         courtId
-          ? `Wunschfeld: ${feld ? feld.court : courtId}. Die Automatik hält es frei, `
+          ? `Wunschfeld: ${feld ? (state.multi_hall ? feldMitHalle(feld) : feld.court) : courtId}. `
+            + `Die Automatik hält es frei, `
             + `sobald das Spiel dran ist.`
           : "Wunschfeld aufgehoben.",
       );

@@ -9,7 +9,53 @@ steht in [features/turnierleitung-web.md](features/turnierleitung-web.md)
 (Spezifikation), [features/tl-web-panelsystem.md](features/tl-web-panelsystem.md)
 (Panels und Profile) und [cloud-relay.md](cloud-relay.md) (Wire-Ebene).
 
+## Am Turnier-PC selbst: ein Klick (seit v0.9.430)
+
+Wer an dem Rechner sitzt, auf dem bts-light läuft, muss nichts koppeln und
+keine Adresse kopieren. Oben in der Kopfzeile, links neben dem
+Start-/Stopp-Knopf, steht der Knopf **Turnierleitung** — er öffnet die
+Oberfläche angemeldet im Browser dieses PCs. Ist das Fenster schmal, zeigt
+er nur sein Sinnbild (ein Pfeil aus einem Kästchen). Derselbe Knopf steht als
+**Turnierleitung öffnen** oben rechts in der **Spielübersicht**.
+<!-- pruef: /label="Turnierleitung"/ in src/components/AppShell.tsx -->
+<!-- pruef: "Turnierleitung öffnen" in src/pages/FieldOverviewPage.tsx -->
+
+- **Die Übertragung muss laufen.** Läuft sie nicht, ist der Knopf blass, und
+  ein Klick sagt, was fehlt — die Oberfläche gibt es nur, solange bts-light
+  läuft.
+- **Beim ersten Klick** legt bts-light den Zugang **Dieser PC** an und
+  schaltet die Oberfläche frei, falls sie noch aus war. Der Zugang steht
+  danach wie jedes gekoppelte Gerät in der Liste unter **Turnierleitung**
+  und lässt sich dort entziehen; der nächste Klick legt ihn neu an.
+  <!-- pruef: /DIESER_PC_LABEL: &str = "Dieser PC"/ in src-tauri/src/tl_lokal.rs -->
+- **Im Hallennetz** (Verbindungsmodus LAN oder LAN+Cloud) öffnet sich die
+  Seite direkt von diesem PC — ohne WLAN, ohne Internet. Im reinen
+  **Cloud**-Modus öffnet sie sich über das Internet; der allererste Klick
+  wartet dann rund drei Sekunden, bis der neue Zugang dort angekommen ist.
+- **Am PC der fernen Halle** (Slave) gibt es den Knopf nicht — die
+  Oberfläche gehört zum Turnier-PC.
+
+**Ein zweiter Klick macht keinen zweiten Tab auf.** Von außen lässt sich ein
+schon offener Browser-Tab nicht ansteuern; die Seiten räumen deshalb selbst
+auf:
+
+| Der schon offene Tab … | Was passiert |
+|---|---|
+| liegt verdeckt hinter anderen Tabs oder Fenstern | Er schließt sich, der frisch geöffnete steht vorn. |
+| ist gerade zu sehen (etwa auf dem zweiten Bildschirm) | Er bleibt, wo er ist, und meldet „Die Turnierleitung ist hier schon offen." — der neue Tab schließt sich wieder. |
+| ist verdeckt, aber es ist etwas offen: ein Dialog (Ergebnis, Schiedsrichter, Profile), die Treffer der Suche, eine gewählte Partie oder ein Feld, in das schon etwas getippt wurde | Nichts — lieber zwei Tabs als eine verlorene Eingabe. |
+<!-- pruef: "Die Turnierleitung ist hier schon offen." in src-tauri/assets/tl.html -->
+
+Das gilt nur für Tabs, die der Knopf geöffnet hat. Wer die Seite von Hand
+ein zweites Mal öffnet, behält beide. **Chrome und Edge** erlauben einer
+Seite, sich so zu schließen; **Firefox** nicht — dort bleiben zwei Tabs
+stehen, beide funktionieren. Im reinen **Cloud**-Modus kommt die Seite von
+badhub.de; dort räumt sie erst auf, sobald der Server die neue Fassung
+ausliefert — bis dahin öffnet jeder Klick einen weiteren Tab.
+
 ## Einrichten
+
+Für **andere Geräte** — Tablet, Telefon, zweiter Rechner:
 
 1. In bts-light auf **Turnierleitung** gehen.
 2. **Freischalten** — die Oberfläche ist ab Werk aus.
@@ -202,6 +248,18 @@ LAN+Cloud voraus.
   **Feld** wählen. Die Automatik legt dieses Spiel dann nur dorthin — und hält
   das Feld frei, sobald das Spiel dran ist. Gedacht für Endspiele, die aufs
   Hauptfeld gehören.
+
+  **Welche Felder zur Wahl stehen** (seit v0.9.430): Bei mehreren Hallen
+  stehen die Felder unter dem Namen ihrer Halle — „Feld 1" gibt es
+  schließlich in jeder. Wählst du ein Feld einer anderen Halle, **zieht das
+  Spiel dorthin um**: Das Wunschfeld legt den Spielort mit fest, auch wenn
+  das Spiel vorher von Hand, aus BTP, durch einen Aufruf oder von der
+  Vorverteilung einer anderen Halle zugeordnet war. Nur eine
+  **Hallen-Regel** aus den Einstellungen („Herreneinzel spielt in Halle A")
+  bindet fester: Dann bietet die Liste allein die Felder dieser Halle an.
+  Die Bestätigung nennt Feld und Halle.
+  <!-- pruef: /wunschfelder\(state\.courts, m\)/ in src-tauri/assets/tl.html -->
+  <!-- pruef: /hall_source !== "rule"/ in src/io/wunschfeld.mjs -->
 
   **Freigehalten wird erst ab Spielbereitschaft**, nicht ab dem Setzen: Solange
   die Spieler noch im Halbfinale stehen oder in ihrer Pflichtpause sind, darf
@@ -1336,6 +1394,7 @@ jede Render-Dauer.
 | „Zugang gilt nicht mehr" | Das Gerät wurde entkoppelt — oder die Oberfläche ist abgeschaltet. Die Seite wirft den Zugang **nicht** weg, sondern versucht es weiter; ist es ein Irrtum, kommt sie von selbst zurück. |
 | „Zu viele Geräte" | Mehr als acht Geräte haben die Seite offen. Ein nicht benutztes schließen; der Platz wird nach einer Minute frei. |
 | „Feld wurde gerade von jemand anderem belegt" | Zwei Helfer waren gleichzeitig dran. Genau einer gewinnt — so ist es gedacht. Die Ansicht springt auf den echten Stand. |
+| Der Knopf **Turnierleitung** meldet „Die Übertragung läuft nicht" | Erst oben rechts **Starten** drücken. Die Oberfläche wird von der laufenden Übertragung ausgeliefert. |
 | Die Seite ist leer, obwohl Spiele laufen | Kein Zugang übernommen (falscher Link) oder die Oberfläche ist aus. Unter **Turnierleitung** nachsehen. |
 
 ## Abschalten

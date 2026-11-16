@@ -48,6 +48,8 @@ if [ ! -s "$OUT/dl/basis.img.xz" ]; then
   mv "$OUT/dl/basis.img.xz.part" "$OUT/dl/basis.img.xz"
 fi
 cp "$REPO/pi/setup-monitor.sh" "$REPO/pi/build-master-image.sh" "$OUT/pi/"
+# Die Dateien, die setup-monitor.sh auf den Pi kopiert (pi/paket/INHALT).
+rm -rf "$OUT/pi/paket" && cp -r "$REPO/pi/paket" "$OUT/pi/paket"
 sed -n '/^#--- INNEN ---$/,$p' "$0" | tail -n +2 > "$OUT/innen.sh"
 docker run --rm --privileged -v "$OUT:/build" \
   -e WLAN_SSID -e WLAN_PSK -e PI_PASSWORT -e HOST_ID="$(id -u):$(id -g)" \
@@ -82,6 +84,7 @@ truncate -s +3G "$IMG"
 parted -s "$IMG" resizepart 2 100%
 LOOP=$(losetup -fP --show "$IMG")
 # Partitions-Knoten im Container nachziehen
+# shellcheck disable=SC2046  # „major minor" soll in zwei Argumente zerfallen.
 for n in 1 2; do [ -e ${LOOP}p$n ] || mknod ${LOOP}p$n b $(cat /sys/block/$(basename $LOOP)/$(basename $LOOP)p$n/dev | tr ':' ' '); done
 e2fsck -fy ${LOOP}p2 || true
 resize2fs ${LOOP}p2
@@ -92,6 +95,7 @@ for d in proc sys dev dev/pts; do mount --bind /$d $R/$d; done
 cp -a $R/etc/resolv.conf /tmp/resolv.orig 2>/dev/null || true
 rm -f $R/etc/resolv.conf; cp /etc/resolv.conf $R/etc/resolv.conf
 cp /build/pi/setup-monitor.sh /build/pi/build-master-image.sh $R/tmp/
+cp -r /build/pi/paket $R/tmp/paket
 
 # Geheimnisse über eine root-only-Datei (nicht per Kommandozeile/Trace).
 set +x
@@ -154,7 +158,9 @@ systemctl enable bts-wlan-freigabe.service
 raspi-config nonint do_change_timezone Europe/Berlin || true
 raspi-config nonint do_configure_keyboard de || true
 # Einrichtung wie am echten Pi, als badhub
-cp /tmp/setup-monitor.sh /home/badhub/ && chown badhub: /home/badhub/setup-monitor.sh
+# paket/ liegt daneben, damit das Skript nichts aus dem Netz nachlädt: Das
+# Image entsteht aus genau dem Stand, aus dem es gebaut wird.
+cp /tmp/setup-monitor.sh /home/badhub/ && cp -r /tmp/paket /home/badhub/paket && chown -R badhub: /home/badhub/setup-monitor.sh /home/badhub/paket
 # sudo ist unter der ARM-Emulation nicht setuid-fähig → als root mit einer
 # sudo-Attrappe laufen, Umgebung wie bei badhub, danach Besitz korrigieren.
 mkdir -p /tmp/shim && printf '#!/bin/sh\nexec "$@"\n' > /tmp/shim/sudo && chmod +x /tmp/shim/sudo
@@ -163,10 +169,12 @@ chown -R badhub: /home/badhub
 rm -rf /tmp/shim
 bash /tmp/build-master-image.sh
 rm -f /tmp/setup-monitor.sh /tmp/build-master-image.sh /home/badhub/setup-monitor.sh
+rm -rf /tmp/paket /home/badhub/paket
 apt-get clean
 IN
 
 cat $R/boot/firmware/cmdline.txt
+# shellcheck disable=SC2010  # Nur Kontrollausgabe fürs Bauprotokoll.
 ls $R/boot/firmware/ | grep -i bts || true
 rm -f $R/etc/resolv.conf; [ -e /tmp/resolv.orig ] && cp -a /tmp/resolv.orig $R/etc/resolv.conf || true
 for d in dev/pts dev sys proc; do umount $R/$d; done

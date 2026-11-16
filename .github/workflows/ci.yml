@@ -228,6 +228,18 @@ jobs:
       - name: Spielbereit faerbt die Zeile gruen (JS)
         run: node scripts/test-spielbereit-farbe.mjs
 
+      # Absprache "ein Tab statt zwei" der Turnierleitungs-Oberflaeche und
+      # Gleichlauf der Inline-Kopie in tl.html. Eine falsche Regel schliesst
+      # den Tab, in dem gerade ein Ergebnis eingetippt wird.
+      - name: TL-Web oeffnet keinen zweiten Tab (JS)
+        run: node scripts/test-ein-tab.mjs
+
+      # Welche Felder der Wunschfeld-Waehler anbietet, und Gleichlauf der
+      # Inline-Kopie in tl.html. Der Waehler filterte einmal auf ein Feld,
+      # das es im Zustand nie gab - der Filter griff still nie.
+      - name: TL-Web Wunschfeld-Waehler (JS)
+        run: node scripts/test-wunschfeld.mjs
+
       # Texte zur geplanten Zeit (Spec tl-zeitplan) und Gleichlauf der
       # Inline-Kopie in tl.html. Eine falsche Planzeit führt die
       # Turnierleitung über den Stand des Zeitplans in die Irre.
@@ -374,6 +386,11 @@ jobs:
       # muessen das von einer Leitungsstoerung unterscheiden.
       - name: Anzeigen ohne Turnier-PC (JS)
         run: node scripts/test-host-weg.mjs
+
+      # Kiosk-Skript, CEC-Dienst und Hinweisseite des Pi liegen als Dateien
+      # unter pi/paket/; Liste, Ordner und setup-monitor.sh muessen sich decken.
+      - name: Pi-Dateien aus einer Quelle (JS)
+        run: node scripts/test-pi-quelle.mjs
 
       # Chromium bietet am Hallen-TV sonst die Uebersetzung der Seite an.
       - name: Keine Uebersetzen-Leiste auf den Seiten (JS)
@@ -563,6 +580,20 @@ jobs:
 
       - name: Rust tests (Linux)
         run: cargo test --workspace
+
+      # Die Pi-Skripte laufen nur unter Linux; hier werden sie wenigstens
+      # gelesen. Ab Stufe "warning" - Hinweise (info/style) bleiben erlaubt.
+      - name: Pi-Skripte (shellcheck + Syntax)
+        run: |
+          shellcheck --version
+          shellcheck -S warning pi/*.sh pi/paket/bin/*.sh pi/paket/xinitrc
+          for f in pi/*.sh pi/paket/bin/*.sh; do bash -n "$f"; done
+          sh -n pi/paket/xinitrc
+
+      # Derselbe Test wie im Windows-Job, hier mit dem Teil, der bash braucht
+      # (Browser und Hinweisseite werden zur Laufzeit gefunden).
+      - name: Pi-Dateien aus einer Quelle (JS, mit Laufzeit-Werten)
+        run: node scripts/test-pi-quelle.mjs
 
   # Android-Kiosk-App: Unit-Tests auf der JVM + Debug-APK als Bau-Probe.
   # Kein Emulator; Android-Verhalten steht auf der Feldtest-Liste der Spec.
