@@ -253,6 +253,39 @@ Für den Anschluss (PR 7b) folgt daraus trotzdem eine Regel: **Getauscht wird
 nur mit einer Datei, deren Probelauf abgeschlossen ist**, nie während er
 läuft.
 
+### Dritter Lauf: Der Tausch bleibt bei rund 2 s (16.11.2026)
+
+Stand `d2e395c`, die aktive Kopie lief vor dem Tausch schon einmal:
+
+| Messwert | Ergebnis |
+|---|---|
+| erster Start der frisch abgelegten Datei | 19,6 s |
+| Tausch bei laufender Datei | **2,13 s** |
+| Ende der alten App → neue Version angekommen | 1,34 s |
+| Fehlstart → alte Version wieder aktiv | 1,09 s |
+| Hänger: Start der neuen Version → Rückfall | 1545 ms bei 1500 ms Frist |
+
+Der erste Start schwankt zwischen 13 und 20 s; die Probelauf-Frist von
+120 s hat Luft.
+
+**Die Deutung „Erstprüfung" trug nur zum Teil.** Mit einer schon gelaufenen
+Datei sank der Tausch von 11,2 s auf 2,13 s — aber nicht auf Millisekunden.
+In allen drei Läufen benannte die Sonde die Datei **300 ms nach ihrem
+Start** um (2,35 s, 11,2 s mit ungeprüfter Datei, 2,13 s). Naheliegend ist,
+dass die Schutzsoftware eine eben gestartete Datei kurz festhält; im Betrieb
+läuft die alte App seit Stunden. Belegt ist das nicht.
+
+Weil der Tausch mitten in der Lücke liegt — 2 s würden sie mehr als
+verdoppeln —, misst die Sonde seither getrennt:
+
+- beide Umbenennungen **einzeln**, mit Dauer und Zahl der Versuche
+  (laufende Datei beiseite / neue Datei einsetzen),
+- nach **6 s Laufzeit** der gespielten alten App (wie im Betrieb),
+- und als **Gegenprobe** 300 ms nach dem Start (wie bisher).
+
+Bleibt auch nach 6 s Laufzeit eine Sperre von Sekunden, muss vor dem
+Anschluss geklärt werden, welcher der beiden Schritte hängt.
+
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
 
 - **Der Wächter wartet auf das Ende des Prozesses, nicht nur auf das
