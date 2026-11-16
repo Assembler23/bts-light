@@ -147,6 +147,25 @@ Daraus folgt:
 - Hand-**Gelb** an einem gerufenen Spiel verschwindet mit dem Aufruf-Ende
   (bewusst, ADR 0056).
 
+### Nachtrag v0.9.426: Spielbereit zeigt Grün statt Aufruf-Gelb
+
+Mit Meetingpoint zeigt das TL-Web eine gerufene Partie, an der alle
+eingecheckt sind, **grün** statt gelb (`spielbereitGruen` in
+`src/io/spielbereitFarbe.mjs`, Inline-Kopie in `assets/tl.html`, CSS
+`.row.spielbereit`). Regeln:
+
+- **Reine Anzeige.** Nach BTP wird nichts geschrieben; `Match.Highlight`
+  bleibt `1`. Der P1-Abgleich und ADR 0056 sind unberührt — ein zweiter
+  Schreibwert hätte den Abgleich („ist das mein Gelb?") um einen Fall
+  erweitert und bei jedem Ein-/Auschecken einen BTP-Write ausgelöst.
+- **Nur über `0` und `1`.** Eine Handfarbe 2–6 bleibt stehen (sie bedeutet dem
+  Team etwas Eigenes). Hand-Gelb an einem gerufenen Spiel ist vom Aufruf-Gelb
+  nicht zu unterscheiden und wird deshalb ebenfalls grün.
+- **Eigener Ton** (`#86efac`), nicht BTPs Hand-Grün (`#5CE1B8`): Das eine ist
+  ein Zustand, das andere hat jemand gesetzt.
+- Der Farbpunkt an der Feld-Kachel ist nicht betroffen — auf dem Feld gibt es
+  keinen Aufruf mehr.
+
 ### Was **nicht** dazugehört (YAGNI)
 
 - Keine Anzeige auf Hallenmonitoren, Zähl-Tablets oder im Liveticker: Die

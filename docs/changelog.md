@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.426
+
+- **„Turnierleitung rufen" kommt im TL-Web an.** Drückt jemand am Zähl-Tablet
+  📣, steht oben im Störungsband der Turnierleitungs-Oberfläche
+  „📣 Turnierleitung ans Feld gerufen: Feld 3 (Halle 1)" — auf jedem Gerät, in
+  jedem Profil und unabhängig vom Hallenfilter. Bisher gab es dort nur das
+  kleine Abzeichen an der Feld-Kachel; wer die Kacheln gerade nicht im Blick
+  hatte, erfuhr vom Ruf nichts. Die Zeile bleibt, bis der Ruf am Tablet
+  zurückgenommen wird oder das Spiel das Feld verlässt.
+- **Das Störungsband trägt mehrere Meldungen.** Ruf, „Ergebnis fehlt" und
+  Meetingpoint-Hinweis stehen untereinander, statt dass eine die andere
+  verdeckt. Ohne Verbindung steht weiterhin nur die Verbindungsmeldung da.
+- **Behoben:** Die Zeile „Ergebnis fehlt" nannte die Halle nie, obwohl sie es
+  sollte.
+- **Spielbereit = grün.** In der Spielliste des TL-Web wird eine gerufene
+  Partie grün statt gelb, sobald am Meetingpoint alle eingecheckt sind. Eine
+  von Hand gesetzte andere Farbe bleibt stehen. In BTP ändert sich nichts.
+
 ## v0.9.425
 
 - **Zähl-Tablet aufgeräumt.** Alle Ansichten wurden im Zusammenhang

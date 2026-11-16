@@ -147,6 +147,12 @@ LAN+Cloud voraus.
   der Aufruf nicht von seinem eigenen Gelb unterscheiden — es verschwindet
   mit dem Ruf aufs Feld. Fehlt die Gruppe im Menü, ist der Turnier-PC noch
   auf einer älteren Version.
+  **Spielbereit = grün** (seit v0.9.426, nur mit Meetingpoint): Sind an einer
+  gerufenen Partie alle eingecheckt, zeigt die Zeile statt des Aufruf-Gelbs
+  ein **Grün**. Das ist reine Anzeige im TL-Web — in BTP bleibt das Spiel
+  gelb. Eine von Hand gesetzte andere Farbe (Pink, Orange, Blau, Grün, Lila)
+  bleibt stehen; dort sagt weiterhin das Abzeichen „✓ spielbereit", dass die
+  Partie komplett ist.
 - **🖨 Zettel (leer)** druckt den **Vorabzettel** des Spiels: derselbe
   Bogen wie der Archivzettel, aber mit leerem Raster — zum Mitgeben an
   den Schiedsrichter, der ihn von Hand führt. Kopf, Namen und Verein sind
@@ -199,6 +205,24 @@ LAN+Cloud voraus.
   Startzeit-Prognose. Die Vorhersage rechnet mit Hallen, nicht mit einzelnen
   Feldern — sie wäre systematisch zu früh und würde auch die Zeiten der
   anderen Spiele verschieben.
+- **Turnierleitung gerufen** (seit v0.9.426): Drückt jemand am Zähl-Tablet
+  **📣 Turnierleitung**, steht das nach wenigen Sekunden oben im
+  Störungsband (im Hallennetz etwa eine, über die Cloud etwas mehr): **„📣 Turnierleitung ans Feld gerufen: Feld 3 (Halle 1)"**.
+  Rufen mehrere Felder, stehen alle in derselben Zeile. Die Feld-Kachel trägt
+  wie bisher zusätzlich das rote Abzeichen „TL gerufen".
+<!-- pruef: "Turnierleitung ans Feld gerufen: " in src-tauri/assets/tl.html -->
+<!-- pruef: "TL gerufen" in src-tauri/assets/tl.html -->
+
+  Die Zeile steht auf **jedem** Gerät der Turnierleitung, in jedem Profil und
+  **unabhängig vom Hallenfilter** — auch wer gerade nur Halle 2 ansieht,
+  erfährt vom Ruf aus Halle 1. Sie bleibt stehen, bis der Ruf **am Tablet
+  zurückgenommen** wird oder das Spiel das Feld verlässt; im TL-Web lässt sie
+  sich nicht wegklicken. Einen Ton gibt es nicht.
+
+  Das Band kann seitdem **mehrere Zeilen** tragen: der Ruf zuerst, darunter
+  „Ergebnis fehlt", darunter der Meetingpoint-Hinweis. Vorher verdeckte eine
+  Meldung die andere. Nur ohne Verbindung steht allein die
+  Verbindungsmeldung da.
 - **Warnung „Ergebnis fehlt"** (seit v0.9.259): Ist ein Spiel nach seinen
   Sätzen entschieden — die Endpunkte sind erreicht —, das Feld aber weiterhin
   belegt, meldet die Oberfläche das nach **einer Minute**: als rote Marke an
@@ -209,7 +233,8 @@ LAN+Cloud voraus.
   sonst verschwiege sie genau den Fall, für den sie gedacht ist. Bei mehreren
   Feldern steht der älteste Fall zuerst. Verliert das Gerät die Verbindung,
   hat die Verbindungsmeldung Vorrang: Ohne Verbindung ist jede andere Aussage
-  wertlos.
+  wertlos. (Die Halle fehlte in dieser Zeile bis v0.9.425 durch einen Fehler;
+  seit v0.9.426 steht sie wirklich da.)
 
   **Wann sie bewusst schweigt:** in der Satzpause, während ein Satz läuft, bei
   Aufgabe/Kampflos/Disqualifikation, auf freien Feldern — und vor allem dann,
@@ -1331,6 +1356,12 @@ Ist der Meetingpoint am Turnier-PC eingeschaltet ([meetingpoint.md](meetingpoint
 - Jede gerufene Partie trägt neben „gerufen" eine Marke `🧍 x/y` (eingecheckt
   von nötig) bzw. **✓ spielbereit**. Mit eingeschalteter Warnung wird die
   Marke nach der eingestellten Zeit orange und nennt die Fehlenden.
+- Eine **spielbereite** Partie steht mit **grünem** statt gelbem Hintergrund
+  in der Liste (seit v0.9.426) — gelb heißt „gerufen, es fehlt noch jemand",
+  grün heißt „kann aufs Feld". Checkt jemand wieder aus, verliert die Zeile
+  das Grün und zeigt wieder ihre Farbe aus BTP (in aller Regel das
+  Aufruf-Gelb). Details unter **Hervorheben** weiter oben.
+<!-- pruef: ".row.spielbereit { --hl: #86efac;" in src-tauri/assets/tl.html -->
 - Im ⋮-Menü der Zeile steht die Gruppe **Meetingpoint**: je Person ein Knopf
   zum Ein-/Auschecken von Hand (`meetingpoint_set`), bei SR-Pflicht dazu
   **Ohne Schiedsrichter** (setzt die vorhandene Aktion `official_clear`).

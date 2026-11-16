@@ -218,6 +218,16 @@ jobs:
       - name: Zuletzt gespielt (JS)
         run: node scripts/test-zuletzt-gespielt.mjs
 
+      # Das Stoerungsband der Turnierleitung meldet den Ruf vom Tablet. Faellt
+      # die Kopie in tl.html zurueck, bleibt ein Ruf unbemerkt.
+      - name: Stoerungsband der Turnierleitung (JS)
+        run: node scripts/test-stoerungsband.mjs
+
+      # Gruen heisst in der Spielliste "kann aufs Feld" - eine falsche Regel
+      # faerbt Partien, an denen noch jemand fehlt.
+      - name: Spielbereit faerbt die Zeile gruen (JS)
+        run: node scripts/test-spielbereit-farbe.mjs
+
       # Texte zur geplanten Zeit (Spec tl-zeitplan) und Gleichlauf der
       # Inline-Kopie in tl.html. Eine falsche Planzeit führt die
       # Turnierleitung über den Stand des Zeitplans in die Irre.
