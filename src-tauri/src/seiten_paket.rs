@@ -33,6 +33,9 @@ pub const MAX_ENTPACKT_BYTES: usize = 32 * 1024 * 1024;
 const FORMAT: u64 = 1;
 const ART: &str = "seiten";
 
+/// Name des Verzeichnisses im App-Datenverzeichnis.
+pub const ORDNER: &str = "seiten";
+
 const DATEI_AKTIV: &str = "aktiv.paket";
 const DATEI_VORHER: &str = "vorher.paket";
 const DATEI_NEU: &str = "neu.paket";
@@ -441,19 +444,7 @@ impl Ablage {
         std::fs::create_dir_all(&self.dir)?;
         // Zustand zuerst: Ohne ihn würde der nächste Start das Paket
         // beiseitelegen. Sperren bleiben erhalten.
-        self.nebendatei_schreiben(
-            DATEI_ZUSTAND_NEU,
-            &[&serde_json::to_vec_pretty(&Zustand {
-                format: FORMAT,
-                kern: kern.to_string(),
-                gesperrt,
-            })
-            .map_err(std::io::Error::other)?],
-        )?;
-        std::fs::rename(
-            self.dir.join(DATEI_ZUSTAND_NEU),
-            self.dir.join(DATEI_ZUSTAND),
-        )?;
+        self.zustand_schreiben(kern, &gesperrt)?;
 
         self.nebendatei_schreiben(DATEI_NEU, &[signatur.as_bytes(), b"\n", bytes])?;
         let aktiv = self.dir.join(DATEI_AKTIV);
@@ -477,6 +468,107 @@ impl Ablage {
             return Err(AblageFehler::Platte(e));
         }
         Ok(paket)
+    }
+
+    /// Nimmt das aktive Paket zurück: Seine Folge wird **gesperrt** (sie wird
+    /// nie wieder angenommen), und das vorige Paket wird wieder aktiv.
+    /// `Ok(None)` heißt: Es gilt wieder der eingebaute Stand — weil es kein
+    /// voriges Paket gab oder es die Prüfung nicht mehr besteht.
+    ///
+    /// Die Sperre wird **zuerst** geschrieben. Scheitert das, bleibt alles
+    /// wie es war; bricht es danach ab, lädt der nächste Start das gesperrte
+    /// Paket nicht mehr — der Rückweg gilt also auch dann.
+    pub fn zurueck(
+        &self,
+        kern: &str,
+        aktive_folge: u32,
+        schluessel: &Schluessel,
+    ) -> Result<Option<Paket>, AblageFehler> {
+        if aktive_folge == 0 {
+            return Err(AblageFehler::Platte(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "es ist kein Seiten-Paket aktiv",
+            )));
+        }
+        let mut gesperrt = self.gesperrt(kern);
+        if !gesperrt.contains(&aktive_folge) {
+            gesperrt.push(aktive_folge);
+        }
+        std::fs::create_dir_all(&self.dir)?;
+        self.zustand_schreiben(kern, &gesperrt)?;
+
+        let voriges = match self.paket_lesen(DATEI_VORHER) {
+            Ok(Some((signatur, bytes))) => {
+                let erwartung = Erwartung {
+                    kern,
+                    aktive_folge: 0,
+                    gesperrt: &gesperrt,
+                };
+                match pruefen(&bytes, &signatur, schluessel, &erwartung) {
+                    Ok(paket) => Some(paket),
+                    Err(grund) => {
+                        tracing::warn!(
+                            "Voriges Seiten-Paket abgelehnt ({grund}) – zurück zum eingebauten Stand"
+                        );
+                        None
+                    }
+                }
+            }
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(
+                    "Voriges Seiten-Paket unlesbar ({e}) – zurück zum eingebauten Stand"
+                );
+                None
+            }
+        };
+        // Ein Umbenennen ersetzt das zurückgenommene Paket. Scheitert es,
+        // geht es zum eingebauten Stand — nie bleibt das gesperrte Paket
+        // „aktiv" liegen, während der Speicher schon etwas anderes zeigt.
+        let voriges = match voriges {
+            Some(paket) => {
+                match std::fs::rename(self.dir.join(DATEI_VORHER), self.dir.join(DATEI_AKTIV)) {
+                    Ok(()) => Some(paket),
+                    Err(e) => {
+                        tracing::warn!(
+                        "Voriges Seiten-Paket ließ sich nicht aktivieren ({e}) – zurück zum eingebauten Stand"
+                    );
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+        if voriges.is_none() {
+            self.entfernen(DATEI_AKTIV);
+            self.entfernen(DATEI_VORHER);
+        }
+        Ok(voriges)
+    }
+
+    /// Die zurückgenommenen Folgen dieser Kern-Version. Leer, wenn der
+    /// Zustand fehlt, unlesbar ist oder zu einer anderen Version gehört.
+    pub fn gesperrt(&self, kern: &str) -> Vec<u32> {
+        match self.zustand_lesen() {
+            ZustandLesung::Da(z) if z.kern == kern => z.gesperrt,
+            _ => Vec::new(),
+        }
+    }
+
+    fn zustand_schreiben(&self, kern: &str, gesperrt: &[u32]) -> std::io::Result<()> {
+        self.nebendatei_schreiben(
+            DATEI_ZUSTAND_NEU,
+            &[&serde_json::to_vec_pretty(&Zustand {
+                format: FORMAT,
+                kern: kern.to_string(),
+                gesperrt: gesperrt.to_vec(),
+            })
+            .map_err(std::io::Error::other)?],
+        )?;
+        std::fs::rename(
+            self.dir.join(DATEI_ZUSTAND_NEU),
+            self.dir.join(DATEI_ZUSTAND),
+        )
     }
 
     /// Schreibt eine Nebendatei vollständig und bis auf die Platte. Sie wird
@@ -1311,6 +1403,90 @@ mod tests {
     }
 
     #[test]
+    fn zurueck_aktiviert_das_vorige_paket_und_sperrt_die_folge() {
+        let dir = tempfile::tempdir().unwrap();
+        let schluessel = Testschluessel::neu(1);
+        let ablage = Ablage::neu(dir.path());
+        lege_ab(&ablage, &schluessel, 1);
+        lege_ab(&ablage, &schluessel, 2);
+
+        let voriges = ablage
+            .zurueck(KERN, 2, &schluessel.oeffentlich())
+            .unwrap()
+            .expect("voriges Paket");
+        assert_eq!(voriges.folge, 1);
+        assert_eq!(gesperrt(&ablage), vec![2]);
+        assert_eq!(ablage.gesperrt(KERN), vec![2]);
+        assert_eq!(ablage.gesperrt("9.9.9"), Vec::<u32>::new());
+        assert!(
+            !dir.path().join(DATEI_VORHER).exists(),
+            "nur EIN Schritt zurück"
+        );
+        // Nach einem Neustart gilt dasselbe.
+        assert_eq!(lade(&ablage, &schluessel), Some(1));
+
+        // Noch einmal zurück: kein voriges Paket mehr → eingebaut.
+        assert!(ablage
+            .zurueck(KERN, 1, &schluessel.oeffentlich())
+            .unwrap()
+            .is_none());
+        assert_eq!(gesperrt(&ablage), vec![2, 1]);
+        assert!(!dir.path().join(DATEI_AKTIV).exists());
+        assert_eq!(lade(&ablage, &schluessel), None);
+    }
+
+    /// Lässt sich das vorige Paket nicht an die Stelle des aktiven schieben
+    /// (dort liegt ein Ordner), endet der Rückweg beim eingebauten Stand —
+    /// Platte und Speicher sagen danach dasselbe.
+    #[test]
+    fn zurueck_bei_gescheitertem_umbenennen_endet_beim_eingebauten_stand() {
+        let dir = tempfile::tempdir().unwrap();
+        let schluessel = Testschluessel::neu(1);
+        let ablage = Ablage::neu(dir.path());
+        lege_ab(&ablage, &schluessel, 1);
+        lege_ab(&ablage, &schluessel, 2);
+        let aktiv = dir.path().join(DATEI_AKTIV);
+        std::fs::remove_file(&aktiv).unwrap();
+        std::fs::create_dir(&aktiv).unwrap();
+        std::fs::write(aktiv.join("x"), b"x").unwrap();
+
+        assert!(ablage
+            .zurueck(KERN, 2, &schluessel.oeffentlich())
+            .unwrap()
+            .is_none());
+        assert_eq!(gesperrt(&ablage), vec![2]);
+        assert!(!dir.path().join(DATEI_VORHER).exists());
+        assert_eq!(lade(&ablage, &schluessel), None);
+    }
+
+    #[test]
+    fn zurueck_ohne_aktives_paket_ist_ein_fehler() {
+        let dir = tempfile::tempdir().unwrap();
+        let schluessel = Testschluessel::neu(1);
+        let ablage = Ablage::neu(dir.path());
+        assert!(ablage.zurueck(KERN, 0, &schluessel.oeffentlich()).is_err());
+        assert!(!dir.path().join(DATEI_ZUSTAND).exists());
+    }
+
+    /// Ein voriges Paket, das die Prüfung nicht mehr besteht (hier: selbst
+    /// gesperrt), wird nicht reaktiviert — dann gilt der eingebaute Stand.
+    #[test]
+    fn zurueck_auf_ungueltiges_voriges_paket_endet_beim_eingebauten_stand() {
+        let dir = tempfile::tempdir().unwrap();
+        let schluessel = Testschluessel::neu(1);
+        let ablage = Ablage::neu(dir.path());
+        lege_ab(&ablage, &schluessel, 1);
+        lege_ab(&ablage, &schluessel, 2);
+        sperre(&ablage, &[1]);
+        assert!(ablage
+            .zurueck(KERN, 2, &schluessel.oeffentlich())
+            .unwrap()
+            .is_none());
+        assert_eq!(gesperrt(&ablage), vec![1, 2]);
+        assert_eq!(lade(&ablage, &schluessel), None);
+    }
+
+    #[test]
     fn schreibfehler_laesst_aktiven_stand_unberuehrt() {
         let dir = tempfile::tempdir().unwrap();
         let schluessel = Testschluessel::neu(1);
@@ -1354,5 +1530,36 @@ mod tests {
             ablage.paket_lesen(DATEI_VORHER).unwrap().unwrap().1,
             zweites
         );
+    }
+}
+
+/// Für die Tests anderer Module: ein gültiges Paket als Bytes.
+#[cfg(test)]
+pub(crate) mod testhilfe {
+    use std::io::Write;
+
+    use crate::tablet::assets::{self, Seite};
+
+    pub(crate) const KERN: &str = "1.2.3";
+
+    /// Alle Seiten wie eingebaut, mit einem Kommentar je Folge davor.
+    pub(crate) fn paket_bytes(folge: u32) -> Vec<u8> {
+        let eingebaut = assets::eingebauter_stand();
+        let seiten: std::collections::BTreeMap<String, String> = Seite::ALLE
+            .iter()
+            .map(|s| {
+                (
+                    s.datei().to_string(),
+                    format!("<!-- folge {folge} -->{}", eingebaut.seite(*s)),
+                )
+            })
+            .collect();
+        let json = serde_json::json!({
+            "format": 1, "art": "seiten", "kern": KERN, "folge": folge,
+            "commit": "0123abcd", "gebaut": "", "seiten": seiten,
+        });
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        enc.write_all(&serde_json::to_vec(&json).unwrap()).unwrap();
+        enc.finish().unwrap()
     }
 }

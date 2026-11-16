@@ -112,8 +112,9 @@ wird einmal je Stand berechnet, nicht je Lebenszeichen. Der Stand ist
 austauschbar — Vorarbeit für
 [`hotfix-ohne-neustart`](hotfix-ohne-neustart.md) (ADR 0099): Wechselt er zur
 Laufzeit, wechselt die Marke atomar mit, und die Tablets bemerken es am
-nächsten `Pong`. Bis das Seiten-Paket eingebaut ist, gilt immer der in der
-Binärdatei steckende Stand.
+nächsten `Pong`. Seit v0.9.433 passiert das wirklich: „Jetzt übernehmen" im
+Update-Banner tauscht den Stand. Ein freies Tablet lädt dann wie nach einem
+Relay-Deploy von selbst neu, eines im Spiel zeigt nur den Hinweis.
 
 ### Teil 2 — Fernbefehl (v0.9.268)
 

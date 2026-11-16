@@ -442,8 +442,8 @@ Zustellung. Wer das Repo zwei Tage nicht öffnet, sieht auch das rote Kreuz nich
 ## Hotfix an einer Geräte-Seite: Seiten-Paket (`seiten-paket.yml`)
 
 > Spec: [features/hotfix-ohne-neustart.md](features/hotfix-ohne-neustart.md) ·
-> ADR 0099. Stand: Der Paket-Job ist gebaut; die App **bietet** Pakete erst
-> mit dem nächsten Baustein an.
+> ADR 0099. Seit v0.9.433 bietet die App passende Pakete im Banner an
+> ([oberflaechen.md](oberflaechen.md)).
 
 Ein Fehler in `tablet.html`, `tl.html` oder einer anderen Geräte-Seite
 (`src-tauri/assets/*.html`) lässt sich als **Seiten-Paket** ausliefern: Der

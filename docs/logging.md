@@ -185,6 +185,22 @@ Grund, nie Inhalte:
 
 Ohne Paket im Verzeichnis erscheint keine Zeile.
 
+### Seiten-Paket: Angebot, Übernahme, Rückweg (seit v0.9.433)
+
+| Zeile | Bedeutung |
+|---|---|
+| `Seiten-Paket Folge N geladen, wartet auf die Übernahme` | Im Hintergrund geladen und geprüft; das Banner bietet es an. Noch ist nichts gewechselt. |
+| `Seiten-Paket abgelehnt, nichts geändert: …` | Ein geladenes Paket bestand die Prüfung nicht. Kein Banner; der Grund steht auch unter **Wartung**. Dieselbe Folge wird danach nicht noch einmal geladen. |
+| `Seiten-Paket Folge N übernommen (vorher Folge M, Commit …)` | Klick auf „Jetzt übernehmen": Die Seiten sind gewechselt. |
+| `Seiten-Paket nicht übernommen: …` | Das Ablegen scheiterte (etwa Platte voll); der aktive Stand ist unverändert. |
+| `Seiten-Paket Folge N zurückgenommen und gesperrt, aktiv ist Folge M` | Klick auf „Zurück zum vorigen Stand". |
+| `Voriges Seiten-Paket abgelehnt (…) – zurück zum eingebauten Stand` | Beim Rückweg bestand das vorige Paket die Prüfung nicht mehr. |
+| `Voriges Seiten-Paket ließ sich nicht aktivieren (…) – zurück zum eingebauten Stand` | Beim Rückweg scheiterte das Umbenennen; es gelten die eingebauten Seiten. |
+| `Seiten-Rückweg gescheitert: …` | Schon die Sperre ließ sich nicht schreiben; nichts wurde geändert. |
+
+Ein Netzfehler beim Suchen oder Laden erzeugt bewusst **keine** Zeile —
+offline ist in der Halle der Normalfall.
+
 ## Automatischer Upload (Standard an, abwählbar)
 
 Im Setup steht **„Diagnose-Logs senden"**. Ist der Schalter an, lädt

@@ -32,7 +32,7 @@ zeigen.
 | **Monitore** | Die Geräteverwaltung für Fernseher und Pis: **welches Gerät zeigt was**. Siehe unten. | Court-Monitor aus |
 | **Siegerehrung** | Steuert, welche Disziplin der Sieger-Monitor gerade zeigt. Bewusst ohne Rotation, damit das Publikum das Podium fotografieren kann. | Court-Monitor aus |
 | **Einstellungen** | Derselbe Bildschirm wie der Einrichtungs-Assistent. Siehe [Einstellungen](einstellungen.md). | nie |
-| **Wartung** | Update prüfen, Logs öffnen, Version ablesen, Identität umziehen. | nie |
+| **Wartung** | Update prüfen, Logs öffnen, Version und Seiten-Stand ablesen, Geräte-Seiten zurücksetzen, Identität umziehen. | nie |
 
 Über allem liegt eine **Kopfzeile** mit dem Start-/Stopp-Knopf und vier
 Statusanzeigen:
@@ -98,6 +98,41 @@ dort ein orangefarbener Balken mit der Frage, ob Datei und Turnier-Kennung
 Antworten bewirken, steht unter
 [Die Suche läuft mit](tp-datei-upload.md#die-suche-läuft-mit).
 <!-- pruef: "Ja, übernehmen" in src/components/TpFundBanner.tsx -->
+
+### Blaues Band: Verbesserung für Tablets und Anzeigen (seit v0.9.433)
+
+Manchmal lässt sich ein Fehler an einer Geräte-Seite — Zähl-Tablet, Monitor,
+Turnierleitungs-Oberfläche — beheben, **ohne bts-light neu zu starten**. Dann
+erscheint oben ein blaues Band: „Verbesserung für Tablets und Anzeigen liegt
+bereit (Seiten-Stand 2) – ohne Unterbrechung." bts-light hat das Paket schon geladen; es
+wechselt aber nichts, bevor jemand am Turnier-PC klickt.
+
+- **Jetzt übernehmen** tauscht die Seiten sofort. Keine Verbindung reißt ab,
+  die Übertragung läuft weiter.
+- Danach sagt das Band, was mit den Geräten passiert: Ein Tablet **ohne**
+  laufendes Spiel lädt von selbst neu. Ein Tablet **im Spiel** zeigt nur einen
+  Hinweis und zählt weiter. Monitore lädt man in der Monitor-Verwaltung über
+  „Neu laden", die Turnierleitungs-Oberfläche im Browser von Hand.
+- **Zurück zum vorigen Stand** nimmt die Änderung wieder weg — ebenfalls ohne
+  Unterbrechung. Der zurückgenommene Stand wird danach nicht noch einmal
+  angeboten, ein späterer schon. Denselben Knopf gibt es dauerhaft unter
+  **Wartung**; dort steht auch der aktuelle Stand („Seiten-Stand 0" heißt:
+  die Seiten, die mit der App ausgeliefert wurden).
+
+<!-- pruef: "Jetzt übernehmen" in src/io/updateBanner.mjs -->
+<!-- pruef: "Zurück zum vorigen Stand" in src/io/updateBanner.mjs -->
+<!-- pruef: "Verbesserung für Tablets und Anzeigen liegt bereit" in src/io/updateBanner.mjs -->
+<!-- pruef: "Seiten-Stand" in src/io/updateBanner.mjs -->
+
+**Wen der Tausch erreicht:** alle Geräte, die ihre Seite von **diesem PC**
+bekommen — also die im Hallennetz. Geräte, die über die Cloud verbunden sind,
+bekommen ihre Seiten vom Server; für sie ändert der Klick nichts, und im
+reinen Cloud-Betrieb erscheint das Band gar nicht. Läuft in einer anderen
+Halle ein zweiter bts-light-PC, wird er dort einzeln aktualisiert.
+
+bts-light sucht beim Start und danach etwa alle zwanzig Minuten nach einem
+Paket. Ohne Internet passiert nichts — ein schon geladenes Paket bleibt
+bereit.
 
 ## Die Geräte in der Halle
 

@@ -451,6 +451,22 @@ bei ≥2 Hallen keine Ansage-Halle gewählt ist (sonst sagt er beide an).
   zuweisen/identify/reload — heute master-only; braucht ein hallen-begrenztes
   `MonitorControl`-Merge im Relay). Siehe `docs/features/multihall-cloud-plan.md`.
 
+## Seiten-Paket: jeder PC für sich (v0.9.433)
+
+Ein Seiten-Paket (Spec
+[hotfix-ohne-neustart](features/hotfix-ohne-neustart.md)) tauscht die
+Geräte-Seiten des PCs, an dem jemand „Jetzt übernehmen" klickt — und nur
+dessen. Für die Betriebsarten heißt das:
+
+- **LAN:** alle Geräte dieses PCs.
+- **LAN + Cloud:** nur die Geräte im Hallennetz. Die Cloud-Geräte bekommen
+  ihre Seiten vom Relay, das mit jedem Merge nach `main` neu ausgerollt wird.
+- **Reine Cloud:** kein Angebot.
+- **Slave-Träger** (ferne Halle gebündelt, ADR 0048): liefert seine Seiten
+  selbst aus und bekommt deshalb ein eigenes Angebot — dort muss ebenfalls
+  jemand klicken. Ein nicht aktualisierter Slave behält seine Seiten samt
+  passender Marke; es entsteht keine Neulade-Schleife.
+
 ## Offene Punkte
 
 - **Verbindungsweg je Gerät anzeigen.** Im Parallelbetrieb pro Gerät

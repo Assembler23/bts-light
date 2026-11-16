@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.433
+
+- **Verbesserungen für Tablets und Anzeigen ohne Neustart.** Lässt sich ein
+  Fehler an einer Geräte-Seite (Zähl-Tablet, Monitor,
+  Turnierleitungs-Oberfläche) ohne neue Programmversion beheben, lädt
+  bts-light das Paket im Hintergrund und zeigt oben ein blaues Band. **Jetzt
+  übernehmen** tauscht die Seiten sofort — keine Verbindung reißt ab, die
+  Übertragung läuft weiter. Tablets ohne laufendes Spiel laden von selbst
+  neu, Tablets im Spiel zeigen nur einen Hinweis.
+- **Ein Klick zurück.** „Zurück zum vorigen Stand" nimmt die Änderung wieder
+  weg, im Band direkt nach dem Übernehmen und dauerhaft unter **Wartung**.
+  Ein zurückgenommener Stand wird nicht noch einmal angeboten.
+- **Gilt für die Geräte dieses PCs.** Geräte über die Cloud bekommen ihre
+  Seiten weiter vom Server; im reinen Cloud-Betrieb erscheint das Band nicht.
+- bts-light sucht jetzt nicht nur beim Start, sondern etwa alle zwanzig
+  Minuten nach Updates und Paketen.
+- Unter **Wartung** steht der Seiten-Stand („App v… · Seiten-Stand N").
+
 ## v0.9.432
 
 - **Intern: Seiten-Paket prüfen und ablegen.** bts-light kann ein signiertes

@@ -231,8 +231,9 @@ impl Seitenstand {
     }
 }
 
-/// Der eingebaute Stand, einmal je Prozess gebaut.
-fn eingebauter_stand() -> Arc<Seitenstand> {
+/// Der eingebaute Stand, einmal je Prozess gebaut. Auch das Ziel des
+/// Rückwegs, wenn es kein voriges Paket gibt.
+pub fn eingebauter_stand() -> Arc<Seitenstand> {
     static EINGEBAUT: OnceLock<Arc<Seitenstand>> = OnceLock::new();
     EINGEBAUT
         .get_or_init(|| Arc::new(Seitenstand::eingebaut()))

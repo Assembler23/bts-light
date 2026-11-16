@@ -349,6 +349,10 @@ jobs:
       - name: Seiten-Paket – Bau-Skript und Workflow
         run: node scripts/test-seiten-paket.mjs
 
+      # Update-Banner, Seiten-Teil: jede Lage der Banner-Tabelle der Spec.
+      - name: Update-Banner – Seiten-Zeile
+        run: node scripts/test-update-banner.mjs
+
       # Ansage-Seite im Browser (Spec ansage-im-browser): Bestandsaufnahme,
       # Hallen-Pflicht, nichts Falsches oder Verfallenes sprechen, Praesenz
       # nur mit Stimme und Ton, Abspiel-Kern mit Fristen - und die
