@@ -96,22 +96,31 @@ ihren Port nicht erbt. Die volle App mit Fenster und Einzelinstanz-Sperre
 startet sie nie — ob der Wechsel mit ihr trägt, zeigt erst der Feldtest nach
 dem Anschluss (PR 7b).
 
-| Messwert | Linux (Entwicklungsrechner, 16.11.2026) | Windows 11 + Defender |
-|---|---|---|
-| erster Start der frisch abgelegten Datei | 20 ms | **offen** |
-| zweiter Start | 20 ms | **offen** |
-| Tausch bei laufender Datei | gelingt, 51 µs | **offen** (Annahme 1) |
-| Ende der alten App → neue Version angekommen | 752 ms (davon 400 ms Nachlauf des Wächters, 300 ms gespielte Startzeit) | **offen** (Annahme 2) |
-| Fehlstart → alte Version wieder aktiv | 601 ms | **offen** |
-| Hänger → Rückfall | Frist + rund 500 ms | **offen** |
-| Installationsverzeichnis beschreibbar | nicht anwendbar | **offen** |
+| Messwert | Linux (Entwicklungsrechner) | Windows-Runner der CI (GitHub, 16.11.2026, #557) | Turnier-PC, Windows 11 + Defender |
+|---|---|---|---|
+| erster Start der frisch abgelegten Datei | 20 ms | 335 ms | **offen** |
+| zweiter Start | 20 ms | 23 ms | **offen** |
+| Tausch bei laufender Datei | gelingt, 51 µs | **gelingt**, 2,4 ms (Annahme 1) | **offen** |
+| Ende der alten App → neue Version angekommen | 752 ms | 757 ms (**Wächter überlebt**, Annahme 2) | **offen** |
+| Fehlstart → alte Version wieder aktiv | 601 ms | 554 ms | **offen** |
+| Hänger → Rückfall | Frist + rund 500 ms | Frist + 470 ms | **offen** |
+| Installationsverzeichnis beschreibbar | nicht anwendbar | keine Installation vorhanden | **offen** |
 
-Die Linux-Spalte zeigt nur, dass der Ablauf als solcher trägt; über Windows
-sagt sie nichts. Die CI lässt die Sonde bei jedem PR auf einem
-Windows-Runner mitlaufen (ohne den PR zu blockieren) — das ersetzt den Lauf
-am Turnier-PC mit Virenscanner nicht, zeigt aber früh, ob Windows das
-Umbenennen und den Wächter grundsätzlich mitmacht. **Der Tausch wird erst an
-das Banner angeschlossen (PR 7b), wenn die rechte Spalte gefüllt ist.**
+In den Zeiten „bis angekommen" stecken 400 ms Nachlauf des Wächters und 300 ms
+gespielte Startzeit der neuen App.
+
+**Stand der Annahmen:** Auf einem echten Windows (Runner der CI) lässt sich
+die laufende Programmdatei umbenennen, und der Wächter überlebt das Ende der
+App und wartet auf sie. Offen bleibt, was nur der Turnier-PC zeigt: das
+Verhalten unter seinem Virenscanner (der Runner maß 335 ms für den ersten
+Start einer frischen Datei), das Schreibrecht im echten
+Installationsverzeichnis und die volle App mit Einzelinstanz-Sperre.
+
+Die CI lässt die Sonde bei jedem PR auf einem Windows- und einem
+Linux-Runner mitlaufen (ohne den PR zu blockieren); die Werte stehen im Log
+des Schritts „Übergabe-Sonde". Das ersetzt den Lauf am Turnier-PC nicht.
+**Der Tausch wird erst an das Banner angeschlossen (PR 7b), wenn die rechte
+Spalte gefüllt ist.**
 Daraus folgt auch die endgültige Frist des Wächters (Startwert 15 s): das
 Mehrfache des gemessenen ersten Starts auf dem langsamsten Turnier-PC.
 Scheitert Annahme 1 oder 2, bleibt der Kernwechsel beim Installer-Weg.

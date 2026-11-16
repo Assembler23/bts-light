@@ -365,7 +365,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   - *Weg 2 (Kernwechsel ohne Installer):* Wiederanlauf im Kern und
     Lückenmessung (#553, v0.9.434) sowie Kern-Artefakt im Release-Job und
     Datenformat-Wächter (v0.9.436) sind da. Das Messwerkzeug (PR 7a,
-    v0.9.437) ist da und unter Linux durchgelaufen. **Nächster Schritt: die
+    v0.9.437) ist da und unter Linux und auf dem Windows-Runner der CI
+    durchgelaufen (laufende Datei umbenennbar, Wächter überlebt). **Nächster Schritt: die
     Sonde am Windows-PC laufen lassen** (`cargo test -p bts-light --test
     uebergabe_probe -- --ignored --nocapture`) und die Werte in ADR 0100
     eintragen. Danach der scharfe Tausch mit Wächter (7b), Kern-Rückweg und
