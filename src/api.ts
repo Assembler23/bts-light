@@ -193,6 +193,10 @@ export const seitenZurueck = (): Promise<void> => invoke("seiten_zurueck");
  *  neue Version und stellt diese wieder her, falls sie nicht anläuft. */
 export const kernWechseln = (): Promise<void> => invoke("kern_wechseln");
 
+/** Zurück zur Vorversion: derselbe Ablauf mit vertauschten Rollen. Die
+ *  laufende Version wird danach nicht erneut angeboten. */
+export const kernZurueck = (): Promise<void> => invoke("kern_zurueck");
+
 /** Die einmalige Meldung im Update-Banner schließen. */
 export const updateMeldungWeg = (welche: "seiten" | "kern"): Promise<void> =>
   invoke("update_meldung_weg", { welche });

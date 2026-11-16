@@ -40,7 +40,13 @@
   ; Bewusst VOR der IfSilent-Sprungmarke: auch eine stille Deinstallation
   ; raeumt sie weg.
   Delete "$INSTDIR\bts-light.neu.exe"
-  Delete "$INSTDIR\bts-light.vorher.exe"
+  Delete "$INSTDIR\bts-light.vorher.exe.teil"
+  Delete "$INSTDIR\bts-light.vorher.exe.tausch"
+  ; Die Vorversion ist der Rueckweg nach einem Update: Laeuft der
+  ; Deinstallierer als Teil eines Updates, bleibt sie liegen.
+  ${If} $UpdateMode <> 1
+    Delete "$INSTDIR\bts-light.vorher.exe"
+  ${EndIf}
   Delete "$INSTDIR\bts-light.defekt.exe"
   RMDir "$INSTDIR"
   IfSilent btslight_fw_del_done

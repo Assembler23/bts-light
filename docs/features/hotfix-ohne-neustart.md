@@ -1,6 +1,6 @@
 # Hotfix ohne Neustart — Spezifikation
 
-> Status: **Freigegeben 2026-11-16** (via /idee: Brief → Grill → How-To → Review). Umsetzung noch nicht begonnen.
+> Status: **Freigegeben 2026-11-16** (via /idee: Brief → Grill → How-To → Review). Umsetzung: Schritte 1–8 gebaut (bis v0.9.441), offen ist der Abschluss mit Feldtest (9).
 > Quelle: Idee vom 16.11.2026 („Wir trauen uns nicht, einen Fix im laufenden
 > Turnier einzuspielen, weil bts-light dafür neu starten muss").
 > Betroffene Crates: `src-tauri`, `src` (Frontend), CI-Workflows. `relay/` und

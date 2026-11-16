@@ -7,7 +7,8 @@ export type KernKnopf =
   | "beim_beenden"
   | "doch_nicht"
   | "verstanden"
-  | "schliessen";
+  | "schliessen"
+  | "kern_zurueck";
 
 export const KNOPF: Record<SeitenKnopf | KernKnopf, string>;
 
@@ -19,15 +20,33 @@ export interface SeitenZeile {
 }
 
 export interface KernZeile {
-  art: "zurueckgefallen" | "gewechselt" | "laedt" | "wechselt" | "bereit";
+  art:
+    | "zurueckgefallen"
+    | "zurueckgenommen"
+    | "gewechselt"
+    | "laedt"
+    | "wechselt"
+    | "bereit";
   text: string;
   zusatz: string[];
   knoepfe: KernKnopf[];
+  /** Abweichende Beschriftung einzelner Knöpfe („Zurück zu v…"). */
+  namen?: Partial<Record<KernKnopf, string>>;
+  /** Knöpfe, die sichtbar, aber aus sind. */
+  aus?: KernKnopf[];
 }
 
 export function seitenZeile(seiten: SeitenInfo | null | undefined): SeitenZeile | null;
 
 export function kernZeile(info: UpdateInfo | null | undefined): KernZeile | null;
+
+export function wartungKern(info: UpdateInfo | null | undefined): {
+  /** Die Vorversion, zu der ein Knopf führt — oder `null`. */
+  version: string | null;
+  erlaubt: boolean;
+  knopf: string | null;
+  hinweise: string[];
+} | null;
 
 export function unterbrechungsHinweis(info: UpdateInfo): string;
 

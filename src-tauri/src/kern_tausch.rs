@@ -107,6 +107,9 @@ pub enum Meldung {
     Gewechselt { von: String },
     /// Die neue Version lief nicht an; die alte läuft wieder.
     Zurueckgefallen { nach: String, grund: String },
+    /// Diese (ältere) Version läuft wieder, weil `version` auf Wunsch
+    /// zurückgenommen wurde.
+    Zurueckgenommen { version: String },
 }
 
 /// Leitet die Meldung aus dem Zustand der letzten Übergabe ab — nur wenn sie
@@ -117,6 +120,12 @@ pub fn meldung_aus(zustand: Option<&tausch::Zustand>, eigene: &str) -> Option<Me
         return None;
     }
     match z.lage {
+        // Von einer neueren Version hierher: Das war der Rückweg.
+        Lage::Angekommen if ruecknahme_aus(zustand, eigene).is_some() => {
+            Some(Meldung::Zurueckgenommen {
+                version: z.von.clone(),
+            })
+        }
         Lage::Angekommen if z.nach == eigene => Some(Meldung::Gewechselt { von: z.von.clone() }),
         Lage::Zurueckgefallen if z.von == eigene => Some(Meldung::Zurueckgefallen {
             nach: z.nach.clone(),
@@ -124,6 +133,19 @@ pub fn meldung_aus(zustand: Option<&tausch::Zustand>, eigene: &str) -> Option<Me
         }),
         _ => None,
     }
+}
+
+/// Kam diese Version über einen Rückweg an, nennt das die zurückgenommene —
+/// unabhängig davon, ob die Meldung dazu schon geschlossen ist. Erst die
+/// Ankunft beweist den Rückweg: Vorher wird nichts gesperrt, sonst bliebe
+/// nach einem Rückfall die wieder laufende Version gesperrt.
+pub fn ruecknahme_aus(zustand: Option<&tausch::Zustand>, eigene: &str) -> Option<String> {
+    let z = zustand?;
+    let aelter = matches!(
+        (Version::lesen(&z.von), Version::lesen(&z.nach)),
+        (Some(von), Some(nach)) if von > nach
+    );
+    (z.lage == Lage::Angekommen && z.nach == eigene && aelter).then(|| z.von.clone())
 }
 
 /// Die Version, die nach einem Rückfall nicht erneut per Tausch angeboten
@@ -144,13 +166,21 @@ pub struct KernInfo {
     pub rueckweg: bool,
     /// Bei `nicht_moeglich`: warum (nur zur Diagnose).
     pub grund: Option<String>,
-    /// `keine` | `gewechselt` | `zurueckgefallen`.
+    /// `keine` | `gewechselt` | `zurueckgefallen` | `zurueckgenommen`.
     pub meldung: String,
     /// `gewechselt`: von welcher Version. `zurueckgefallen`: welche nicht
-    /// anlief.
+    /// anlief. `zurueckgenommen`: welche zurückgenommen wurde.
     pub meldung_version: Option<String>,
     /// `zurueckgefallen`: der Grund des Wächters.
     pub meldung_grund: Option<String>,
+    /// Die Vorversion, die neben dem Programm liegt und zu der ein Rückweg
+    /// führen könnte.
+    pub zurueck_version: Option<String>,
+    /// Darf zu ihr gewechselt werden? `false` = sie kann die heutigen Daten
+    /// nicht lesen (ADR 0101): Knopf sichtbar, aber aus.
+    pub zurueck_erlaubt: bool,
+    /// Zurückgenommene Versionen — sie werden nicht erneut angeboten.
+    pub zurueckgenommen: Vec<String>,
 }
 
 #[derive(Default)]
@@ -162,6 +192,14 @@ struct Innen {
     gesperrt: Option<String>,
     /// Version, für die das Vorladen läuft oder lief, und wie oft schon.
     versucht: Option<(String, u32)>,
+    /// Auf Wunsch zurückgenommene Versionen (aus `rueckweg.json`): weder
+    /// per Tausch noch per Installer erneut angeboten.
+    zurueckgenommen: Vec<String>,
+    /// Die Vorversion neben dem Programm und ob der Rückweg erlaubt ist.
+    zurueck: Option<(String, bool)>,
+    /// Der Stand vor einem begonnenen Rückweg — bricht er ab, bevor etwas
+    /// verändert wurde, gilt er wieder.
+    vor_rueckweg: Option<Stand>,
 }
 
 /// Zustand des Kernwechsels. Lebt im `AppState`.
@@ -187,6 +225,75 @@ impl KernTausch {
         i.gesperrt = sperre_aus(zustand, eigene);
     }
 
+    /// Beim Start und nach jeder Änderung an `rueckweg.json`: Welche
+    /// Vorversion liegt bereit, und was ist zurückgenommen?
+    pub fn rueckweg_setzen(&self, urteil: crate::rueckweg::Urteil, gesperrt: Vec<String>) {
+        use crate::rueckweg::Urteil;
+        let mut i = self.innen();
+        i.zurueckgenommen = gesperrt;
+        i.zurueck = match urteil {
+            Urteil::Keiner => None,
+            Urteil::Erlaubt { version } => Some((version, true)),
+            Urteil::NichtLesbar { version } => Some((version, false)),
+        };
+    }
+
+    /// Wurde `version` auf Wunsch zurückgenommen? Dann wird sie gar nicht
+    /// mehr angeboten — auch nicht über den Installer.
+    pub fn ist_zurueckgenommen(&self, version: &str) -> bool {
+        self.innen().zurueckgenommen.iter().any(|v| v == version)
+    }
+
+    /// Nimmt den Rückweg — genau einmal. Sperrt wie ein Wechsel den
+    /// Installer-Weg.
+    pub fn nimm_fuer_rueckweg(&self) -> Result<String, &'static str> {
+        let mut i = self.innen();
+        match &i.stand {
+            // Das Vorladen schreibt gerade die Datei, deren Namen der
+            // Rückweg braucht.
+            Stand::Laedt => {
+                return Err("Gerade wird ein Update vorbereitet – bitte gleich noch einmal.")
+            }
+            Stand::Wechselt { .. } => return Err("Es läuft schon ein Wechsel."),
+            _ => {}
+        }
+        let version = match &i.zurueck {
+            Some((version, true)) => version.clone(),
+            Some((_, false)) => {
+                return Err("Die vorige Version kann die heutigen Daten nicht lesen.")
+            }
+            None => return Err("Es liegt keine vorige Version bereit."),
+        };
+        i.vor_rueckweg = Some(std::mem::replace(
+            &mut i.stand,
+            Stand::Wechselt {
+                version: version.clone(),
+                rueckweg: false,
+            },
+        ));
+        Ok(version)
+    }
+
+    /// Der Rückweg brach ab, **bevor** etwas verändert wurde.
+    pub fn rueckweg_nicht_begonnen(&self) {
+        let mut i = self.innen();
+        if let Some(vorher) = i.vor_rueckweg.take() {
+            i.stand = vorher;
+        }
+    }
+
+    /// Der Rückweg ist gescheitert, nachdem Dateien bewegt wurden. Ein
+    /// bereitliegendes Update bleibt (der Rückweg fasst seine Datei nicht
+    /// an), aber der Knopf verschwindet bis zum nächsten Start: Ob die
+    /// Vorversion noch unversehrt daliegt, ist dann nicht mehr sicher.
+    pub fn rueckweg_gescheitert(&self) {
+        let mut i = self.innen();
+        if let Some(vorher) = i.vor_rueckweg.take() {
+            i.stand = vorher;
+            i.zurueck = None;
+        }
+    }
+
     /// Soll für `version` vorgeladen werden? Zählt den Versuch.
     ///
     /// Nein, wenn: gerade geladen wird, die Datei schon bereitliegt, ein
@@ -194,7 +301,8 @@ impl KernTausch {
     /// oder schon [`MAX_VERSUCHE`] Versuche liefen.
     pub fn beginne(&self, version: &str) -> bool {
         let mut i = self.innen();
-        if i.gesperrt.as_deref() == Some(version) {
+        if i.gesperrt.as_deref() == Some(version) || i.zurueckgenommen.iter().any(|v| v == version)
+        {
             return false;
         }
         let bisher = match &i.versucht {
@@ -329,6 +437,9 @@ impl KernTausch {
             Some(Meldung::Zurueckgefallen { nach, grund }) => {
                 ("zurueckgefallen", Some(nach.clone()), Some(grund.clone()))
             }
+            Some(Meldung::Zurueckgenommen { version }) => {
+                ("zurueckgenommen", Some(version.clone()), None)
+            }
         };
         KernInfo {
             tausch: tausch.to_string(),
@@ -338,6 +449,9 @@ impl KernTausch {
             meldung: meldung.to_string(),
             meldung_version,
             meldung_grund,
+            zurueck_version: i.zurueck.as_ref().map(|(v, _)| v.clone()),
+            zurueck_erlaubt: i.zurueck.as_ref().is_some_and(|(_, erlaubt)| *erlaubt),
+            zurueckgenommen: i.zurueckgenommen.clone(),
         }
     }
 }
@@ -970,6 +1084,174 @@ mod tests {
         assert_eq!(
             ankunft_versuchen(dir.path(), "1.2.4", 1),
             Ankunft::SpaeterNochmal
+        );
+    }
+
+    fn mit_rueckweg(k: &KernTausch, version: &str, erlaubt: bool, gesperrt: &[&str]) {
+        use crate::rueckweg::Urteil;
+        let version = version.to_string();
+        k.rueckweg_setzen(
+            if erlaubt {
+                Urteil::Erlaubt { version }
+            } else {
+                Urteil::NichtLesbar { version }
+            },
+            gesperrt.iter().map(|s| s.to_string()).collect(),
+        );
+    }
+
+    #[test]
+    fn rueckweg_wird_genau_einmal_genommen_und_sperrt_den_installer() {
+        let k = KernTausch::default();
+        assert!(
+            k.nimm_fuer_rueckweg().is_err(),
+            "ohne Vorversion kein Rückweg"
+        );
+        mit_rueckweg(&k, "1.2.3", true, &[]);
+        let info = k.info();
+        assert_eq!(info.zurueck_version.as_deref(), Some("1.2.3"));
+        assert!(info.zurueck_erlaubt);
+
+        assert_eq!(k.nimm_fuer_rueckweg().as_deref(), Ok("1.2.3"));
+        assert!(k.wechselt(), "der Installer-Weg ist gesperrt");
+        assert_eq!(k.info().version.as_deref(), Some("1.2.3"));
+        assert!(k.nimm_fuer_rueckweg().is_err(), "kein zweiter Klick");
+        assert!(k.nimm_fuer_wechsel().is_none());
+    }
+
+    #[test]
+    fn rueckweg_knopf_aus_laesst_sich_nicht_druecken() {
+        let k = KernTausch::default();
+        mit_rueckweg(&k, "1.2.3", false, &[]);
+        let info = k.info();
+        assert_eq!(info.zurueck_version.as_deref(), Some("1.2.3"));
+        assert!(!info.zurueck_erlaubt);
+        assert!(k.nimm_fuer_rueckweg().is_err());
+        assert!(!k.wechselt());
+    }
+
+    /// Während das Vorladen die Datei `neu` schreibt, darf der Rückweg sie
+    /// nicht unter ihm wegziehen.
+    #[test]
+    fn kein_rueckweg_waehrend_des_vorladens() {
+        let k = KernTausch::default();
+        mit_rueckweg(&k, "1.2.3", true, &[]);
+        k.beginne("1.2.5");
+        assert!(k.nimm_fuer_rueckweg().is_err());
+        assert_eq!(k.info().tausch, "laedt");
+        // Danach schon.
+        k.bereit("1.2.5", true);
+        assert!(k.nimm_fuer_rueckweg().is_ok());
+    }
+
+    #[test]
+    fn abgebrochener_rueckweg_stellt_den_stand_wieder_her() {
+        // Vor jeder Änderung abgebrochen: Ein bereitliegendes Update bleibt.
+        let k = KernTausch::default();
+        mit_rueckweg(&k, "1.2.3", true, &[]);
+        k.beginne("1.2.5");
+        k.bereit("1.2.5", true);
+        k.nimm_fuer_rueckweg().unwrap();
+        k.rueckweg_nicht_begonnen();
+        let info = k.info();
+        assert_eq!(
+            (info.tausch.as_str(), info.version.as_deref()),
+            ("bereit", Some("1.2.5"))
+        );
+        assert_eq!(info.zurueck_version.as_deref(), Some("1.2.3"));
+
+        // Nach dem Bewegen von Dateien gescheitert: Das Update bleibt
+        // bereit, der Rückweg-Knopf verschwindet.
+        k.nimm_fuer_rueckweg().unwrap();
+        k.rueckweg_gescheitert();
+        let info = k.info();
+        assert_eq!(info.tausch, "bereit");
+        assert_eq!(info.zurueck_version, None);
+        assert!(!k.wechselt(), "der Installer-Weg ist wieder frei");
+        assert!(k.nimm_fuer_rueckweg().is_err());
+
+        // Ohne laufenden Rückweg tun beide nichts.
+        let k = KernTausch::default();
+        mit_rueckweg(&k, "1.2.3", true, &[]);
+        k.rueckweg_gescheitert();
+        k.rueckweg_nicht_begonnen();
+        assert_eq!(k.info().zurueck_version.as_deref(), Some("1.2.3"));
+    }
+
+    #[test]
+    fn zurueckgenommene_version_nicht_erneut_angeboten() {
+        let k = KernTausch::default();
+        k.rueckweg_setzen(crate::rueckweg::Urteil::Keiner, vec!["1.2.4".into()]);
+        assert!(k.ist_zurueckgenommen("1.2.4"));
+        assert!(!k.beginne("1.2.4"), "kein Vorladen für den Tausch");
+        assert_eq!(k.info().zurueckgenommen, vec!["1.2.4"]);
+        // Eine neuere schon.
+        assert!(!k.ist_zurueckgenommen("1.2.5"));
+        assert!(k.beginne("1.2.5"));
+    }
+
+    /// Kommt die ältere Version nach einem Rückweg an, sagt sie das — und
+    /// nicht „läuft jetzt mit …" wie nach einem Update.
+    #[test]
+    fn nach_dem_rueckweg_meldet_die_alte_version_die_ruecknahme() {
+        assert_eq!(
+            meldung_aus(
+                Some(&zustand("1.2.4", "1.2.3", Lage::Angekommen, None)),
+                "1.2.3"
+            ),
+            Some(Meldung::Zurueckgenommen {
+                version: "1.2.4".into()
+            })
+        );
+        let k = KernTausch::default();
+        k.start(
+            Some(&zustand("1.2.4", "1.2.3", Lage::Angekommen, None)),
+            "1.2.3",
+        );
+        let info = k.info();
+        assert_eq!(info.meldung, "zurueckgenommen");
+        assert_eq!(info.meldung_version.as_deref(), Some("1.2.4"));
+        assert_eq!(
+            ruecknahme_aus(
+                Some(&zustand("1.2.4", "1.2.3", Lage::Angekommen, None)),
+                "1.2.3"
+            )
+            .as_deref(),
+            Some("1.2.4")
+        );
+        // Auch wenn die Meldung schon geschlossen ist.
+        let mut gesehen = zustand("1.2.4", "1.2.3", Lage::Angekommen, None);
+        gesehen.gesehen = true;
+        assert_eq!(meldung_aus(Some(&gesehen), "1.2.3"), None);
+        assert_eq!(
+            ruecknahme_aus(Some(&gesehen), "1.2.3").as_deref(),
+            Some("1.2.4")
+        );
+        // Ein gewöhnliches Update oder ein noch offener Rückweg sperrt nichts.
+        for z in [
+            zustand("1.2.3", "1.2.4", Lage::Angekommen, None),
+            zustand("1.2.4", "1.2.3", Lage::Gestartet, None),
+            zustand("1.2.4", "1.2.3", Lage::Zurueckgefallen, None),
+        ] {
+            assert_eq!(ruecknahme_aus(Some(&z), &z.nach), None);
+            assert_eq!(ruecknahme_aus(Some(&z), &z.von), None);
+        }
+        // Läuft die Vorversion beim Rückweg NICHT an, läuft die neue wieder
+        // und sagt das wie nach jedem Rückfall.
+        assert_eq!(
+            meldung_aus(
+                Some(&zustand(
+                    "1.2.4",
+                    "1.2.3",
+                    Lage::Zurueckgefallen,
+                    Some("Frist")
+                )),
+                "1.2.4"
+            ),
+            Some(Meldung::Zurueckgefallen {
+                nach: "1.2.3".into(),
+                grund: "Frist".into()
+            })
         );
     }
 }

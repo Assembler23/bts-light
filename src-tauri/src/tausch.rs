@@ -205,6 +205,49 @@ pub fn tauschen(pfade: &Pfade) -> Result<(), TauschFehler> {
     Ok(())
 }
 
+/// Name der Zwischenablage beim Rückweg (`x.vorher.exe.tausch`).
+pub fn tausch_ablage(pfade: &Pfade) -> PathBuf {
+    let mut name = pfade.vorher.clone().into_os_string();
+    name.push(".tausch");
+    PathBuf::from(name)
+}
+
+/// Der Rückweg auf Wunsch: `vorher` und `aktiv` tauschen die Plätze — die
+/// Vorversion wird wieder aktiv, die laufende wird die neue `vorher` (aus
+/// ihr startet der Wächter). Drei Umbenennungen über eine Zwischenablage;
+/// eine vorgeladene Datei `neu` bleibt unberührt.
+///
+/// Scheitert ein Schritt, wird zurückgenommen, was schon bewegt war. Fehler
+/// wie bei [`tauschen`]: `Beiseitelegen` und `Einsetzen { zurueck: true }`
+/// heißen „alles liegt wie vorher".
+pub fn zurueckwechseln(pfade: &Pfade) -> Result<(), TauschFehler> {
+    if !pfade.vorher.is_file() {
+        return Err(TauschFehler::Einsetzen {
+            fehler: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "die vorige Programmdatei fehlt",
+            ),
+            zurueck: true,
+        });
+    }
+    let ablage = tausch_ablage(pfade);
+    let _ = entferne_wenn_da(&ablage);
+    // 1. Die laufende Datei beiseite.
+    umbenennen(&pfade.aktiv, &ablage).map_err(TauschFehler::Beiseitelegen)?;
+    // 2. Die Vorversion an ihre Stelle.
+    if let Err(fehler) = umbenennen(&pfade.vorher, &pfade.aktiv) {
+        let zurueck = umbenennen(&ablage, &pfade.aktiv).is_ok();
+        return Err(TauschFehler::Einsetzen { fehler, zurueck });
+    }
+    // 3. Die eben noch laufende wird die neue Vorversion.
+    if let Err(fehler) = umbenennen(&ablage, &pfade.vorher) {
+        let zurueck = umbenennen(&pfade.aktiv, &pfade.vorher).is_ok()
+            && umbenennen(&ablage, &pfade.aktiv).is_ok();
+        return Err(TauschFehler::Einsetzen { fehler, zurueck });
+    }
+    Ok(())
+}
+
 /// Der Rückfall: `aktiv` (lief nicht an) → `defekt`, `vorher` → `aktiv`.
 ///
 /// Ohne Vorher-Datei wird **nichts** angefasst: Die nicht anlaufende Datei
@@ -1401,6 +1444,76 @@ mod tests {
         assert!(marker.running);
         assert_eq!(marker.written_ms, 9_000);
         assert_eq!(marker.from_version, "1.2.3");
+    }
+
+    #[test]
+    fn rueckweg_tauscht_vorher_und_aktiv() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pfade_in(dir.path());
+        std::fs::write(&p.aktiv, "neu").unwrap();
+        std::fs::write(&p.vorher, "alt").unwrap();
+        // Eine vorgeladene Datei für ein noch neueres Update bleibt liegen.
+        std::fs::write(&p.neu, "uebermorgen").unwrap();
+        // Ein Rest in der Zwischenablage stört nicht.
+        std::fs::write(tausch_ablage(&p), "rest").unwrap();
+
+        zurueckwechseln(&p).unwrap();
+        assert_eq!(inhalt(&p.aktiv), "alt");
+        assert_eq!(inhalt(&p.vorher), "neu", "aus ihr startet der Wächter");
+        assert_eq!(inhalt(&p.neu), "uebermorgen");
+        assert!(!tausch_ablage(&p).exists());
+
+        // Läuft die Vorversion nicht an, bringt der gewöhnliche Rückfall die
+        // zurückgenommene Version wieder nach vorn.
+        zurueckfallen(&p).unwrap();
+        assert_eq!(inhalt(&p.aktiv), "neu");
+        assert_eq!(inhalt(&p.defekt), "alt");
+    }
+
+    #[test]
+    fn rueckweg_ohne_vorversion_aendert_nichts() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pfade_in(dir.path());
+        std::fs::write(&p.aktiv, "neu").unwrap();
+        std::fs::write(&p.neu, "uebermorgen").unwrap();
+        match zurueckwechseln(&p) {
+            Err(TauschFehler::Einsetzen { zurueck: true, .. }) => {}
+            anderes => panic!("erwartet: nichts verändert, war {anderes:?}"),
+        }
+        assert_eq!(inhalt(&p.aktiv), "neu");
+        assert_eq!(inhalt(&p.neu), "uebermorgen");
+    }
+
+    /// Lässt sich die laufende Datei nicht beiseitelegen, ist nichts
+    /// verändert — die Vorversion liegt noch an ihrem Platz.
+    #[test]
+    fn rueckweg_scheitert_am_ersten_schritt_ohne_spuren() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pfade_in(dir.path());
+        // Keine aktive Datei: Das Beiseitelegen scheitert sofort.
+        std::fs::write(&p.vorher, "alt").unwrap();
+        match zurueckwechseln(&p) {
+            Err(TauschFehler::Beiseitelegen(_)) => {}
+            anderes => panic!("erwartet: nichts verändert, war {anderes:?}"),
+        }
+        assert_eq!(inhalt(&p.vorher), "alt");
+        assert!(!tausch_ablage(&p).exists());
+    }
+
+    /// Scheitert der zweite Schritt, liegt die laufende Datei danach wieder
+    /// an ihrem Platz. Erzwungen über einen Ordner unter dem Namen der
+    /// Vorversion: `is_file` muss ihn abweisen, bevor etwas bewegt wird.
+    #[test]
+    fn rueckweg_weist_einen_ordner_als_vorversion_ab() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pfade_in(dir.path());
+        std::fs::write(&p.aktiv, "neu").unwrap();
+        std::fs::create_dir(&p.vorher).unwrap();
+        assert!(matches!(
+            zurueckwechseln(&p),
+            Err(TauschFehler::Einsetzen { zurueck: true, .. })
+        ));
+        assert_eq!(inhalt(&p.aktiv), "neu");
     }
 
     /// Lief die Übertragung vor dem Wechsel NICHT, startet die alte Version

@@ -1010,10 +1010,17 @@ export interface KernInfo {
   /** Bei `nicht_moeglich`: warum (nur zur Diagnose). */
   grund: string | null;
   /** Einmalige Meldung nach einem Wechsel. */
-  meldung: "keine" | "gewechselt" | "zurueckgefallen";
-  /** `gewechselt`: von welcher Version. `zurueckgefallen`: welche nicht anlief. */
+  meldung: "keine" | "gewechselt" | "zurueckgefallen" | "zurueckgenommen";
+  /** `gewechselt`: von welcher Version. `zurueckgefallen`: welche nicht
+   *  anlief. `zurueckgenommen`: welche zurückgenommen wurde. */
   meldung_version: string | null;
   meldung_grund: string | null;
+  /** Vorversion neben dem Programm, zu der ein Rückweg führen könnte. */
+  zurueck_version: string | null;
+  /** `false` = sie kann die heutigen Daten nicht lesen: Knopf aus. */
+  zurueck_erlaubt: boolean;
+  /** Zurückgenommene Versionen — werden nicht erneut angeboten. */
+  zurueckgenommen: string[];
 }
 
 /** Stand der Geräte-Seiten (Rust: seiten_angebot::SeitenInfo). Ein

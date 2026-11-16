@@ -17,6 +17,7 @@ export const KNOPF = {
   beim_beenden: "Beim Beenden einbauen",
   doch_nicht: "Doch nicht beim Beenden",
   verstanden: "Verstanden",
+  kern_zurueck: "Zurück zur vorigen Version",
 };
 
 const ZUSATZ_CLOUD =
@@ -114,6 +115,41 @@ export function wechselHinweis(info) {
   return `${felderText(info.occupied_courts)} – der Wechsel unterbricht wenige Sekunden, die Übertragung läuft von selbst weiter.`;
 }
 
+/** Warum der Rückweg zur Vorversion gesperrt ist (ADR 0101). */
+function rueckwegGesperrtText(info, vorher) {
+  return `Zurück zu v${vorher} ist nicht möglich: v${info.app_version} speichert Daten in einer Form, die v${vorher} nicht lesen kann.`;
+}
+
+/**
+ * Der Kern-Rückweg auf der Wartungsseite — dauerhaft, nicht nur direkt nach
+ * dem Wechsel. `null`, wenn es weder eine Vorversion noch eine
+ * zurückgenommene Version gibt.
+ */
+export function wartungKern(info) {
+  const kern = info?.kern;
+  if (!kern) return null;
+  const vorher = kern.zurueck_version ?? null;
+  const hinweise = [];
+  if (vorher && kern.zurueck_erlaubt) {
+    hinweise.push(`Vorher lief v${vorher}. ${wechselHinweis(info)}`);
+    hinweise.push(
+      `Einstellungen, die es erst seit v${info.app_version} gibt, gehen dabei verloren, und v${info.app_version} wird danach nicht erneut angeboten.`,
+    );
+  } else if (vorher) {
+    hinweise.push(rueckwegGesperrtText(info, vorher));
+  }
+  for (const v of kern.zurueckgenommen ?? []) {
+    hinweise.push(`v${v} wurde zurückgenommen und wird nicht erneut angeboten.`);
+  }
+  if (hinweise.length === 0) return null;
+  return {
+    version: vorher,
+    erlaubt: Boolean(vorher && kern.zurueck_erlaubt),
+    knopf: vorher ? `Zurück zu v${vorher}` : null,
+    hinweise,
+  };
+}
+
 /**
  * Die Kern-Zeile des Banners — oder `null`.
  *
@@ -128,6 +164,16 @@ export function kernZeile(info) {
   const kern = info.kern ?? {};
   const version = info.version ? ` (v${info.version})` : "";
 
+  // Ein laufender Wechsel (auch der Rückweg) geht allem vor — sonst stünde
+  // nach dem Klick auf „Zurück" weiter die alte Meldung da.
+  if (kern.tausch === "wechselt") {
+    return {
+      art: "wechselt",
+      text: `Wechsel auf v${kern.version} läuft – bts-light ist gleich wieder da.`,
+      zusatz: [],
+      knoepfe: [],
+    };
+  }
   if (kern.meldung === "zurueckgefallen") {
     const laeuft = info.sync_running ? ", die Übertragung läuft" : "";
     return {
@@ -137,24 +183,34 @@ export function kernZeile(info) {
       knoepfe: ["verstanden"],
     };
   }
-  if (kern.meldung === "gewechselt") {
+  if (kern.meldung === "zurueckgenommen") {
     return {
+      art: "zurueckgenommen",
+      text: `v${kern.meldung_version} wurde zurückgenommen und wird nicht erneut angeboten.`,
+      zusatz: [`bts-light läuft wieder mit v${info.app_version}.`],
+      knoepfe: ["schliessen"],
+    };
+  }
+  if (kern.meldung === "gewechselt") {
+    const zeile = {
       art: "gewechselt",
       text: `bts-light läuft jetzt mit v${info.app_version}.`,
       zusatz: [],
       knoepfe: ["schliessen"],
     };
+    const vorher = kern.zurueck_version;
+    if (vorher) {
+      zeile.knoepfe = ["kern_zurueck", "schliessen"];
+      zeile.namen = { kern_zurueck: `Zurück zu v${vorher}` };
+      if (!kern.zurueck_erlaubt) {
+        zeile.zusatz = [rueckwegGesperrtText(info, vorher)];
+        zeile.aus = ["kern_zurueck"];
+      }
+    }
+    return zeile;
   }
   if (info.phase === "downloading") {
     return { art: "laedt", text: `Update${version} wird im Hintergrund geladen …`, zusatz: [], knoepfe: [] };
-  }
-  if (kern.tausch === "wechselt") {
-    return {
-      art: "wechselt",
-      text: `Wechsel auf v${kern.version} läuft – bts-light ist gleich wieder da.`,
-      zusatz: [],
-      knoepfe: [],
-    };
   }
   if (info.phase === "installing") {
     return {
