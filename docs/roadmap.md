@@ -649,6 +649,16 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Ansage ohne Internet** — Spec:
+  [features/ansage-offline-stimme.md](features/ansage-offline-stimme.md)
+  (**freigegeben 16.11.2026**, ADR 0104–0106). Fällt in der Halle
+  das Internet aus, hängt die Ansage heute erst und wechselt dann hörbar auf die
+  Windows-Stimme. Drei Bausteine: Ausfall schnell erkennen und merken (harte Frist
+  im Kern), eine neuronale deutsche Offline-Stimme im Programm (einmaliger Download,
+  auch als Sprachdienst „Lokal (ohne Internet)" wählbar) und Ansagen vorab laden
+  (laufend für die nächsten Spiele, auf Knopfdruck fürs ganze Turnier). Sechs
+  Abschnitte E0–E5; **E0 ist eine Messung** und entscheidet, ob die Offline-Stimme
+  ohne GPL-Code trägt.
 - **Pi-Fernupdate** — Spec:
   [features/pi-fernupdate.md](features/pi-fernupdate.md)
   (freigegeben 16.11.2026, ADR 0102/0103). Die Monitor-Pis holen neue Skripte auf
@@ -1705,7 +1715,10 @@ verliehen):
 - **Azure-Audio mit Spielernamen dauerhaft auf der Platte** (Befund
   29.10.2026): `azure_tts.rs` cacht jede Ansage als MP3 in
   `app_data_dir/tts-cache/` ohne Verfall. Verfall/Räumen beim Turnierwechsel
-  prüfen.
+  prüfen. → aufgegriffen in der Spec
+  [ansage-offline-stimme](features/ansage-offline-stimme.md) (Abschnitt E4: Verfall
+  nach 60 Tagen unbenutzt, Knopf „Ansage-Speicher leeren"; bewusst **nicht** ans
+  Turnier gebunden). Offen, bis E4 gebaut ist.
 
 - **Kein Framing-Schutz für die Zähl-Seite** `/court/{id}` **im LAN**
   (Port 8088/8443 setzen weder `X-Frame-Options` noch `frame-ancestors`):
