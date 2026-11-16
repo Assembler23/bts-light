@@ -466,3 +466,10 @@ neues Panel nach dem Update in keiner bestehenden Ansicht ungefragt auf.
 Der Host kennt weiterhin keine Panel-Schlüssel; eine Migration gibt es
 nicht. Kanonische Regel und Test: `src/io/zeitplan.mjs`
 (`panelStandardSichtbar`), `scripts/test-zeitplan.mjs`.
+
+**Nachtrag 16.11.2026 (v0.9.429):** Auch „Aufgaben" (`walkovers`) steht jetzt
+in `PANEL_STANDARD_AUS` und ist damit aus dem eingebauten Standardprofil
+genommen. Zusätzlich gilt es über `panelAvailable` nur als vorhanden, solange
+ein Walkover-Vorschlag offen ist — in gespeicherten Profilen, die es noch
+sichtbar führen, belegt es leer keinen Platz mehr. „Spielzeiten" steht in
+`PANEL_KEYS` am Ende und damit im Standardprofil unten in der zweiten Spalte.

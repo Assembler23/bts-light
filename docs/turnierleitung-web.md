@@ -614,6 +614,13 @@ eingerichtetem Check-In) und „Zeitplan". Neue Panels erscheinen in
 Bestandsprofilen automatisch in der letzten Spalte. Die Ausnahme ist
 **„Zeitplan"**: Es bleibt ausgeblendet, bis du es im Profil-Editor
 einschaltest (siehe [Zeitplan](#zeitplan-liegt-das-turnier-im-plan)).
+**„Aufgaben"** ist in der Standardansicht ebenfalls ausgeblendet (seit
+v0.9.429). Es dient der Spielaufgabe: Gibt ein Spieler oder Paar auf, schlägt
+das Panel vor, dessen Folgespiele kampflos zu werten (siehe
+[walkover.md](walkover.md)). Wer es im Profil einschaltet, sieht es nur,
+solange ein Vorschlag offen ist — sonst belegt es keinen Platz. Die
+Vorschläge stehen unabhängig davon in der App am Turnier-PC. Im Standardprofil steht **„Spielzeiten"** ganz unten in der
+zweiten Spalte.
 Jedes trägt dieselbe Kopfzeile: Titel, Anzahl, ein **Auge** zum Aus- und
 Einblenden und einen **Pfeil** zum Zu- und Aufklappen.
 

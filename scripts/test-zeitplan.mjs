@@ -108,6 +108,7 @@ ok("Uhr kaputt", lage({}, NaN).text, "Noch keine Prognose");
 
 // ── Panel standardmäßig unsichtbar ──
 ok("zeitplan fehlt ⇒ unsichtbar", panelStandardSichtbar("zeitplan"), false);
+ok("walkovers fehlt ⇒ unsichtbar", panelStandardSichtbar("walkovers"), false);
 ok("andere fehlen ⇒ sichtbar", ["courts", "queue", "checkin", "neu"].map(panelStandardSichtbar),
   [true, true, true, true]);
 
@@ -203,6 +204,19 @@ if (keys && sichtbarQuelle && normQuelle && konstante) {
   ok("eingeschaltet bleibt sichtbar", sicht([{ key: "zeitplan", visible: true, column: 1 }]).zeitplan, true);
   ok("ausgeschaltet bleibt aus", sicht([{ key: "zeitplan", visible: false, column: 1 }]).zeitplan, false);
   ok("leeres Profil", sicht(undefined).zeitplan, false);
+}
+
+// ── Standardansicht: „Aufgaben" nur bei offenem Vorschlag, „Spielzeiten" unten ──
+// eslint-disable-next-line no-new-func
+ok("Spielzeiten steht am Ende der Panel-Folge", keys && new Function(`return ${keys[1]};`)().at(-1), "times");
+const verfuegbarQuelle = funktion(tl, "panelAvailable");
+ok("tl.html trägt panelAvailable", !!verfuegbarQuelle, true);
+if (verfuegbarQuelle) {
+  // eslint-disable-next-line no-new-func
+  const verfuegbar = (state) => new Function("state", `${verfuegbarQuelle}\nreturn panelAvailable("walkovers");`)(state);
+  ok("Aufgaben: ohne Vorschlag kein Panel",
+    [verfuegbar(null), verfuegbar({}), verfuegbar({ walkovers: [] })], [false, false, false]);
+  ok("Aufgaben: mit Vorschlag sichtbar", verfuegbar({ walkovers: [{ id: "p-1" }] }), true);
 }
 
 if (failures) {

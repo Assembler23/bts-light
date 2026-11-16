@@ -2039,10 +2039,12 @@ function zeitplanLage(schedule, nowMs) {
 /**
  * Panels, die unsichtbar bleiben, bis man sie im Profil einschaltet (ADR
  * 0094). Jedes andere Panel, das in einem Profil fehlt, wird sichtbar
- * ergänzt — sonst bliebe ein neues Panel für alle unauffindbar. Dieses hier
- * soll nach dem Update in keiner bestehenden Ansicht ungefragt auftauchen.
+ * ergänzt — sonst bliebe ein neues Panel für alle unauffindbar. „Zeitplan"
+ * soll nach dem Update in keiner bestehenden Ansicht ungefragt auftauchen;
+ * „Aufgaben" (Walkover-Vorschläge) ist seit v0.9.429 aus der Standardansicht
+ * genommen — die Vorschläge stehen weiterhin in der App am Turnier-PC.
  */
-const PANEL_STANDARD_AUS = ["zeitplan"];
+const PANEL_STANDARD_AUS = ["zeitplan", "walkovers"];
 
 /** Sichtbarkeit eines Panels, das im Profil (noch) nicht vorkommt. */
 function panelStandardSichtbar(key) {
@@ -2149,9 +2151,12 @@ const EIERUHR = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="tr
 // Alte Profile brauchen KEINE Migration: `normalizedPanels()` filtert gegen
 // diese Whitelist (die vier alten Schlüssel fliegen raus) und ergänzt Fehlendes
 // sichtbar am Ende (`queue` kommt so dazu).
+// Die Reihenfolge ist zugleich die des eingebauten Standardprofils:
+// „Spielzeiten" steht bewusst ganz unten in der zweiten Spalte — eine
+// Auswertung zum Nachschlagen, nichts für den laufenden Betrieb.
 const PANEL_KEYS = [
   "courts", "walkovers", "scorekeepers", "officials", "queue", "finished",
-  "times", "checkin", "zeitplan",
+  "checkin", "zeitplan", "times",
 ];
 const PANEL_TITLES = {
   courts: "Felder",
@@ -2214,7 +2219,7 @@ function builtInProfile() {
     // `columns`; das eingebaute Standardprofil soll seine Aufteilung selbst
     // sagen, nicht aus einem Altfeld herleiten müssen.
     panels: PANEL_KEYS.map((key) => ({
-      // „Zeitplan" bleibt aus, bis man es einschaltet (ADR 0094).
+      // „Zeitplan" und „Aufgaben" bleiben aus, bis man sie einschaltet.
       key, visible: panelStandardSichtbar(key), heightFr: 1, collapsed: false,
       column: key === "courts" ? 1 : 2,
     })),
@@ -6824,6 +6829,11 @@ function startReorderDrag(list, li, down, onReorder, geschwister = null) {
  *  wenn die Installation sie eingeschaltet hat — bisher die `hidden`-Regel
  *  auf `#sk-box`/`#off-box`, jetzt hier zentral geprüft. */
 function panelAvailable(key) {
+  // „Aufgaben" (Walkover-Vorschläge nach einer Spielaufgabe): nur solange
+  // ein Vorschlag offen ist. Leer belegte das Panel dauerhaft Platz für
+  // etwas, das an den meisten Turniertagen nie vorkommt; es GANZ
+  // auszublenden hieße dagegen, dass ein Vorschlag ungesehen liegen bleibt.
+  if (key === "walkovers") return !!(state && (state.walkovers || []).length);
   if (key === "scorekeepers") return !!(state && state.scorekeeper_managed);
   if (key === "officials") return !!(state && state.officials_managed);
   // Spielzeiten-Auswertung (Spec spielzeiten-prognose): nur wenn der Host
