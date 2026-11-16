@@ -4100,7 +4100,13 @@ function courtCard(c, cellStyle) {
       + 'Vermutlich wurde das Ergebnis nicht übermittelt.">Ergebnis fehlt</span>');
   }
   if (c.pause) badges.push(pauseBadge(c.pause));
-  if (c.match_id && !c.tablet_connected) badges.push('<span class="badge badge-warn">kein Tablet</span>');
+  if (c.match_id && !c.tablet_connected) {
+    // Nur noch ein Sinnbild: Die Angabe wird selten gebraucht, das Wort
+    // kostete aber an jeder Kachel ohne Tablet eine Abzeichen-Breite.
+    // Der Wortlaut steht im Tooltip und für Vorleser im aria-label.
+    badges.push('<span class="badge badge-warn" role="img" '
+      + 'title="Kein Tablet verbunden" aria-label="Kein Tablet verbunden">📵</span>');
+  }
 
   // Satz-/Matchball: nur für die Turnierleitung, nie auf den Hallen-TVs
   // (Scope-Entscheidung 20.07.2026, Plan 16). Die Streifenfarben bleiben

@@ -105,7 +105,8 @@ pub struct AnnounceConfig {
     pub voice_en: String,
     /// Sprech-Geschwindigkeit (sinnvoll 0,5–1,5).
     pub rate: f64,
-    /// Gong vor der Ansage abspielen?
+    /// Gong vor der Ansage abspielen? Standard aus: Bisher wollte ihn kein
+    /// Verein, also muss ihn niemand erst abschalten.
     pub gong: bool,
     /// Phonetische Aussprache-Korrekturen: Name oder Namensteil → gesprochene
     /// Schreibweise. Behebt z. B. asiatische Namen, die die deutsche/englische
@@ -190,7 +191,7 @@ impl Default for AnnounceConfig {
             voice_de: String::new(),
             voice_en: String::new(),
             rate: 0.8,
-            gong: true,
+            gong: false,
             name_overrides: Vec::new(),
             name_overrides_enabled: true,
             announce_hall: String::new(),
@@ -3116,7 +3117,7 @@ mod tests {
         assert_eq!(loaded.announce, AnnounceConfig::default());
         assert!(!loaded.announce.enabled);
         assert_eq!(loaded.announce.rate, 0.8);
-        assert!(loaded.announce.gong);
+        assert!(!loaded.announce.gong);
         // Ebenso der court_monitor-Block – ältere config.json kennt ihn nicht.
         assert_eq!(loaded.court_monitor, CourtMonitorConfig::default());
         assert!(!loaded.court_monitor.enabled);
