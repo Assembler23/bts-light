@@ -119,6 +119,13 @@ App-Start ─► update_check ─► Manifest ─► neuer? ─► download (Hin
    .setup(): wiederanlauf_im_kern → start_sync_kern      keine App, neue Version
 ```
 
+> **Nachtrag v0.9.433:** Das Banner hat eine zweite Zeile bekommen — das
+> Seiten-Paket, das Geräte-Seiten ohne Neustart tauscht (Spec
+> [hotfix-ohne-neustart](hotfix-ohne-neustart.md)). Sie steht über der hier
+> beschriebenen Kern-Zeile; `update_info` trägt dafür `seiten` und
+> `app_version`. Geprüft wird seither nicht nur beim Start, sondern etwa alle
+> zwanzig Minuten.
+
 ## Tests
 
 - `update.rs`: Marker-Frische (inkl. rückwärts gehender Uhr), Lesen-und-

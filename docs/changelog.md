@@ -16,6 +16,43 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - **Roter Balken, wenn der Anschluss für die Hallengeräte belegt ist.** Konnte
   bts-light Port 8088 nicht öffnen — etwa weil es doppelt läuft —, stand das
   bisher nur in der Logdatei. Jetzt sagt es der Balken oben in der App.
+## v0.9.433
+
+- **Verbesserungen für Tablets und Anzeigen ohne Neustart.** Lässt sich ein
+  Fehler an einer Geräte-Seite (Zähl-Tablet, Monitor,
+  Turnierleitungs-Oberfläche) ohne neue Programmversion beheben, lädt
+  bts-light das Paket im Hintergrund und zeigt oben ein blaues Band. **Jetzt
+  übernehmen** tauscht die Seiten sofort — keine Verbindung reißt ab, die
+  Übertragung läuft weiter. Tablets ohne laufendes Spiel laden von selbst
+  neu, Tablets im Spiel zeigen nur einen Hinweis.
+- **Ein Klick zurück.** „Zurück zum vorigen Stand" nimmt die Änderung wieder
+  weg, im Band direkt nach dem Übernehmen und dauerhaft unter **Wartung**.
+  Ein zurückgenommener Stand wird nicht noch einmal angeboten.
+- **Gilt für die Geräte dieses PCs.** Geräte über die Cloud bekommen ihre
+  Seiten weiter vom Server; im reinen Cloud-Betrieb erscheint das Band nicht.
+- bts-light sucht jetzt nicht nur beim Start, sondern etwa alle zwanzig
+  Minuten nach Updates und Paketen.
+- Unter **Wartung** steht der Seiten-Stand („App v… · Seiten-Stand N").
+
+## v0.9.432
+
+- **Intern: Seiten-Paket prüfen und ablegen.** bts-light kann ein signiertes
+  Paket mit allen Geräte-Seiten prüfen (Signatur des Updater-Schlüssels über
+  die rohen Bytes, Größendeckel, exakt dieselbe Seitenmenge, keine leere
+  Seite, Platzhalter, genau diese App-Version, steigende Folge) und im App-Datenverzeichnis
+  ablegen. Ein abgelegtes Paket wird bei jedem Start neu geprüft; jeder
+  Fehler führt zu den eingebauten Seiten. Noch lädt und bietet die App kein
+  Paket an — das folgt. Zweiter Baustein für „Hotfix ohne Neustart".
+
+## v0.9.431
+
+- **Intern: Geräte-Seiten austauschbar gemacht.** Tablet-, Monitor-, TL-Seite
+  und die übrigen Seiten des Turnier-PCs kommen nicht mehr aus festen
+  Konstanten, sondern aus einem gemeinsamen Seitenstand, der auch die Marke
+  des Versionsabgleichs trägt. Am Verhalten ändert sich nichts. Es ist der
+  erste Baustein für „Hotfix ohne Neustart" (Spec
+  `features/hotfix-ohne-neustart.md`): Später lässt sich ein Fix an einer
+  Seite im laufenden Turnier einspielen, ohne bts-light neu zu starten.
 
 ## v0.9.430
 

@@ -12,6 +12,9 @@ pub mod hall_colors;
 pub mod log_upload;
 pub mod openai_tts;
 pub mod print;
+pub mod seiten_angebot;
+pub mod seiten_paket;
+pub mod signatur;
 pub mod sync;
 pub mod tablet;
 pub mod tl_lokal;
@@ -140,6 +143,10 @@ pub fn run() {
             commands::update_info,
             commands::update_install_now,
             commands::update_set_install_on_exit,
+            commands::seiten_suchen,
+            commands::seiten_uebernehmen,
+            commands::seiten_zurueck,
+            commands::update_meldung_weg,
             commands::take_wiederanlauf,
             commands::get_status,
             commands::wifi_status,
@@ -252,6 +259,12 @@ pub fn run() {
             // Vor dem ersten Command: der alte globale Kombi-Schalter zieht
             // einmalig in die Geräte-Datei um (ADR 0049).
             commands::migrate_combo_dir_einmalig(app.handle());
+            // Ein abgelegtes Seiten-Paket gilt ab dem ersten Abruf — also
+            // bevor die Übertragung den Tablet-Server startet (ADR 0099).
+            match app.path().app_data_dir() {
+                Ok(dir) => seiten_paket::beim_start_anwenden(&dir.join(seiten_paket::ORDNER)),
+                Err(e) => tracing::warn!("Seiten-Pakete aus: kein App-Datenverzeichnis ({e})"),
+            }
             setup_tray(app.handle())?;
             // Zuletzt: Lief die Übertragung vor einem Update, läuft sie
             // jetzt wieder an — ohne auf das Fenster zu warten.

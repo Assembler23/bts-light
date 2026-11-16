@@ -491,6 +491,7 @@ dependencies = [
  "include_dir",
  "local-ip-address",
  "mdns-sd",
+ "minisign-verify",
  "qrcode",
  "quick-xml 0.42.0",
  "rcgen",

@@ -991,6 +991,30 @@ export interface UpdateInfo {
   sync_running: boolean;
   /** Einbau beim Beenden vorgemerkt? */
   install_on_exit: boolean;
+  /** Version dieser App. */
+  app_version: string;
+  /** Stand der Geräte-Seiten (Spec `hotfix-ohne-neustart`). */
+  seiten: SeitenInfo;
+}
+
+/** Stand der Geräte-Seiten (Rust: seiten_angebot::SeitenInfo). Ein
+ *  Seiten-Paket ersetzt Tablet-, Monitor- und TL-Seite ohne Neustart. */
+export interface SeitenInfo {
+  /** Aktiver Seiten-Stand; 0 = eingebaut. */
+  aktive_folge: number;
+  /** Folge eines bereitliegenden Pakets. */
+  bereit_folge: number | null;
+  /** Einmalige Meldung nach Übernahme oder Rückweg. */
+  meldung: "keine" | "uebernommen" | "zurueckgenommen";
+  meldung_folge: number | null;
+  /** Wen ein Tausch an diesem PC erreicht. */
+  reichweite: "keine" | "lan" | "lan+cloud";
+  /** Dieser PC ist Teil eines Verbunds mehrerer PCs. */
+  verbund: boolean;
+  /** Grund der letzten Ablehnung (nur Wartungsseite). */
+  abgelehnt: string | null;
+  /** Gibt es einen Stand, zu dem „Zurück" führt? */
+  rueckweg: boolean;
 }
 
 export interface SyncStatus {

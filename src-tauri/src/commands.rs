@@ -116,6 +116,9 @@ pub struct AppState {
     pub wiederanlauf: Mutex<Option<WiederanlaufMeldung>>,
     /// Anhaltezeit der Vorversion, bis der LAN-Server die Lücke misst.
     pub wiederanlauf_stop_ms: Mutex<Option<u64>>,
+    /// Bereitliegendes Seiten-Paket und die Meldung nach Übernahme oder
+    /// Rückweg (Spec `hotfix-ohne-neustart`, ADR 0099).
+    pub seiten: crate::seiten_angebot::SeitenAngebot,
     /// Stand des letzten TP-Datei-Uploads (Spec `tp-datei-upload`). Nur im
     /// Speicher: nicht in der Config, nicht in der `SyncEngine` (die wird bei
     /// jedem Speichern neu gebaut). Geht beim Neustart verloren — der Server
@@ -3471,6 +3474,9 @@ pub fn update_check(app: AppHandle, state: State<'_, AppState>) {
     use crate::update::Phase;
     // Prüfen + Umschalten atomar (Review 06.09.2026): Auto-Check beim Start
     // und Klick auf der Wartungsseite laufen sonst beide los und laden zweimal.
+    // Unabhängig vom Kern-Update: ein Seiten-Paket für genau diese Version.
+    // Eigener Lauf, damit ein hängender Updater es nicht aufhält.
+    seiten_pruefen(&app, &state);
     let Some(bereit) = state.update.begin_check() else {
         return;
     };
@@ -3549,7 +3555,115 @@ pub fn update_check(app: AppHandle, state: State<'_, AppState>) {
 #[tauri::command]
 pub fn update_info(state: State<'_, AppState>) -> crate::update::UpdateInfo {
     let running = state.status.lock().map(|s| s.running).unwrap_or(false);
-    state.update.info(belegte_felder(&state), running)
+    let (reichweite, verbund) = seiten_reichweite(&state);
+    state.update.info(
+        belegte_felder(&state),
+        running,
+        state.seiten.info(reichweite, verbund),
+    )
+}
+
+/// Reichweite eines Seiten-Tauschs und ob dieser PC Teil eines Verbunds ist
+/// — aus der Konfiguration gelesen, ohne sie zu kopieren (`update_info`
+/// läuft im Sekundentakt).
+fn seiten_reichweite(state: &AppState) -> (crate::seiten_angebot::Reichweite, bool) {
+    let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    (
+        crate::seiten_angebot::reichweite(
+            cfg.connection_mode,
+            crate::seiten_angebot::ist_slave_traeger(&cfg),
+        ),
+        cfg.slave_mode,
+    )
+}
+
+/// Sucht nur nach einem Seiten-Paket — der regelmäßige Hintergrund-Takt.
+/// Bewusst ohne die Update-Prüfung des Kerns: Die würde ein bereitliegendes
+/// Update für die Dauer der Prüfung aus dem Banner nehmen.
+#[tauri::command]
+pub fn seiten_suchen(app: AppHandle, state: State<'_, AppState>) {
+    seiten_pruefen(&app, &state);
+}
+
+/// Die Ablage der Seiten-Pakete im App-Datenverzeichnis.
+fn seiten_ablage(app: &AppHandle) -> Result<crate::seiten_paket::Ablage, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("App-Datenverzeichnis fehlt ({e})"))?;
+    Ok(crate::seiten_paket::Ablage::neu(
+        dir.join(crate::seiten_paket::ORDNER),
+    ))
+}
+
+/// Stößt die Suche nach einem Seiten-Paket an (Hintergrund, still bei
+/// Netzfehlern). Lädt höchstens vor — übernommen wird nur per Klick.
+fn seiten_pruefen(app: &AppHandle, state: &AppState) {
+    let (reichweite, _) = seiten_reichweite(state);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(schluessel) = crate::signatur::updater_schluessel() else {
+            return;
+        };
+        let gesperrt = seiten_ablage(&app)
+            .map(|a| a.gesperrt(env!("CARGO_PKG_VERSION")))
+            .unwrap_or_default();
+        let st = app.state::<AppState>();
+        crate::seiten_angebot::pruefen_und_laden(&st.seiten, reichweite, gesperrt, schluessel)
+            .await;
+    });
+}
+
+/// „Jetzt übernehmen": macht das bereitliegende Seiten-Paket zum aktiven
+/// Stand. Keine Verbindung reißt ab; Tablets laden über den vorhandenen
+/// Versionsabgleich neu, sobald kein Spiel läuft.
+///
+/// Die Datei-Arbeit (Prüfen, Schreiben, fsync) läuft auf einem
+/// Arbeits-Thread — sonst stünde für diese Zeit das Fenster.
+#[tauri::command]
+pub async fn seiten_uebernehmen(app: AppHandle) -> Result<(), String> {
+    seiten_aktion(app, |angebot, ablage, schluessel| {
+        angebot.uebernehmen(ablage, env!("CARGO_PKG_VERSION"), schluessel)
+    })
+    .await
+}
+
+/// „Zurück zum vorigen Stand": nimmt das aktive Seiten-Paket zurück und
+/// sperrt seine Folge.
+#[tauri::command]
+pub async fn seiten_zurueck(app: AppHandle) -> Result<(), String> {
+    seiten_aktion(app, |angebot, ablage, schluessel| {
+        angebot.zurueck(ablage, env!("CARGO_PKG_VERSION"), schluessel)
+    })
+    .await
+}
+
+/// Gemeinsamer Rahmen der beiden Seiten-Aktionen.
+async fn seiten_aktion(
+    app: AppHandle,
+    aktion: impl FnOnce(
+            &crate::seiten_angebot::SeitenAngebot,
+            &crate::seiten_paket::Ablage,
+            &crate::signatur::Schluessel,
+        ) -> Result<u32, String>
+        + Send
+        + 'static,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let schluessel = crate::signatur::updater_schluessel().map_err(|e| e.to_string())?;
+        let ablage = seiten_ablage(&app)?;
+        let state = app.state::<AppState>();
+        aktion(&state.seiten, &ablage, schluessel).map(|_| ())
+    })
+    .await
+    .map_err(|e| format!("Die Seiten wurden nicht geändert ({e})."))?
+}
+
+/// Schließt die einmalige Meldung im Update-Banner („Seiten aktualisiert",
+/// „zurückgenommen").
+#[tauri::command]
+pub fn update_meldung_weg(state: State<'_, AppState>) {
+    state.seiten.meldung_weg();
 }
 
 /// Baut das geladene Update jetzt ein: Live-Stand sichern, Wiederanlauf-
