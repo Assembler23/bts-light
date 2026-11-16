@@ -13,6 +13,7 @@ import type {
   WifiStatus,
 } from "../types";
 import { type NavView, type SettingsFocus, SideNav } from "./SideNav";
+import { TlWebKnopf } from "./TlWebKnopf";
 
 function dotColor(status: SyncStatus | null): string {
   if (!status || !status.running) return "bg-slate-400";
@@ -126,6 +127,7 @@ export function AppShell({
   busy,
   onToggleRun,
   onNavigate,
+  onConfigSaved,
   children,
 }: {
   current: NavView;
@@ -137,6 +139,9 @@ export function AppShell({
   busy: boolean;
   onToggleRun: () => void;
   onNavigate: (view: NavView, focus?: SettingsFocus) => void;
+  /** Der Knopf „Turnierleitung" legt beim ersten Druck einen Zugang an —
+   *  die neue Konfiguration muss in die Kopie der App zurück. */
+  onConfigSaved: (c: AppConfig) => void;
   children: ReactNode;
 }) {
   const running = status?.running ?? false;
@@ -191,25 +196,38 @@ export function AppShell({
           </div>
         )}
 
-        {/* Start/Stopp – von überall erreichbar. */}
-        <button
-          onClick={onToggleRun}
-          disabled={busy || !status}
-          title={
-            running
-              ? "Liveticker und Tablet-Server anhalten"
-              : "Liveticker starten – BTP wird verbunden"
-          }
-          className={`ml-auto inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm
-                      font-medium text-white transition-colors disabled:opacity-50 ${
-                        running
-                          ? "bg-rose-600 hover:bg-rose-700"
-                          : "bg-emerald-600 hover:bg-emerald-700"
-                      }`}
-        >
-          {running ? <Square size={15} /> : <Play size={15} />}
-          {running ? "Stoppen" : "Starten"}
-        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {/* Turnierleitungs-Oberfläche im Browser dieses PCs – ein Klick,
+              ohne Koppeln. Die ferne Halle hat keine eigene Oberfläche. */}
+          {!config.slave_mode && (
+            <TlWebKnopf
+              label="Turnierleitung"
+              kompakt
+              running={running}
+              onConfigSaved={onConfigSaved}
+            />
+          )}
+
+          {/* Start/Stopp – von überall erreichbar. */}
+          <button
+            onClick={onToggleRun}
+            disabled={busy || !status}
+            title={
+              running
+                ? "Liveticker und Tablet-Server anhalten"
+                : "Liveticker starten – BTP wird verbunden"
+            }
+            className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm
+                        font-medium text-white transition-colors disabled:opacity-50 ${
+                          running
+                            ? "bg-rose-600 hover:bg-rose-700"
+                            : "bg-emerald-600 hover:bg-emerald-700"
+                        }`}
+          >
+            {running ? <Square size={15} /> : <Play size={15} />}
+            {running ? "Stoppen" : "Starten"}
+          </button>
+        </div>
       </header>
 
       {/* Seitenleiste + Inhalt. */}

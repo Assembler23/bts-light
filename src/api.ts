@@ -511,6 +511,13 @@ export const tlDeviceRemove = (id: string): Promise<AppConfig> =>
 export const tlWebSetEnabled = (enabled: boolean): Promise<AppConfig> =>
   invoke("tl_web_set_enabled", { enabled });
 
+/** Öffnet die Turnierleitungs-Oberfläche im Browser dieses PCs — ohne
+ *  Koppeln. Legt beim ersten Mal den Zugang „Dieser PC" an; nur dann kommt
+ *  die neue Konfiguration zurück (sonst `null`). Die Adresse selbst bleibt
+ *  im Kern: Der Zugang darin gehört nicht in die Oberfläche. */
+export const tlWebOpenLocal = (): Promise<AppConfig | null> =>
+  invoke("tl_web_open_local");
+
 /** Legt die Raster-Anordnung einer Halle fest (oder ersetzt sie); liefert
  *  die neue Konfiguration. */
 export const setHallLayout = (layout: HallLayoutConfig): Promise<AppConfig> =>

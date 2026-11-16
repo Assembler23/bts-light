@@ -23,9 +23,9 @@ zeigen.
 | Menüpunkt | Wofür | Ausgegraut, wenn |
 |---|---|---|
 | **Status** | Die Startseite: Läuft die Übertragung? Wie weit ist das Turnier? Sind alle Felder mit Geräten versorgt? Von hier aus lassen sich die Anzeigen im Browser öffnen, der Aushang drucken und die [Turnierdatei an badhub senden](tp-datei-upload.md). | nie |
-| **Spielübersicht** | Das Arbeitspferd der Feldvergabe: oben die spielbereiten Spiele, darunter die Felder mit Ampel — grün frei, gelb belegt, **rot gesperrt**. Spiele zuweisen, Felder freigeben und sperren. | nie |
+| **Spielübersicht** | Das Arbeitspferd der Feldvergabe: oben die spielbereiten Spiele, darunter die Felder mit Ampel — grün frei, gelb belegt, **rot gesperrt**. Spiele zuweisen, Felder freigeben und sperren. Oben rechts öffnet **Turnierleitung öffnen** die [Turnierleitungs-Oberfläche](turnierleitung-web.md#am-turnier-pc-selbst-ein-klick-seit-v09430) im Browser dieses PCs. | nie |
 | **Tablets** | Drei Reiter: **Übersicht** (welches Tablet hängt an welchem Feld, mit Akkustand), **In Vorbereitung** (gerufene Spiele), **QR-Codes** zum Einrichten der Geräte — die Adresse daneben ist ein Link und öffnet den Spielzettel im Browser des Turnier-PCs; bei eingeschaltetem Meetingpoint steht dort auch die Adresse der [Meetingpoint-Seite](meetingpoint.md) je Halle. | nie |
-| **Turnierleitung** | Hier entstehen die Zugänge für die Turnierleitungs-Oberfläche: Gerät koppeln, QR-Code zeigen, Zugang wieder entziehen. | nie — hier schaltet man sie schließlich ein |
+| **Turnierleitung** | Hier entstehen die Zugänge für die Turnierleitungs-Oberfläche: Gerät koppeln, QR-Code zeigen, Zugang wieder entziehen. Für den Turnier-PC selbst braucht es das nicht — dafür gibt es den Knopf in der Kopfzeile. | nie — hier schaltet man sie schließlich ein |
 | **Check-In** | Wer ist da, wer fehlt — je Klasse, gesetzte Meldungen mit ihrem Setzplatz (`[1]`). Von Hand einchecken oder zurücksetzen, Fehlende ausrufen lassen, Hallen-Ansicht, Zeitplan, Check-In-Seite und QR-Aushang öffnen. | Check-In aus **oder** Turnier-Kennung fehlt |
 | **Schiedsrichter** | Einsatzplanung: Reihenfolge (bei „Getrennte Listen" je eine für SR und AR), Rolle je Person („SR und AR", „nur SR", „nur AR"), Vorschau „als Nächstes SR/AR", Pausen, Sperrlisten, feldweise Schalter. Die Stammliste kommt aus BTP. | „Mit Schiedsrichtern spielen" aus |
 | **Ansagen** | Feld von Hand ansagen, Freitext sprechen, gespeicherte Ansagen, Verlauf mit „Erneut abspielen" — und alle Detail-Einstellungen zu Stimme und Tempo. Unter dem Test-Knopf steht, worüber die Ansage läuft („Ausgabe: Windows-Standard (…)"), und **Ansage über:** wählt ein festes Gerät für diesen PC, siehe [Ausgabegerät](announcements.md#ausgabegerät-seit-v09318). | Ansagen aus |
@@ -41,6 +41,14 @@ Statusanzeigen:
 - **Hallennetz** — hängt der PC im WLAN der Halle?
 - **Internet** beziehungsweise Cloud-Verbindung
 - **Ferne Halle** — nur, wenn eine gekoppelt ist
+
+Links neben dem Start-/Stopp-Knopf steht **Turnierleitung** (seit v0.9.430):
+ein Klick öffnet die
+[Turnierleitungs-Oberfläche](turnierleitung-web.md#am-turnier-pc-selbst-ein-klick-seit-v09430)
+im Browser dieses PCs — ohne Koppeln. Ein zweiter Klick macht keinen zweiten
+Tab auf. Am PC einer fernen Halle fehlt der Knopf.
+<!-- pruef: /label="Turnierleitung"/ in src/components/AppShell.tsx -->
+<!-- pruef: "Turnierleitung öffnen" in src/pages/FieldOverviewPage.tsx -->
 
 Läuft alles, steht dort **„Verbunden – Liveticker aktuell"** (seit v0.9.382).
 <!-- pruef: "Verbunden – Liveticker aktuell" in src-tauri/src/commands.rs -->

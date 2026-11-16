@@ -6467,6 +6467,88 @@ pub fn tl_web_set_enabled(
     })
 }
 
+/// Öffnet die Turnierleitungs-Oberfläche im Browser **dieses** PCs — mit
+/// einem Klick, ohne Koppeln (Knopf in der Kopfzeile und in der
+/// Spielübersicht).
+///
+/// Beim ersten Mal legt der Command den Zugang „Dieser PC" an und schaltet
+/// die Oberfläche ein; danach öffnet er nur noch. Zurück kommt die neue
+/// Konfiguration **nur**, wenn gespeichert wurde — die Oberfläche hält eine
+/// eigene Kopie und muss sie dann übernehmen (siehe [`mutate_config`]).
+///
+/// Die fertige Adresse baut der Kern selbst, übergibt sie direkt dem
+/// Betriebssystem und schreibt sie in kein Protokoll. Ein Geheimnis vor der
+/// eigenen Oberfläche ist der Zugang damit **nicht**: Die Konfiguration samt
+/// Gerätezugängen kennt das WebView ohnehin (wie bei `tl_device_add`), und
+/// der Browser sieht die Adresse beim Start wie jeden Koppel-Link.
+#[tauri::command]
+pub async fn tl_web_open_local(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<AppConfig>, String> {
+    use crate::tl_lokal;
+
+    // Der Server (und im Cloud-Betrieb die Verbindung zum Relay) laufen nur
+    // mit der Übertragung. Ohne sie öffnete der Browser eine Fehlerseite.
+    let laeuft = state
+        .status
+        .lock()
+        .expect("Status-Mutex nicht vergiftet")
+        .running;
+    if !laeuft {
+        return Err(
+            "Die Übertragung läuft nicht. Bitte zuerst oben rechts „Starten\" drücken – \
+             die Turnierleitungs-Oberfläche gibt es nur, solange bts-light läuft."
+                .to_string(),
+        );
+    }
+
+    let (weg, bereit) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (
+            tl_lokal::weg(&cfg)?,
+            tl_lokal::bereit(&cfg).map(str::to_string),
+        )
+    };
+
+    let (zugang, gespeichert) = match bereit {
+        Some(z) => (z, None),
+        None => {
+            let frisch = tl_lokal::zufalls_zugang()?;
+            let jetzt = now_ms();
+            // `sicherstellen` noch einmal unter der Sperre: Zwischen dem
+            // Blick oben und hier kann ein zweiter Klick den Zugang schon
+            // angelegt haben — dann bleibt dessen Zugang, `frisch` verfällt.
+            let cfg = mutate_config(&app, &state, move |cfg| {
+                tl_lokal::sicherstellen(cfg, &frisch, jetzt).map(|_| ())
+            })?;
+            let z = tl_lokal::bereit(&cfg)
+                .map(str::to_string)
+                .ok_or_else(|| "Zugang für diesen PC ließ sich nicht anlegen.".to_string())?;
+            (z, Some(cfg))
+        }
+    };
+
+    // Im reinen Cloud-Betrieb erfährt der Relay erst mit dem nächsten Takt
+    // von einem neuen Zugang. Ohne die kurze Pause begrüßte die Seite den
+    // ersten Klick mit „Zugang gilt nicht mehr".
+    let warten = tl_lokal::wartezeit(weg, gespeichert.is_some());
+    if !warten.is_zero() {
+        tokio::time::sleep(warten).await;
+    }
+
+    let url = tl_lokal::adresse(weg, &zugang, &crate::badhub_host::relay_https());
+    // Dieselbe Regel wie für jeden anderen Link, den die App öffnet — auch
+    // wenn die Adresse hier aus eigener Hand stammt.
+    if !open_url_erlaubt(&url, None) {
+        return Err("Die Adresse der Turnierleitungs-Oberfläche ist ungültig.".to_string());
+    }
+    app.opener()
+        .open_url(url, None::<String>)
+        .map_err(|_| "Der Browser ließ sich nicht öffnen.".to_string())?;
+    Ok(gespeichert)
+}
+
 /// Legt die Raster-Anordnung einer Halle fest (oder ersetzt sie).
 ///
 /// Validierung + Normalisierung (Trimmen, Groß-/Kleinschreibung-unabhängiger

@@ -228,6 +228,18 @@ jobs:
       - name: Spielbereit faerbt die Zeile gruen (JS)
         run: node scripts/test-spielbereit-farbe.mjs
 
+      # Absprache "ein Tab statt zwei" der Turnierleitungs-Oberflaeche und
+      # Gleichlauf der Inline-Kopie in tl.html. Eine falsche Regel schliesst
+      # den Tab, in dem gerade ein Ergebnis eingetippt wird.
+      - name: TL-Web oeffnet keinen zweiten Tab (JS)
+        run: node scripts/test-ein-tab.mjs
+
+      # Welche Felder der Wunschfeld-Waehler anbietet, und Gleichlauf der
+      # Inline-Kopie in tl.html. Der Waehler filterte einmal auf ein Feld,
+      # das es im Zustand nie gab - der Filter griff still nie.
+      - name: TL-Web Wunschfeld-Waehler (JS)
+        run: node scripts/test-wunschfeld.mjs
+
       # Texte zur geplanten Zeit (Spec tl-zeitplan) und Gleichlauf der
       # Inline-Kopie in tl.html. Eine falsche Planzeit führt die
       # Turnierleitung über den Stand des Zeitplans in die Irre.

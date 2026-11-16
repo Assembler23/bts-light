@@ -14,6 +14,7 @@ pub mod openai_tts;
 pub mod print;
 pub mod sync;
 pub mod tablet;
+pub mod tl_lokal;
 pub mod tp_finden;
 pub mod tts_teile;
 pub mod tts_text;
@@ -204,6 +205,7 @@ pub fn run() {
             commands::tl_device_add,
             commands::tl_device_remove,
             commands::tl_web_set_enabled,
+            commands::tl_web_open_local,
             commands::set_hall_layout,
             commands::remove_hall_layout,
             commands::set_hall_color,

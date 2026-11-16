@@ -511,6 +511,8 @@ function App() {
               (p) => p.display?.unlimited_court_calls,
             )}
             hallLayouts={config.hall_layouts}
+            running={status?.running ?? false}
+            slaveMode={config.slave_mode}
             onConfigSaved={(c) => setConfig(c)}
           />
         );
@@ -555,10 +557,14 @@ function App() {
         return <WinnersPage />;
       case "settings":
         // Hinweis: SetupWizard liest seine Felder einmalig aus initialConfig.
-        // Das ist sicher, weil `config` nur beim Speichern (onDone) wechselt –
-        // dann zeigt die Seite ohnehin den gespeicherten Stand. Würde `config`
-        // künftig während offener Einstellungen von außen geändert, müsste die
-        // Seite per key remountet werden.
+        // Das ist sicher, weil `config` bei offenen Einstellungen nur an zwei
+        // Stellen wechselt: beim Speichern (onDone) – dann zeigt die Seite
+        // ohnehin den gespeicherten Stand – und durch den Knopf
+        // „Turnierleitung" in der Kopfzeile. Der ändert allein `tl_web`, und
+        // genau das hält der Assistent nicht als Feld, sondern liest es erst
+        // beim Speichern aus der dann aktuellen `initialConfig`. Würde
+        // künftig ein Feld von außen geändert, das der Assistent selbst
+        // bearbeitet, müsste die Seite per key remountet werden.
         return (
           <SetupWizard
             mode="settings"
@@ -610,6 +616,7 @@ function App() {
           busy={busy}
           onToggleRun={toggleRun}
           onNavigate={navigate}
+          onConfigSaved={(c) => setConfig(c)}
         >
           {activePage(view)}
         </AppShell>
