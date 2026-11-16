@@ -56,6 +56,10 @@ use std::time::{Duration, Instant};
 
 use bts_light_lib::tausch::{self, Lage, Pfade, WaechterArgs, Zustand, ARG_PROBE, ARG_SELBSTTEST};
 
+/// So lange wartet die Sonde höchstens auf einen Probelauf. Weit über der
+/// Frist der App — die Sonde soll die Zeit messen, nicht an ihr scheitern.
+const MESS_OBERGRENZE: Duration = Duration::from_secs(300);
+
 /// Die frisch gebaute Programmdatei dieses Workspaces.
 fn programm() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_bts-light"))
@@ -167,10 +171,44 @@ fn uebergabe_probe() {
 
     // ── 1. Erster Start einer frisch abgelegten Datei ────────────────────
     let a = aufbau();
-    let erster = tausch::probelauf(&a.pfade.neu).expect("Probelauf der neuen Datei");
-    let zweiter = tausch::probelauf(&a.pfade.neu).expect("zweiter Probelauf");
+    // Mit weit gefasster Obergrenze MESSEN statt an der Frist der App
+    // abzubrechen: Wie lange ein Virenscanner eine frische Programmdatei
+    // festhält, ist gerade die Zahl, um die es geht.
+    let messen = |was: &str, datei: &Path| -> Duration {
+        match tausch::probelauf_mit(datei, &[ARG_SELBSTTEST], MESS_OBERGRENZE) {
+            Ok(dauer) => dauer,
+            Err(e) => panic!(
+                "{was}: Der Probelauf {e} (Obergrenze {} s). Dann läuft die Programmdatei \
+                 auf diesem Rechner gar nicht durch — das ist das Ergebnis.",
+                MESS_OBERGRENZE.as_secs()
+            ),
+        }
+    };
+    let vorhanden = messen("vorhandene Datei", &programm());
+    println!(
+        "MESSWERT start-der-vorhandenen-datei-ms {}",
+        vorhanden.as_millis()
+    );
+    let erster = messen("frisch abgelegte Datei", &a.pfade.neu);
+    let zweiter = messen("zweiter Start", &a.pfade.neu);
     println!("MESSWERT erster-start-ms {}", erster.as_millis());
     println!("MESSWERT zweiter-start-ms {}", zweiter.as_millis());
+    if erster > tausch::PROBELAUF_FRIST {
+        println!(
+            "HINWEIS: Der erste Start liegt ÜBER der Probelauf-Frist der App ({} s). \
+             Mit dieser Frist würde der Wechsel auf diesem Rechner nie angeboten.",
+            tausch::PROBELAUF_FRIST.as_secs()
+        );
+    }
+    // Die Fristen der folgenden Schritte richten sich nach dem Gemessenen —
+    // jeder Aufbau legt wieder frische Dateien ab, die erneut geprüft werden.
+    let frist = tausch::ANKUNFT_FRIST_START.max(erster * 3);
+    let geduld = frist + tausch::ELTERN_FRIST + Duration::from_secs(15);
+    println!(
+        "Frist des Wächters in dieser Sonde: {} s (Startwert der App: {} s)",
+        frist.as_secs(),
+        tausch::ANKUNFT_FRIST_START.as_secs()
+    );
 
     // ── 2. Laufende Programmdatei umbenennen ─────────────────────────────
     let mut laeuft = Command::new(&a.pfade.aktiv)
@@ -211,8 +249,8 @@ fn uebergabe_probe() {
         },
     )
     .unwrap();
-    let seit = uebergabe_starten(&a, Duration::from_secs(15), "kind-ok");
-    let angekommen = warte_bis(Duration::from_secs(20), || {
+    let seit = uebergabe_starten(&a, frist, "kind-ok");
+    let angekommen = warte_bis(geduld, || {
         tausch::zustand_lesen(&a.daten)
             .is_some_and(|z| z.lage == Lage::Angekommen && z.nach == env!("CARGO_PKG_VERSION"))
     });
@@ -247,8 +285,8 @@ fn uebergabe_probe() {
     let b = aufbau();
     let alt = sha256(&b.pfade.aktiv);
     tausch::tauschen(&b.pfade).unwrap();
-    let seit = uebergabe_starten(&b, Duration::from_secs(15), "kind-stirbt");
-    let zurueck = warte_bis(Duration::from_secs(20), || {
+    let seit = uebergabe_starten(&b, frist, "kind-stirbt");
+    let zurueck = warte_bis(geduld, || {
         tausch::zustand_lesen(&b.daten).is_some_and(|z| z.lage == Lage::Zurueckgefallen)
     });
     println!(
@@ -274,7 +312,7 @@ fn uebergabe_probe() {
         "frischer Wiederanlauf-Marker für die alte Version"
     );
     assert!(
-        warte_bis(Duration::from_secs(10), || protokoll(&b.daten)
+        warte_bis(geduld, || protokoll(&b.daten)
             .contains("alte Version wieder gestartet"))
         .is_some(),
         "die alte Version wird wieder gestartet"
@@ -286,7 +324,7 @@ fn uebergabe_probe() {
     tausch::tauschen(&c.pfade).unwrap();
     let frist = Duration::from_millis(1500);
     let seit = uebergabe_starten(&c, frist, "kind-haengt");
-    let zurueck = warte_bis(Duration::from_secs(20), || {
+    let zurueck = warte_bis(geduld, || {
         tausch::zustand_lesen(&c.daten).is_some_and(|z| z.lage == Lage::Zurueckgefallen)
     });
     println!(

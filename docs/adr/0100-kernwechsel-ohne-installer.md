@@ -129,6 +129,27 @@ Von Hand zu prüfen, nicht Teil der Sonde: Reste nach der Deinstallation und ob
 die Prüfsumme der installierten Datei der aus `kern/kern-<version>.json`
 gleicht (die Sonde druckt sie).
 
+### Erster Lauf an einem Windows-11-Arbeitsrechner (16.11.2026)
+
+Auf einem Firmen-Notebook mit Unternehmens-Schutzsoftware endete schon der
+erste Schritt nicht rechtzeitig: Der Probelauf der frisch abgelegten
+Programmdatei (`--selbsttest`) lief **länger als die Frist von 10 s** und
+wurde abgebrochen. Auf dem Windows-Runner der CI dauert derselbe Schritt
+335 ms.
+
+Was daraus folgt, ist noch offen:
+
+- Die Sonde brach an dieser Stelle ab und maß die Dauer nicht. Sie misst
+  seither mit einer Obergrenze von 300 s und richtet die Fristen der
+  folgenden Schritte am Gemessenen aus; zusätzlich misst sie den Start der
+  schon vorhandenen Datei, um „frische Datei wird geprüft" von „die Datei
+  startet hier grundsätzlich langsam" zu trennen.
+- Ist der erste Start auf Turnier-PCs ähnlich langsam, reicht weder die
+  Probelauf-Frist (10 s) noch der Startwert der Wächter-Frist (15 s). Beide
+  sind erst nach der Messung festzulegen.
+- Ein Firmen-Notebook ist kein typischer Turnier-PC. Maßgeblich ist der
+  Lauf auf einem Rechner, wie er in der Halle steht.
+
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
 
 - **Der Wächter wartet auf das Ende des Prozesses, nicht nur auf das
