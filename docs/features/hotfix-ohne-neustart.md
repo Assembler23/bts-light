@@ -324,7 +324,7 @@ Fenster, ohne Tauri), N = neue App.
 
 | # | Wer | Schritt | Frist |
 |---|---|---|---|
-| 0 | A | Vorladen: Kopf prüfen, exe laden, Größe und SHA-256 prüfen, als `bts-light.neu.exe` ins Installationsverzeichnis. **Probelauf** `bts-light.neu.exe --selbsttest` (endet vor dem Fensteraufbau mit Code 0). | 10 s, sonst kein Wechsel-Angebot |
+| 0 | A | Vorladen: Kopf prüfen, exe laden, Größe und SHA-256 prüfen, als `bts-light.neu.exe` ins Installationsverzeichnis. **Probelauf** `bts-light.neu.exe --selbsttest` (endet vor dem Fensteraufbau mit Code 0). | 120 s, sonst kein Wechsel-Angebot (ursprünglich 10 s; gemessen wurden 15 s für den ersten Start unter Schutzsoftware, siehe ADR 0100) |
 | 1 | A | Klick: `uebergabe.json` (von, nach, Zeitstempel, Zustand `gestartet`) und Wiederanlauf-Marker schreiben. | — |
 | 2 | A | Übertragung anhalten wie `stop_sync` (Stände sichern, Ports frei, Relay-Verbindung zu). **Lücke beginnt.** | — |
 | 3 | A | Alte `bts-light.vorher.exe` löschen; `bts-light.exe` → `bts-light.vorher.exe`; `bts-light.neu.exe` → `bts-light.exe`. Scheitert die zweite Umbenennung: erste zurücknehmen, Übertragung wieder starten, Fehler im Banner. | — |

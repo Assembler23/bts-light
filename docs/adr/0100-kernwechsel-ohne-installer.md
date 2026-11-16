@@ -129,6 +129,47 @@ Von Hand zu prüfen, nicht Teil der Sonde: Reste nach der Deinstallation und ob
 die Prüfsumme der installierten Datei der aus `kern/kern-<version>.json`
 gleicht (die Sonde druckt sie).
 
+### Erster Lauf an einem Windows-11-Arbeitsrechner (16.11.2026)
+
+Auf einem Firmen-Notebook mit Unternehmens-Schutzsoftware endete schon der
+erste Schritt nicht rechtzeitig: Der Probelauf der frisch abgelegten
+Programmdatei (`--selbsttest`) lief **länger als die Frist von 10 s** und
+wurde abgebrochen. Auf dem Windows-Runner der CI dauert derselbe Schritt
+335 ms.
+
+Nachgemessen von Hand (Debug-Build, dieselbe Shell):
+
+| Start | Dauer |
+|---|---|
+| eben gebaute Programmdatei, erster Start | 12,8 s |
+| frische Kopie davon, erster Start | 15,2 s |
+| dieselbe Kopie, zweiter Start | 0,6 s |
+
+Alle drei endeten mit Code 0. Es ist also die Prüfung beim **ersten** Start
+einer neuen Datei; danach ist sie schnell.
+
+Was daraus folgt:
+
+- **Die Probelauf-Frist steht jetzt bei 120 s** (vorher 10 s). Der Probelauf
+  läuft im Hintergrund vor dem Angebot und kostet keine Lücke — und er
+  erledigt die Prüfung, bevor jemand klickt. Er ist damit nicht nur Test,
+  sondern Vorwärmen.
+- **Offen und entscheidend:** Bleibt die Datei „bekannt", nachdem sie von
+  `bts-light.neu.exe` in `bts-light.exe` **umbenannt** wurde? Wenn ja,
+  startet die neue Version nach dem Tausch in Sekundenbruchteilen und die
+  Wächter-Frist von 15 s hat reichlich Luft. Wenn nein, kostet der Wechsel
+  hier rund 15 s und die Frist muss darüber liegen. Die Sonde misst genau
+  das im Schritt „Erfolg" (`ende-der-app-bis-ankunft`): Dort wird eine schon
+  zur Probe gelaufene Datei umbenannt und gestartet.
+- Gemessen wurde der Debug-Build; er ist um ein Mehrfaches größer als die
+  ausgelieferte Programmdatei (33,8 MB). Deren Prüfzeit ist nicht gemessen.
+- Ein Firmen-Notebook ist kein typischer Turnier-PC. Maßgeblich bleibt der
+  Lauf auf einem Rechner, wie er in der Halle steht.
+
+Die Sonde misst seither mit einer Obergrenze von 300 s, statt abzubrechen,
+misst zusätzlich den Start der schon vorhandenen Datei und richtet die
+Fristen der folgenden Schritte am Gemessenen aus.
+
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
 
 - **Der Wächter wartet auf das Ende des Prozesses, nicht nur auf das
