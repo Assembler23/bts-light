@@ -12,8 +12,11 @@
 //!
 //! 1. A legt die neue Programmdatei als `bts-light.neu.exe` neben sich und
 //!    lässt sie zur Probe laufen (`--selbsttest`).
-//! 2. A hält die Übertragung an, tauscht per Umbenennen und startet W — die
-//!    **alte** Programmdatei mit `--waechter`, ohne Fenster.
+//! 2. A tauscht per Umbenennen — **noch bei laufender Übertragung**, denn
+//!    das Umbenennen kann unter Schutzsoftware sekundenlang blockieren
+//!    (ADR 0100, vierter Lauf) und soll keine Lücke kosten. Erst danach hält
+//!    A die Übertragung an und startet W — die **alte** Programmdatei mit
+//!    `--waechter`, ohne Fenster.
 //! 3. W wartet auf das Ende von A, startet N und wartet auf dessen
 //!    Ankunftsmeldung. Kommt sie nicht, stellt W die alte Datei wieder her
 //!    und startet sie.
