@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.437
+
+- **Intern: Messwerkzeug für den Wechsel ohne Installer.** bts-light kennt
+  jetzt die Bausteine des Wechsels — Probelauf der neuen Programmdatei,
+  Tausch per Umbenennen und einen Wächter, der bei einem Fehlstart die alte
+  Version wiederherstellt. Sie sind noch **nicht** angeschlossen: Erst misst
+  eine Sonde am Windows-PC, ob die Annahmen stimmen. Im Betrieb merkt man
+  davon nichts; neu sind nur zwei Startschalter der Programmdatei
+  (`--selbsttest`, `--waechter`), die ohne Fenster enden.
+
 ## v0.9.436
 
 - **Intern: Vorarbeit für den Wechsel ohne Installer.** Ein Release legt

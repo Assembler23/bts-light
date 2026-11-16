@@ -364,9 +364,12 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     Paket-Jobs, Banner und Wartungsseite in der laufenden App ansehen.
   - *Weg 2 (Kernwechsel ohne Installer):* Wiederanlauf im Kern und
     Lückenmessung (#553, v0.9.434) sowie Kern-Artefakt im Release-Job und
-    Datenformat-Wächter (v0.9.436) sind da. Es fehlen das Messwerkzeug am
-    Windows-PC (PR 7a), der scharfe Tausch mit Wächter (7b), Kern-Rückweg
-    und Aufräumen (8), Abschluss mit Feldtest (9).
+    Datenformat-Wächter (v0.9.436) sind da. Das Messwerkzeug (PR 7a,
+    v0.9.437) ist da und unter Linux durchgelaufen. **Nächster Schritt: die
+    Sonde am Windows-PC laufen lassen** (`cargo test -p bts-light --test
+    uebergabe_probe -- --ignored --nocapture`) und die Werte in ADR 0100
+    eintragen. Danach der scharfe Tausch mit Wächter (7b), Kern-Rückweg und
+    Aufräumen (8), Abschluss mit Feldtest (9).
   - Nebenbefund für später: `latest.json` ist unsigniert und
     `require_signed_version` nicht gesetzt.
 
