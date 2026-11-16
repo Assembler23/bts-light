@@ -334,6 +334,7 @@ fn uebergabe_probe() {
             zeit_ms: 1,
             lage: Lage::Angekommen,
             grund: None,
+            gesehen: false,
         },
     )
     .unwrap();

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Download, FileCheck2 } from "lucide-react";
 import {
+  kernWechseln,
   seitenSuchen,
   seitenUebernehmen,
   seitenZurueck,
@@ -18,7 +19,13 @@ import {
   updateMeldungWeg,
   updateSetInstallOnExit,
 } from "../api";
-import { KNOPF, seitenZeile, type SeitenKnopf } from "../io/updateBanner.mjs";
+import {
+  KNOPF,
+  kernZeile,
+  seitenZeile,
+  type KernKnopf,
+  type SeitenKnopf,
+} from "../io/updateBanner.mjs";
 import type { UpdateInfo } from "../types";
 
 interface UpdateState {
@@ -43,6 +50,10 @@ interface UpdateState {
   seitenFehler: string;
   /** Den Fehlertext der Seiten-Aktion schließen. */
   seitenFehlerWeg: () => void;
+  /** Auf die vorgeladene Version wechseln (ohne Installer). */
+  wechseln: () => Promise<void>;
+  /** Die einmalige Meldung der Kern-Zeile schließen. */
+  kernMeldungWeg: () => Promise<void>;
 }
 
 const UpdateContext = createContext<UpdateState | null>(null);
@@ -158,9 +169,17 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     [seitenAktion],
   );
   const meldungWeg = useCallback(
-    () => seitenAktion(updateMeldungWeg),
+    () => seitenAktion(() => updateMeldungWeg("seiten")),
     [seitenAktion],
   );
+  const kernMeldungWeg = useCallback(async () => {
+    try {
+      await updateMeldungWeg("kern");
+    } catch {
+      /* Die Meldung bleibt dann stehen und lässt sich erneut schließen. */
+    }
+    await lesen();
+  }, [lesen]);
 
   // Automatischer Check beim App-Start.
   useEffect(() => {
@@ -192,6 +211,18 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
 
   const seitenFehlerWeg = useCallback(() => setSeitenFehler(""), []);
 
+  // Wechsel ohne Installer. Gelingt er, endet die App; ein Fehler heißt, es
+  // wurde nichts gewechselt — er erscheint wie ein gescheiterter Einbau.
+  const wechseln = useCallback(async () => {
+    setInstallError("");
+    try {
+      await kernWechseln();
+    } catch (e) {
+      setInstallError(String(e));
+    }
+    await lesen();
+  }, [lesen]);
+
   useEffect(() => {
     const id = setInterval(() => void lesen(), leseTaktMs(phase));
     return () => clearInterval(id);
@@ -211,24 +242,13 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         meldungWeg,
         seitenFehler,
         seitenFehlerWeg,
+        wechseln,
+        kernMeldungWeg,
       }}
     >
       {children}
     </UpdateContext.Provider>
   );
-}
-
-/** Hinweis auf die Unterbrechung, abhängig von der Lage in der Halle. */
-export function unterbrechungsHinweis(info: UpdateInfo): string {
-  if (!info.sync_running) return "Die App startet dafür kurz neu.";
-  if (info.occupied_courts === 0) {
-    return "Kein Spiel läuft – die Übertragung setzt nach dem Neustart von selbst wieder ein.";
-  }
-  const felder =
-    info.occupied_courts === 1
-      ? "Auf 1 Feld läuft ein Spiel"
-      : `Auf ${info.occupied_courts} Feldern laufen Spiele`;
-  return `${felder} – der Neustart unterbricht etwa 20 s, die Tablets zählen weiter und die Übertragung setzt von selbst wieder ein.`;
 }
 
 /**
@@ -310,80 +330,91 @@ export function UpdateBanner() {
   );
 }
 
-/** Kern-Zeile: sobald ein Update der App geladen wird oder bereitliegt. */
+/**
+ * Kern-Zeile: Update der App selbst. Text und Knöpfe kommen aus
+ * `io/updateBanner.mjs` — Wechsel ohne Installer, wo er vorbereitet ist,
+ * sonst der Installer-Weg.
+ */
 function KernBanner() {
-  const { phase, info, installNow, setInstallOnExit, installError } =
-    useUpdate();
+  const {
+    info,
+    installNow,
+    setInstallOnExit,
+    installError,
+    wechseln,
+    kernMeldungWeg,
+  } = useUpdate();
+  // Ein Klick genügt: Während der Wechsel anläuft, sind die Knöpfe aus.
+  const [beschaeftigt, setBeschaeftigt] = useState(false);
   if (!info) return null;
-  // Ein gescheiterter Einbau lässt das Paket bereit (Phase `ready`) — der
-  // Fehlertext kommt aus der abgelehnten Antwort und hat Vorrang.
-  if (installError) {
-    return (
-      <div className="flex items-center gap-2 bg-red-100 px-4 py-2 text-sm text-red-900">
-        <Download size={16} className="shrink-0" />
-        {installError}
-      </div>
-    );
-  }
-  if (phase !== "downloading" && phase !== "ready" && phase !== "installing") {
-    return null;
-  }
-  const version = info.version ? ` (v${info.version})` : "";
-
-  if (phase === "downloading") {
-    return (
-      <div className="flex items-center gap-2 bg-amber-100 px-4 py-2 text-sm text-amber-900">
-        <Download size={16} className="shrink-0" />
-        Update{version} wird im Hintergrund geladen …
-      </div>
-    );
-  }
-  if (phase === "installing") {
-    return (
-      <div className="flex items-center gap-2 bg-amber-100 px-4 py-2 text-sm text-amber-900">
-        <Download size={16} className="shrink-0" />
-        Update{version} wird eingebaut – die App startet gleich neu.
-      </div>
-    );
-  }
-
+  // Ein gescheiterter Einbau oder Wechsel lässt das Update bereit — der
+  // Fehlertext kommt aus der abgelehnten Antwort und steht darüber.
+  const zeile = kernZeile(info);
+  const aktion: Record<KernKnopf, () => Promise<void>> = {
+    wechseln,
+    neu_starten: installNow,
+    beim_beenden: () => setInstallOnExit(true),
+    doch_nicht: () => setInstallOnExit(false),
+    verstanden: kernMeldungWeg,
+    schliessen: kernMeldungWeg,
+  };
+  const druecken = async (k: KernKnopf) => {
+    setBeschaeftigt(true);
+    try {
+      await aktion[k]();
+    } finally {
+      setBeschaeftigt(false);
+    }
+  };
+  const rot = zeile?.art === "zurueckgefallen";
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-100 px-4 py-2 text-sm text-amber-900">
-      <span className="flex items-start gap-2">
-        <Download size={16} className="mt-0.5 shrink-0" />
-        <span>
-          <span className="font-medium">Update{version} liegt bereit.</span>{" "}
-          {info.install_on_exit
-            ? "Es wird beim Beenden von bts-light still eingebaut."
-            : unterbrechungsHinweis(info)}
-        </span>
-      </span>
-      <span className="flex shrink-0 items-center gap-2">
-        {info.install_on_exit ? (
-          <button
-            onClick={() => void setInstallOnExit(false)}
-            className="rounded-lg border border-amber-500 px-3 py-1 font-medium text-amber-900
-                       transition-colors hover:bg-amber-200"
-          >
-            Doch nicht beim Beenden
-          </button>
-        ) : (
-          <button
-            onClick={() => void setInstallOnExit(true)}
-            className="rounded-lg border border-amber-500 px-3 py-1 font-medium text-amber-900
-                       transition-colors hover:bg-amber-200"
-          >
-            Beim Beenden einbauen
-          </button>
-        )}
-        <button
-          onClick={() => void installNow()}
-          className="rounded-lg bg-amber-500 px-3 py-1 font-medium text-white
-                     transition-colors hover:bg-amber-600"
+    <>
+      {installError && (
+        <div className="flex items-center gap-2 bg-red-100 px-4 py-2 text-sm text-red-900">
+          <Download size={16} className="shrink-0" />
+          {installError}
+        </div>
+      )}
+      {zeile && (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2 text-sm ${
+            rot ? "bg-red-100 text-red-900" : "bg-amber-100 text-amber-900"
+          }`}
         >
-          Jetzt neu starten
-        </button>
-      </span>
-    </div>
+          <span className="flex items-start gap-2">
+            <Download size={16} className="mt-0.5 shrink-0" />
+            <span>
+              <span className="font-medium">{zeile.text}</span>
+              {zeile.zusatz.map((z) => (
+                <span key={z}> {z}</span>
+              ))}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            {zeile.knoepfe.map((k) => {
+              const haupt = k === "wechseln" || k === "neu_starten";
+              return (
+                <button
+                  key={k}
+                  disabled={beschaeftigt}
+                  onClick={() => void druecken(k)}
+                  className={
+                    haupt
+                      ? "rounded-lg bg-amber-500 px-3 py-1 font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+                      : `rounded-lg border px-3 py-1 font-medium transition-colors disabled:opacity-50 ${
+                          rot
+                            ? "border-red-400 hover:bg-red-200"
+                            : "border-amber-500 text-amber-900 hover:bg-amber-200"
+                        }`
+                  }
+                >
+                  {KNOPF[k]}
+                </button>
+              );
+            })}
+          </span>
+        </div>
+      )}
+    </>
   );
 }

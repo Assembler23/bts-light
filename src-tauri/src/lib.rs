@@ -9,6 +9,7 @@ pub mod config;
 pub mod elevenlabs_tts;
 pub mod gemini_tts;
 pub mod hall_colors;
+pub mod kern_tausch;
 pub mod log_upload;
 pub mod openai_tts;
 pub mod print;
@@ -149,6 +150,7 @@ pub fn run() {
             commands::seiten_uebernehmen,
             commands::seiten_zurueck,
             commands::update_meldung_weg,
+            commands::kern_wechseln,
             commands::take_wiederanlauf,
             commands::get_status,
             commands::wifi_status,
@@ -268,6 +270,9 @@ pub fn run() {
                 Err(e) => tracing::warn!("Seiten-Pakete aus: kein App-Datenverzeichnis ({e})"),
             }
             setup_tray(app.handle())?;
+            // Was sagt die letzte Übergabe über diese Version (Meldung,
+            // Sperre nach einem Rückfall)?
+            commands::kern_start(app.handle());
             // Zuletzt: Lief die Übertragung vor einem Update, läuft sie
             // jetzt wieder an — ohne auf das Fenster zu warten.
             commands::wiederanlauf_im_kern(app.handle());
@@ -328,6 +333,13 @@ pub fn run() {
 /// stille Installer (Spec `update-im-turnierbetrieb`) — nach dem Flush,
 /// damit auch der letzte Stand die Installation überlebt.
 fn beenden(app: &tauri::AppHandle) {
+    // Mitten im Kernwechsel nicht beenden: Der Wechsel endet die App gleich
+    // selbst — nach dem Start des Wächters. Ein Ende davor ließe die neue
+    // Programmdatei ohne Wächter zurück, und ein vorgemerkter Installer
+    // liefe dem Wechsel in die Quere.
+    if commands::kern_wechselt(app) {
+        return;
+    }
     app.state::<commands::AppState>().tablet.flush_scores();
     commands::update_beim_beenden(app);
     app.exit(0);

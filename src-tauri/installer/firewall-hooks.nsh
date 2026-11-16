@@ -35,6 +35,14 @@
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
+  ; Hilfsdateien des Kernwechsels ohne Installer (ADR 0100). Der
+  ; Deinstallierer kennt sie nicht und liesse sie samt Ordner zurueck.
+  ; Bewusst VOR der IfSilent-Sprungmarke: auch eine stille Deinstallation
+  ; raeumt sie weg.
+  Delete "$INSTDIR\bts-light.neu.exe"
+  Delete "$INSTDIR\bts-light.vorher.exe"
+  Delete "$INSTDIR\bts-light.defekt.exe"
+  RMDir "$INSTDIR"
   IfSilent btslight_fw_del_done
   ExecShellWait "runas" "netsh.exe" 'advfirewall firewall delete rule name="BTS Light (Tablets)"' SW_HIDE
   ExecShellWait "runas" "netsh.exe" 'advfirewall firewall delete rule name="BTS Light (Tablets, verschluesselt)"' SW_HIDE

@@ -3,14 +3,20 @@
 // Wartungsseite"). Reine Funktionen, damit jede Zeile der Tabelle einen Test
 // hat — die Komponente malt nur, was hier herauskommt.
 //
-// Der Kern-Teil des Banners (Update der App selbst) steht noch in
-// `components/UpdateBanner.tsx` und zieht mit dem Kernwechsel hierher.
+// Beide Zeilen stehen hier: die Seiten-Zeile (Seiten-Paket) und die
+// Kern-Zeile (Update der App selbst — per Wechsel ohne Installer, wo er
+// möglich ist, sonst per Installer wie bisher).
 
 /** Beschriftungen der Knöpfe. */
 export const KNOPF = {
   uebernehmen: "Jetzt übernehmen",
   zurueck: "Zurück zum vorigen Stand",
   schliessen: "Schließen",
+  wechseln: "Jetzt wechseln",
+  neu_starten: "Jetzt neu starten",
+  beim_beenden: "Beim Beenden einbauen",
+  doch_nicht: "Doch nicht beim Beenden",
+  verstanden: "Verstanden",
 };
 
 const ZUSATZ_CLOUD =
@@ -82,5 +88,109 @@ export function wartungSeiten(info) {
     stand: `App v${info.app_version} · Seiten-Stand ${s.aktive_folge}${s.aktive_folge === 0 ? " (eingebaut)" : ""}`,
     hinweise,
     rueckweg: s.rueckweg,
+  };
+}
+
+/** „Auf N Feldern laufen Spiele" bzw. die Einzahl. */
+function felderText(n) {
+  return n === 1 ? "Auf 1 Feld läuft ein Spiel" : `Auf ${n} Feldern laufen Spiele`;
+}
+
+/** Hinweis auf die Unterbrechung beim Installer-Weg (Neustart, rund 20 s). */
+export function unterbrechungsHinweis(info) {
+  if (!info.sync_running) return "Die App startet dafür kurz neu.";
+  if (info.occupied_courts === 0) {
+    return "Kein Spiel läuft – die Übertragung setzt nach dem Neustart von selbst wieder ein.";
+  }
+  return `${felderText(info.occupied_courts)} – der Neustart unterbricht etwa 20 s, die Tablets zählen weiter und die Übertragung setzt von selbst wieder ein.`;
+}
+
+/** Hinweis auf die Unterbrechung beim Wechsel ohne Installer (wenige Sekunden). */
+export function wechselHinweis(info) {
+  if (!info.sync_running) return "Der Wechsel dauert wenige Sekunden.";
+  if (info.occupied_courts === 0) {
+    return "Kein Spiel läuft – der Wechsel unterbricht wenige Sekunden, die Übertragung läuft von selbst weiter.";
+  }
+  return `${felderText(info.occupied_courts)} – der Wechsel unterbricht wenige Sekunden, die Übertragung läuft von selbst weiter.`;
+}
+
+/**
+ * Die Kern-Zeile des Banners — oder `null`.
+ *
+ * Reihenfolge: Erst, was gerade passiert ist (die neue Version lief nicht an
+ * / der Wechsel ist geglückt), dann, was ansteht. Der Wechsel ohne Installer
+ * wird nur angeboten, wenn die neue Programmdatei geprüft bereitliegt und zu
+ * genau der Version gehört, die der Updater nennt; sonst bleibt es beim
+ * Installer-Weg.
+ */
+export function kernZeile(info) {
+  if (!info) return null;
+  const kern = info.kern ?? {};
+  const version = info.version ? ` (v${info.version})` : "";
+
+  if (kern.meldung === "zurueckgefallen") {
+    const laeuft = info.sync_running ? ", die Übertragung läuft" : "";
+    return {
+      art: "zurueckgefallen",
+      text: `v${kern.meldung_version} ließ sich nicht starten. bts-light läuft wieder mit v${info.app_version}${laeuft}.`,
+      zusatz: [],
+      knoepfe: ["verstanden"],
+    };
+  }
+  if (kern.meldung === "gewechselt") {
+    return {
+      art: "gewechselt",
+      text: `bts-light läuft jetzt mit v${info.app_version}.`,
+      zusatz: [],
+      knoepfe: ["schliessen"],
+    };
+  }
+  if (info.phase === "downloading") {
+    return { art: "laedt", text: `Update${version} wird im Hintergrund geladen …`, zusatz: [], knoepfe: [] };
+  }
+  if (kern.tausch === "wechselt") {
+    return {
+      art: "wechselt",
+      text: `Wechsel auf v${kern.version} läuft – bts-light ist gleich wieder da.`,
+      zusatz: [],
+      knoepfe: [],
+    };
+  }
+  if (info.phase === "installing") {
+    return {
+      art: "wechselt",
+      text: `Update${version} wird eingebaut – die App startet gleich neu.`,
+      zusatz: [],
+      knoepfe: [],
+    };
+  }
+  if (info.phase !== "ready") return null;
+
+  if (info.install_on_exit) {
+    return {
+      art: "bereit",
+      text: `Update${version} liegt bereit.`,
+      zusatz: ["Es wird beim Beenden von bts-light still eingebaut."],
+      knoepfe: ["doch_nicht"],
+    };
+  }
+  const tauschBereit = kern.tausch === "bereit" && kern.version === info.version;
+  if (tauschBereit) {
+    const zusatz = [wechselHinweis(info)];
+    if (!kern.rueckweg) {
+      zusatz.push(`Ein Zurück zu v${info.app_version} ist nach diesem Update nicht möglich.`);
+    }
+    return {
+      art: "bereit",
+      text: `Update${version} liegt bereit.`,
+      zusatz,
+      knoepfe: ["beim_beenden", "wechseln"],
+    };
+  }
+  return {
+    art: "bereit",
+    text: `Update${version} liegt bereit.`,
+    zusatz: [unterbrechungsHinweis(info)],
+    knoepfe: ["beim_beenden", "neu_starten"],
   };
 }

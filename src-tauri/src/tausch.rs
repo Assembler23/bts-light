@@ -259,9 +259,22 @@ impl std::fmt::Display for Hindernis {
 
 /// Schreibtest im Verzeichnis: Datei anlegen, schreiben, wieder löschen.
 pub fn schreibbar(dir: &Path) -> std::io::Result<()> {
-    let probe = dir.join(format!(".bts-light-schreibtest-{}", std::process::id()));
-    let ergebnis = std::fs::File::create(&probe).and_then(|mut f| f.write_all(b"x"));
-    let _ = std::fs::remove_file(&probe);
+    // Neu anlegen statt öffnen, mit nicht vorhersagbarem Namen: Eine schon
+    // vorhandene Datei (oder ein Verweis) unter dem Namen wird so nie
+    // gekürzt.
+    let probe = dir.join(format!(
+        ".bts-light-schreibtest-{}-{}",
+        std::process::id(),
+        jetzt_ms()
+    ));
+    let ergebnis = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .and_then(|mut f| f.write_all(b"x"));
+    if ergebnis.is_ok() {
+        let _ = std::fs::remove_file(&probe);
+    }
     ergebnis
 }
 
@@ -300,6 +313,10 @@ pub struct Zustand {
     /// Warum zurückgefallen wurde.
     #[serde(default)]
     pub grund: Option<String>,
+    /// Hat die Turnierleitung die Meldung dazu im Banner geschlossen? Sonst
+    /// käme sie nach jedem Programmstart wieder.
+    #[serde(default)]
+    pub gesehen: bool,
 }
 
 /// Schreibt den Zustand über eine Nebendatei, damit nie ein halber liegt.
@@ -315,7 +332,31 @@ pub fn zustand_schreiben(daten: &Path, zustand: &Zustand) -> std::io::Result<()>
 }
 
 pub fn zustand_lesen(daten: &Path) -> Option<Zustand> {
-    serde_json::from_slice(&std::fs::read(daten.join(ZUSTAND_DATEI)).ok()?).ok()
+    zustand_lesen_genau(daten).ok().flatten()
+}
+
+/// Wie [`zustand_lesen`], unterscheidet aber „es gibt keine Datei"
+/// (`Ok(None)`) von „sie ließ sich gerade nicht lesen" (`Err`). Wer daraus
+/// eine endgültige Entscheidung ableitet, braucht den Unterschied: Eine
+/// kurz gesperrte Datei ist kein „keine Übergabe im Gang".
+pub fn zustand_lesen_genau(daten: &Path) -> Result<Option<Zustand>, std::io::Error> {
+    match std::fs::read(daten.join(ZUSTAND_DATEI)) {
+        Ok(roh) => serde_json::from_slice(&roh)
+            .map(Some)
+            .map_err(std::io::Error::other),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Merkt in der Datei, dass die Meldung zur letzten Übergabe gesehen wurde.
+pub fn meldung_gesehen(daten: &Path) {
+    if let Some(mut z) = zustand_lesen(daten) {
+        if !z.gesehen {
+            z.gesehen = true;
+            let _ = zustand_schreiben(daten, &z);
+        }
+    }
 }
 
 /// N meldet sich an: Aus „gestartet" wird „angekommen" — aber nur, wenn die
@@ -494,16 +535,24 @@ pub fn rueckfall(
             zeit_ms: jetzt_ms,
             lage: Lage::Zurueckgefallen,
             grund: Some(grund.to_string()),
+            gesehen: false,
         },
     ) {
         maengel.push(format!("Zustand nicht geschrieben ({e})"));
     }
     // Frischer Marker: Die alte Version soll die Übertragung nach ihrem
-    // Start von selbst wieder aufnehmen.
+    // Start von selbst wieder aufnehmen — aber nur, wenn sie vor dem Wechsel
+    // lief. Das steht im Marker, den die App vor dem Wechsel geschrieben
+    // hat; fehlt er (oder ist er unlesbar), gilt „lief".
+    let marker_pfad = daten.join(crate::update::RESUME_FILE);
+    let lief = std::fs::read(&marker_pfad)
+        .ok()
+        .and_then(|roh| serde_json::from_slice::<ResumeMarker>(&roh).ok())
+        .is_none_or(|m| m.running);
     if let Err(e) = crate::update::write_resume(
-        &daten.join(crate::update::RESUME_FILE),
+        &marker_pfad,
         &ResumeMarker {
-            running: true,
+            running: lief,
             written_ms: jetzt_ms,
             from_version: von.to_string(),
         },
@@ -861,6 +910,7 @@ pub fn waechter_hauptprogramm(args: &WaechterArgs) -> i32 {
             zeit_ms: jetzt_ms(),
             lage: Lage::Gestartet,
             grund: None,
+            gesehen: false,
         },
     ) {
         Ok(()) => true,
@@ -1353,6 +1403,54 @@ mod tests {
         assert_eq!(marker.from_version, "1.2.3");
     }
 
+    /// Lief die Übertragung vor dem Wechsel NICHT, startet die alte Version
+    /// sie nach einem Rückfall auch nicht von selbst. Das steht im Marker,
+    /// den die App vor dem Wechsel geschrieben hat.
+    #[test]
+    fn rueckfall_uebernimmt_ob_die_uebertragung_lief() {
+        for lief in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let daten = dir.path().join("daten");
+            let p = pfade_in(dir.path());
+            std::fs::write(&p.aktiv, "neu").unwrap();
+            std::fs::write(&p.vorher, "alt").unwrap();
+            let marker = daten.join(crate::update::RESUME_FILE);
+            crate::update::write_resume(
+                &marker,
+                &ResumeMarker {
+                    running: lief,
+                    written_ms: 1_000,
+                    from_version: "1.2.3".into(),
+                },
+            )
+            .unwrap();
+
+            rueckfall(&p, &daten, "x", 9_000, "1.2.3", "1.2.4").unwrap();
+            let gelesen: ResumeMarker =
+                serde_json::from_slice(&std::fs::read(&marker).unwrap()).unwrap();
+            assert_eq!(gelesen.running, lief, "lief = {lief}");
+            assert_eq!(gelesen.written_ms, 9_000, "der Marker ist frisch");
+        }
+    }
+
+    #[test]
+    fn schreibtest_kuerzt_keine_vorhandene_datei() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("wichtig.txt"), "inhalt").unwrap();
+        schreibbar(dir.path()).unwrap();
+        schreibbar(dir.path()).unwrap();
+        let namen: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            namen,
+            vec!["wichtig.txt"],
+            "der Schreibtest hinterlässt nichts"
+        );
+    }
+
     /// Lässt sich im Datenverzeichnis nichts schreiben (hier: Es ist eine
     /// Datei), gilt der Rückfall trotzdem — die Dateien sind zurück, und der
     /// Aufrufer startet die alte Version. Ohne das stünde die Turnierleitung
@@ -1386,6 +1484,7 @@ mod tests {
             zeit_ms: 1,
             lage: Lage::Gestartet,
             grund: None,
+            gesehen: false,
         };
         zustand_schreiben(dir.path(), &z).unwrap();
         // Eine ANDERE Version als das Ziel meldet nichts an.

@@ -995,6 +995,25 @@ export interface UpdateInfo {
   app_version: string;
   /** Stand der Geräte-Seiten (Spec `hotfix-ohne-neustart`). */
   seiten: SeitenInfo;
+  /** Kernwechsel ohne Installer: Stand und Meldung nach einem Wechsel. */
+  kern: KernInfo;
+}
+
+/** Stand des Kernwechsels ohne Installer (Rust: kern_tausch::KernInfo). */
+export interface KernInfo {
+  /** `bereit` = die neue Programmdatei liegt geprüft daneben. */
+  tausch: "aus" | "laedt" | "bereit" | "nicht_moeglich" | "wechselt";
+  /** Version, zu der gewechselt werden kann. */
+  version: string | null;
+  /** Bei `bereit`: Führt nach dem Wechsel ein Weg zurück? */
+  rueckweg: boolean;
+  /** Bei `nicht_moeglich`: warum (nur zur Diagnose). */
+  grund: string | null;
+  /** Einmalige Meldung nach einem Wechsel. */
+  meldung: "keine" | "gewechselt" | "zurueckgefallen";
+  /** `gewechselt`: von welcher Version. `zurueckgefallen`: welche nicht anlief. */
+  meldung_version: string | null;
+  meldung_grund: string | null;
 }
 
 /** Stand der Geräte-Seiten (Rust: seiten_angebot::SeitenInfo). Ein
