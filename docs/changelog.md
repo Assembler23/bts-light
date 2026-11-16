@@ -4,6 +4,21 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.431
+
+- **TL-Web: Ruf nach der Turnierleitung zurücknehmen.** Ruft ein Feld über
+  das Megafon am Zähl-Tablet, steht im Störungsband hinter dem Feld jetzt der
+  Knopf **zurücknehmen**; derselbe Schritt steht als **Ruf zurücknehmen** im
+  ⋯-Menü der Feld-Kachel. Nach einer Rückfrage ist die Meldung überall weg —
+  auf allen Geräten der Turnierleitung, am Turnier-PC und am Tablet, wo das
+  Megafon ausgeht und kurz „Die Turnierleitung hat den Ruf zurückgenommen."
+  erscheint. Bisher ging das nur am Tablet selbst. Über das Internet wirkt es
+  nach dem Relay-Deploy; ein Tablet, dessen Seite seit dem Update nicht neu
+  geladen wurde, behält das Megafon an, bis dort „Meldung zurücknehmen"
+  getippt wird (**Tablets neu laden** hilft).
+- **Störungsband auf dem Handy:** Feld und Knopf bleiben beim Umbruch
+  zusammen; rufen mehrere Felder, steht jedes mit seinem Knopf für sich.
+
 ## v0.9.430
 
 - **Turnierleitungs-Oberfläche mit einem Klick am Turnier-PC.** In der

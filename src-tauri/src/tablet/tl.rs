@@ -1874,6 +1874,23 @@ pub(crate) async fn execute(
         return response;
     }
 
+    // Ruf nach der Turnierleitung zurücknehmen: wie der Fernbefehl oben ein
+    // reiner Laufzeit-Zustand an den Tablet-Verbindungen — keine Config,
+    // kein BTP, kein Turnierbezug. Eine Feld-Prüfung braucht es nicht:
+    // `ruf_zuruecknehmen` rührt nur ein Feld an, an dem wirklich ein Ruf
+    // steht, ein unbekanntes Feld hinterlässt also nichts.
+    //
+    // „Kein Ruf (mehr)" ist ebenfalls ein Erfolg — die Aktion trägt den
+    // Zielzustand. Das zweite von zwei Geräten bekäme sonst eine
+    // Fehlermeldung für etwas, das längst so ist, wie es sein soll.
+    if let relay_proto::TlAction::ClearOfficialCall { court_id } = &action {
+        ctx.tablet.ruf_zuruecknehmen(*court_id);
+        let response = relay_proto::TlResponse::ok(0);
+        ctx.tablet
+            .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        return response;
+    }
+
     // Panel-Profile: eigener Weg wie Wertungen unten, weil sie `AppConfig`/
     // `config.json` ändern statt Turnier-Zustand — `apply_state_action`
     // bleibt auf reine `TabletState`-Änderungen ohne Datei-I/O beschränkt
@@ -2657,6 +2674,7 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         // Idempotenz hängt an der Vorgangs-Kennung — ein zweiter, bewusster
         // Druck bringt eine neue mit und wird deshalb ausgeführt.
         A::ReloadTablets => "reload-tablets".to_string(),
+        A::ClearOfficialCall { court_id } => format!("clear-call:{court_id}"),
         // Das Ziel gehört hinein: „auf Feld 3" und „aufheben" sind zwei
         // verschiedene Absichten und dürfen einander nicht als „schon
         // erledigt" gelten.
@@ -2795,6 +2813,9 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             format!("Profil {profile_id} als Standard gesetzt")
         }
         A::ReloadTablets => "Alle Tablets laden neu".to_string(),
+        A::ClearOfficialCall { court_id } => {
+            format!("Ruf nach der Turnierleitung an Feld {court_id} zurückgenommen")
+        }
         A::LockCourt { court_id, locked } => {
             if *locked {
                 format!("Feld {court_id} gesperrt")
@@ -3101,6 +3122,13 @@ pub struct TlState {
     /// hielte die Tablets für aufgefrischt.
     #[serde(default)]
     pub can_reload_tablets: bool,
+    /// Kennt dieser Turnier-PC das Zurücknehmen eines Rufs nach der
+    /// Turnierleitung ([`relay_proto::TlAction::ClearOfficialCall`])?
+    /// Gleiche Begründung wie bei [`Self::can_lock_courts`]: Ein älterer
+    /// Host verwirft die unbekannte Aktion still — die Turnierleitung hielte
+    /// den Ruf für erledigt, und er stünde weiter im Band.
+    #[serde(default)]
+    pub can_clear_official_call: bool,
     /// Kennt dieser Turnier-PC die Spielersuche (`POST /tl/api/search`,
     /// Spec `tl-spielersuche`, ADR 0081)? Der Relay liefert die neue Seite
     /// sofort nach dem Merge aus, der Turnier-PC kommt erst mit dem Tag —
@@ -4537,6 +4565,7 @@ pub(crate) fn build_state_limited(
             // lehnt die Aktion ohnehin ab (E7).
             can_lock_courts: true,
             can_reload_tablets: true,
+            can_clear_official_call: true,
             can_search: true,
             halls: Vec::new(),
             auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
@@ -4915,6 +4944,7 @@ pub(crate) fn build_state_limited(
         can_assign_waiting_officials: true,
         meetingpoint: meetingpoint_lage(tablet, config),
         can_reload_tablets: true,
+        can_clear_official_call: true,
         can_search: true,
         finished_warning_seconds: config.finished_warning_seconds,
         shuttle_counter: config.shuttle_counter,
@@ -12284,6 +12314,9 @@ mod tests {
             // Fähigkeitsmerkmal (Spec tablet-version-abgleich): reines Bool
             // „dieser Turnier-PC kennt den Fernbefehl".
             "can_reload_tablets",
+            // Fähigkeitsmerkmal: reines Bool „dieser Turnier-PC kann einen
+            // Ruf nach der Turnierleitung zurücknehmen".
+            "can_clear_official_call",
             // Fähigkeitsmerkmal (Spec tl-spielersuche): reines Bool „dieser
             // Turnier-PC kennt die Spielersuche".
             "can_search",

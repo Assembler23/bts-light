@@ -169,7 +169,7 @@ function tablet(zustand = {}) {
     clearReidentify: () => {}, syncServerClock: () => {}, render: merk("render"), clearInterval: () => {},
     persistState: (ausRestore) => ruf.push(ausRestore ? "spiegeln" : "persist"),
     sendRallySync: merk("sendRallySync"), sendMatchEventSync: merk("sendMatchEventSync"),
-    trySubmitPending: merk("trySubmitPending"),
+    trySubmitPending: merk("trySubmitPending"), sendAlert: merk("sendAlert"),
     zeigeGeparktMeldung: (text) => ruf.push("hinweis:" + text),
     sendeauftragBeiFinalisierungLoslassen: () => false, geparktBeiFinalisierungAufloesen: () => false,
     // Übernimmt wie die echte Funktion die Felder, auf die es hier ankommt.
@@ -218,6 +218,10 @@ const hat = (t, name) => t.ruf.includes(name);
   assert.equal(t.STATE.history.length, 2, "samt Undo-Schritten");
   assert.ok(t.ruf.indexOf("apply") < t.ruf.indexOf("spiegeln"), "gespiegelt wird erst der ÜBERNOMMENE Stand — nie 0:0");
   assert.equal(t.gesendet.length, 0, "kein score_update mit 0:0");
+  // Die Meldungen (✚, 📣) des übernommenen Stands gehen an den Turnier-PC —
+  // dieses Gerät hat beim Verbinden gerade „keine" gemeldet.
+  assert.ok(hat(t, "sendAlert") && t.ruf.indexOf("apply") < t.ruf.indexOf("sendAlert"),
+    "nach der Übernahme werden die Meldungen neu gemeldet");
   // Danach die Zuweisung desselben Spiels: alles bleibt.
   t.beiMatchAssigned({ match: SPIEL(7), hostSets: S([21, 10], [5, 3]) });
   assert.ok(!hat(t, "log:einstieg_mit_host_saetzen"));

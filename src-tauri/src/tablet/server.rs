@@ -4550,6 +4550,11 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
     // der Server ausliefert — ein vorher gegebener Befehl gilt für sie nicht
     // mehr. Je WebSocket, denn „verbunden" heißt hier „Seite frisch geladen".
     let mut reload_wacht = crate::tablet::state::ReloadWacht::beim_verbinden(&ctx.tablet);
+    // Hat DIESE Verbindung dem Tablet die offene Rücknahme seines Rufs nach
+    // der Turnierleitung schon gesagt? Je WebSocket, damit ein neu
+    // verbundenes Tablet sie noch einmal hört — der Ruf lebt am Tablet und
+    // käme sonst mit dem nächsten `alert` zurück.
+    let mut ruf_ruecknahme_gesagt = false;
     // Zeitpunkt der letzten empfangenen Nachricht (jede Art, inkl. App-Ping
     // und Protokoll-Pong). Bricht der Router weg, liefert der Browser oft
     // KEIN Close – die TCP-Verbindung bleibt serverseitig minutenlang als
@@ -4705,8 +4710,17 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                             }
                             Ok(TabletMsg::Alert { injury, official }) => {
                                 if let (Some(c), Some(t)) = (court, my_token) {
-                                    if ctx.tablet.is_court_active(c, t) {
-                                        ctx.tablet.record_alert(c, injury, official);
+                                    if ctx.tablet.is_court_active(c, t)
+                                        && ctx.tablet.record_alert(c, injury, official)
+                                    {
+                                        // Das Tablet meldet einen Ruf, den die
+                                        // Turnierleitung schon zurückgenommen
+                                        // hat (es weiß davon noch nichts) —
+                                        // gleich sagen statt auf den Takt
+                                        // warten.
+                                        send_msg(&mut socket, &ServerMsg::OfficialCallCleared)
+                                            .await;
+                                        ruf_ruecknahme_gesagt = true;
                                     }
                                 }
                             }
@@ -4832,6 +4846,15 @@ async fn handle_socket(mut socket: WebSocket, ctx: Arc<ServerCtx>) {
                 }
                 if let (Some(c), Some(token)) = (court, my_token) {
                     if ctx.tablet.is_court_active(c, token) {
+                        // Die Turnierleitung hat den Ruf dieses Felds
+                        // zurückgenommen: dem Tablet einmal sagen. Der Merker
+                        // fällt, sobald es „kein Ruf" zurückmeldet — bis dahin
+                        // bleibt es bei diesem einen Mal je Verbindung.
+                        let offen = ctx.tablet.ruf_ruecknahme_offen(c);
+                        if offen && !ruf_ruecknahme_gesagt {
+                            send_msg(&mut socket, &ServerMsg::OfficialCallCleared).await;
+                        }
+                        ruf_ruecknahme_gesagt = offen;
                         push_match(c, &ctx, &mut socket, &mut last_match).await;
                     } else {
                         my_token = None;
@@ -7520,6 +7543,61 @@ mod tests {
             hall: String::new(),
             profile_id: String::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn turnierleitung_nimmt_den_ruf_eines_felds_zurueck() {
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a"), tl_device("b")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2, 3]));
+        ctx.tablet.attach_tablet(2);
+        ctx.tablet.record_alert(2, false, true);
+        let ctx = Arc::new(ctx);
+        let ruf = |ctx: &ServerCtx| {
+            ctx.tablet
+                .overview()
+                .iter()
+                .any(|c| c.court_id == 2 && c.official_call)
+        };
+        assert!(ruf(&ctx));
+
+        let response = crate::tablet::tl::execute(
+            &ctx,
+            &tl_device("a"),
+            "op-ruf-1",
+            1,
+            0,
+            relay_proto::TlAction::ClearOfficialCall { court_id: 2 },
+        )
+        .await;
+        assert!(response.ok, "Zurücknehmen soll gelingen: {response:?}");
+        assert!(!ruf(&ctx), "der Ruf ist aus dem Zustand");
+        assert!(
+            ctx.tablet.ruf_ruecknahme_offen(2),
+            "und das Tablet muss es noch erfahren"
+        );
+
+        // Das zweite Gerät quittiert dasselbe Feld: Erfolg, kein Fehler —
+        // die Aktion trägt den Zielzustand. Und ein Feld ohne Ruf (oder eins,
+        // das es nicht gibt) hinterlässt keinen Merker.
+        for (op, feld) in [("op-ruf-2", 2), ("op-ruf-3", 3), ("op-ruf-4", 99)] {
+            let response = crate::tablet::tl::execute(
+                &ctx,
+                &tl_device("b"),
+                op,
+                2,
+                0,
+                relay_proto::TlAction::ClearOfficialCall { court_id: feld },
+            )
+            .await;
+            assert!(response.ok, "Feld {feld}: {response:?}");
+        }
+        assert!(!ctx.tablet.ruf_ruecknahme_offen(3));
+        assert!(!ctx.tablet.ruf_ruecknahme_offen(99));
+
+        // Der Zustand der Turnierleitung sagt der Seite, dass es geht.
+        let config = ctx.app_config();
+        let state = crate::tablet::tl::build_state(&ctx.tablet, &config, 3, 0);
+        assert!(state.can_clear_official_call);
     }
 
     #[tokio::test]

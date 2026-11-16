@@ -166,6 +166,16 @@ struct CourtSession {
     injury: bool,
     /// Die Turnierleitung wurde an dieses Feld gerufen.
     official: bool,
+    /// Die Turnierleitung hat den Ruf aus ihrer Oberfläche zurückgenommen,
+    /// das Tablet hat das noch nicht bestätigt.
+    ///
+    /// Der Ruf lebt am Tablet und kommt nach jedem Neuverbinden erneut.
+    /// Solange dieser Merker steht, hält der Host einen (wieder) gemeldeten
+    /// Ruf zurück und sagt dem Tablet, dass er erledigt ist. Er fällt, sobald
+    /// das Tablet einmal „kein Ruf" meldet — danach gilt ein Ruf wieder als
+    /// neu. Nur im Arbeitsspeicher: Nach einem Neustart des Turnier-PCs
+    /// meldet ein Tablet, das die Rücknahme nie erfahren hat, den Ruf erneut.
+    ruf_ruecknahme_offen: bool,
 }
 
 /// Eine Court-Zeile für die Felder-Übersicht der Turnierleitung.
@@ -455,6 +465,35 @@ impl ReloadWacht {
         }
         self.0 = jetzt;
         true
+    }
+}
+
+/// Merkt für **einen** Beobachter (eine Relay-Sitzung), welchen Feldern er
+/// die offene Rücknahme des Rufs nach der Turnierleitung schon weitergesagt
+/// hat.
+///
+/// Die Rücknahme ist ein Zustand, kein Ereignis: Im Betrieb LAN+Cloud sehen
+/// ihn zwei Schleifen, und jede muss ihn genau einmal melden — eine
+/// Warteschlange könnte nur eine von beiden leeren. Eine neue Sitzung
+/// beginnt leer und sagt deshalb alles Offene noch einmal; das Tablet
+/// verträgt die Wiederholung (es antwortet nur erneut „kein Ruf").
+#[derive(Default)]
+pub struct RufWacht(HashSet<i64>);
+
+impl RufWacht {
+    /// Felder, deren offene Rücknahme dieser Beobachter noch nicht gemeldet
+    /// hat — jedes **genau einmal**, in fester Reihenfolge. Erledigte Felder
+    /// fallen aus dem Merker, damit eine spätere Rücknahme am selben Feld
+    /// wieder gemeldet wird.
+    pub fn faellig(&mut self, state: &TabletState) -> Vec<i64> {
+        let offen: HashSet<i64> = state
+            .felder_mit_offener_ruf_ruecknahme()
+            .into_iter()
+            .collect();
+        let mut neu: Vec<i64> = offen.difference(&self.0).copied().collect();
+        neu.sort_unstable();
+        self.0 = offen;
+        neu
     }
 }
 
@@ -2928,6 +2967,7 @@ impl TabletState {
                 battery: None,
                 injury: false,
                 official: false,
+                ruf_ruecknahme_offen: false,
             })
             .connected = true;
     }
@@ -2958,6 +2998,7 @@ impl TabletState {
                 battery: None,
                 injury: false,
                 official: false,
+                ruf_ruecknahme_offen: false,
             });
             session.match_id = match_id;
             session.sets = sets;
@@ -2998,6 +3039,7 @@ impl TabletState {
                 battery: None,
                 injury: false,
                 official: false,
+                ruf_ruecknahme_offen: false,
             });
         }
     }
@@ -3089,13 +3131,20 @@ impl TabletState {
                 battery: None,
                 injury: false,
                 official: false,
+                ruf_ruecknahme_offen: false,
             })
             .battery = Some(TabletBattery { percent, charging });
     }
 
     /// Meldungs-Zustand (Verletzung / Turnierleitung gerufen) des Felds setzen.
-    pub fn record_alert(&self, court_id: i64, injury: bool, official: bool) {
-        {
+    ///
+    /// Gibt `true` zurück, wenn ein gemeldeter Ruf **zurückgehalten** wurde,
+    /// weil die Turnierleitung ihn schon zurückgenommen hat
+    /// ([`Self::ruf_zuruecknehmen`]). Der Aufrufer sagt es dem Tablet dann
+    /// noch einmal — es hat die erste Nachricht offenbar nicht bekommen
+    /// (Verbindung weg) oder kennt sie nicht (ältere Seite).
+    pub fn record_alert(&self, court_id: i64, injury: bool, official: bool) -> bool {
+        let zurueckgehalten = {
             let mut courts = self.courts.write().unwrap();
             let session = courts.entry(court_id).or_insert(CourtSession {
                 match_id: 0,
@@ -3104,14 +3153,73 @@ impl TabletState {
                 battery: None,
                 injury: false,
                 official: false,
+                ruf_ruecknahme_offen: false,
             });
             session.injury = injury;
-            session.official = official;
-        }
+            // „Kein Ruf" vom Tablet ist die Bestätigung der Rücknahme: Ab
+            // jetzt ist ein Ruf wieder ein neuer.
+            if !official {
+                session.ruf_ruecknahme_offen = false;
+            }
+            let zurueckgehalten = official && session.ruf_ruecknahme_offen;
+            session.official = official && !zurueckgehalten;
+            zurueckgehalten
+        };
         // Meldungs-Zustand (Pause/Verletzung) ist am Court-Monitor sichtbar →
         // Anzeige anstoßen. Wie bei `record_score` erst den `courts`-Guard
         // droppen, DANN nudgen (Lock nicht über den Broadcast halten).
         self.notify_monitor(court_id);
+        zurueckgehalten
+    }
+
+    /// Die Turnierleitung nimmt den Ruf eines Felds zurück (TL-Web).
+    ///
+    /// Löscht den Ruf am Host und merkt vor, dass das Tablet es noch erfahren
+    /// muss — die Schleifen der Tablet-Verbindungen (LAN und Cloud) lesen das
+    /// über [`Self::ruf_ruecknahme_offen`] und schicken die Nachricht.
+    ///
+    /// Gibt zurück, ob überhaupt ein Ruf anstand. Ohne Ruf geschieht nichts:
+    /// Ein zweites Gerät, das dasselbe Feld quittiert, darf keinen Merker
+    /// hinterlassen, der den **nächsten** Ruf verschluckte.
+    pub fn ruf_zuruecknehmen(&self, court_id: i64) -> bool {
+        let anstehend = {
+            let mut courts = self.courts.write().unwrap();
+            match courts.get_mut(&court_id) {
+                Some(session) if session.official => {
+                    session.official = false;
+                    session.ruf_ruecknahme_offen = true;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if anstehend {
+            // Übersicht, Feld-Monitor und Desktop zeigen den Ruf ebenfalls.
+            self.notify_monitor(court_id);
+        }
+        anstehend
+    }
+
+    /// Wartet an diesem Feld eine Rücknahme darauf, dass das Tablet sie
+    /// bestätigt?
+    pub fn ruf_ruecknahme_offen(&self, court_id: i64) -> bool {
+        self.courts
+            .read()
+            .unwrap()
+            .get(&court_id)
+            .is_some_and(|s| s.ruf_ruecknahme_offen)
+    }
+
+    /// Alle Felder mit offener Rücknahme — für die Cloud-Schleife, die eine
+    /// Verbindung für alle Felder führt.
+    pub fn felder_mit_offener_ruf_ruecknahme(&self) -> Vec<i64> {
+        self.courts
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|(_, s)| s.ruf_ruecknahme_offen)
+            .map(|(id, _)| *id)
+            .collect()
     }
 
     /// Meldet einen Court-Monitor als Nudge-Abonnenten an (A1, ADR 0016).
@@ -4454,6 +4562,7 @@ impl TabletState {
                 battery: None,
                 injury: false,
                 official: false,
+                ruf_ruecknahme_offen: false,
             });
             target.match_id = match_id;
             target.sets = sets;
@@ -4464,6 +4573,8 @@ impl TabletState {
                 src.sets = Vec::new();
                 src.injury = false;
                 src.official = false;
+                // Das Spiel ist weg — eine offene Rücknahme galt ihm.
+                src.ruf_ruecknahme_offen = false;
             }
         }
         // Den gespiegelten Spielzustand (Aufschlag, Pause) mitnehmen, damit
@@ -5712,6 +5823,145 @@ pub(crate) mod tests {
         assert_eq!(st.active_courts(), vec![101]);
         st.detach_tablet(101);
         assert!(st.active_courts().is_empty());
+    }
+
+    /// Steht an diesem Feld der Ruf in der Übersicht?
+    fn ruf_steht(st: &TabletState, court_id: i64) -> bool {
+        st.overview()
+            .iter()
+            .find(|o| o.court_id == court_id)
+            .is_some_and(|o| o.official_call)
+    }
+
+    fn zustand_mit_ruf() -> TabletState {
+        let st = TabletState::default();
+        st.set_snapshot(snapshot(
+            vec![match_on(1, Some(101), MatchStatus::OnCourt)],
+            vec![(101, "Court 1"), (102, "Court 2")],
+        ));
+        st.attach_tablet(101);
+        st.record_score(101, 1, vec![(3, 2)]);
+        assert!(!st.record_alert(101, false, true));
+        assert!(ruf_steht(&st, 101));
+        st
+    }
+
+    #[test]
+    fn ruf_zuruecknehmen_loescht_den_ruf_und_merkt_die_ruecknahme_vor() {
+        let st = zustand_mit_ruf();
+        assert!(st.ruf_zuruecknehmen(101), "es stand ein Ruf an");
+        assert!(!ruf_steht(&st, 101));
+        assert!(st.ruf_ruecknahme_offen(101));
+        assert_eq!(st.felder_mit_offener_ruf_ruecknahme(), vec![101]);
+    }
+
+    #[test]
+    fn zurueckgenommener_ruf_kommt_nach_dem_neuverbinden_nicht_wieder() {
+        // Der Ruf lebt am Tablet: Nach einem Wackler meldet es ihn erneut.
+        // Genau das darf die Rücknahme nicht rückgängig machen.
+        let st = zustand_mit_ruf();
+        st.ruf_zuruecknehmen(101);
+        assert!(
+            st.record_alert(101, false, true),
+            "der Aufrufer muss erfahren, dass er dem Tablet antworten soll"
+        );
+        assert!(!ruf_steht(&st, 101));
+        assert!(st.ruf_ruecknahme_offen(101), "bleibt offen, bis bestätigt");
+    }
+
+    #[test]
+    fn nach_der_bestaetigung_ist_ein_ruf_wieder_ein_neuer() {
+        let st = zustand_mit_ruf();
+        st.ruf_zuruecknehmen(101);
+        // Das Tablet bestätigt mit „kein Ruf" …
+        assert!(!st.record_alert(101, false, false));
+        assert!(!st.ruf_ruecknahme_offen(101));
+        assert!(st.felder_mit_offener_ruf_ruecknahme().is_empty());
+        // … und der nächste Ruf vom Feld kommt wieder an.
+        assert!(!st.record_alert(101, false, true));
+        assert!(ruf_steht(&st, 101));
+    }
+
+    #[test]
+    fn ruecknahme_ohne_ruf_hinterlaesst_keinen_merker() {
+        // Zweites Turnierleitungs-Gerät quittiert dasselbe Feld, oder das
+        // Tablet war schneller: Der nächste Ruf darf nicht verschluckt werden.
+        let st = zustand_mit_ruf();
+        st.record_alert(101, false, false);
+        assert!(!st.ruf_zuruecknehmen(101));
+        assert!(!st.ruf_ruecknahme_offen(101));
+        // Feld ohne Tablet-Sitzung und unbekanntes Feld: ebenso nichts.
+        assert!(!st.ruf_zuruecknehmen(102));
+        assert!(!st.ruf_zuruecknehmen(999));
+        assert!(!st.record_alert(101, false, true));
+        assert!(ruf_steht(&st, 101));
+    }
+
+    #[test]
+    fn ruecknahme_laesst_die_verletzungsmeldung_stehen() {
+        let st = zustand_mit_ruf();
+        st.record_alert(101, true, true);
+        st.ruf_zuruecknehmen(101);
+        let ov = st.overview();
+        let c = ov.iter().find(|o| o.court_id == 101).unwrap();
+        assert!(c.injury, "die Behandlung läuft weiter");
+        assert!(!c.official_call);
+        // Eine zurückgehaltene Meldung trägt die Verletzung trotzdem weiter:
+        // Zurückgehalten wird nur der Ruf, nicht die ganze Nachricht.
+        assert!(st.record_alert(101, false, true));
+        assert!(!st.overview().iter().any(|o| o.injury || o.official_call));
+        assert!(st.record_alert(101, true, true));
+        let ov = st.overview();
+        let c = ov.iter().find(|o| o.court_id == 101).unwrap();
+        assert!(c.injury);
+        assert!(!c.official_call);
+    }
+
+    #[test]
+    fn ruf_wacht_meldet_jede_ruecknahme_genau_einmal() {
+        let st = zustand_mit_ruf();
+        let mut wacht = RufWacht::default();
+        assert!(wacht.faellig(&st).is_empty(), "nichts offen");
+
+        assert!(st.ruf_zuruecknehmen(101));
+        assert_eq!(wacht.faellig(&st), vec![101]);
+        assert!(wacht.faellig(&st).is_empty(), "nicht in jedem Takt erneut");
+        // Eine zweite Schleife (LAN+Cloud) hört dieselbe Rücknahme auch.
+        assert_eq!(RufWacht::default().faellig(&st), vec![101]);
+
+        // Das Tablet bestätigt, ruft neu, die Turnierleitung nimmt wieder
+        // zurück: Das ist eine neue Rücknahme und wird wieder gemeldet.
+        st.record_alert(101, false, false);
+        assert!(wacht.faellig(&st).is_empty());
+        st.record_alert(101, false, true);
+        assert!(st.ruf_zuruecknehmen(101));
+        assert_eq!(wacht.faellig(&st), vec![101]);
+    }
+
+    #[test]
+    fn offene_ruecknahme_wandert_nicht_mit_dem_feldwechsel() {
+        let st = zustand_mit_ruf();
+        st.ruf_zuruecknehmen(101);
+        st.move_match_score(101, 102, 1);
+        assert!(!st.ruf_ruecknahme_offen(101));
+        assert!(!st.ruf_ruecknahme_offen(102));
+    }
+
+    /// Verlässt das Spiel das Feld, ist auch eine nie bestätigte Rücknahme
+    /// erledigt — sie darf den ersten Ruf des nächsten Spiels nicht
+    /// verschlucken.
+    #[test]
+    fn offene_ruecknahme_endet_mit_dem_raeumen_des_felds() {
+        let st = zustand_mit_ruf();
+        st.ruf_zuruecknehmen(101);
+        st.clear_court(101);
+        assert!(!st.ruf_ruecknahme_offen(101));
+        assert!(st.felder_mit_offener_ruf_ruecknahme().is_empty());
+        assert!(
+            !st.record_alert(101, false, true),
+            "der nächste Ruf ist ein neuer"
+        );
+        assert!(ruf_steht(&st, 101));
     }
 
     #[test]

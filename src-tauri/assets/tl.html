@@ -223,15 +223,26 @@ header {
 .auto.off::before { background: var(--warn); }
 
 /* Störungsband: nimmt die volle Breite, damit es niemand übersieht.
-   `pre-line`: Mehrere Meldungen stehen als eigene Zeilen untereinander
+   Mehrere Meldungen stehen als eigene Zeilen (je ein `div`) untereinander
    (Ruf vom Feld, „Ergebnis fehlt", Meetingpoint) — eine verdrängt die
    andere nicht mehr. */
 .banner {
   display: none; flex: none; padding: 10px 16px; font-weight: 650;
   background: #fef2f2; color: #7f1d1d; border-bottom: 1px solid #fecaca;
-  white-space: pre-line;
 }
 .banner.show { display: block; }
+/* „zurücknehmen" hinter jedem rufenden Feld: klein genug, um die Zeile
+   nicht zu sprengen, aber mit eigener Fläche — auf dem Tablet der
+   Turnierleitung wird getippt, nicht gezielt. */
+.banner .ruf-weg {
+  margin: 0 2px 0 8px; padding: 3px 12px; border-radius: 999px;
+  border: 1px solid #fca5a5; background: #fff; color: #7f1d1d;
+  font: inherit; font-size: .85em; font-weight: 650; cursor: pointer;
+}
+.banner .ruf-weg:hover { background: #fee2e2; }
+/* Feld und sein Knopf bleiben beim Umbruch zusammen — sonst stünde auf dem
+   Handy ein „zurücknehmen" allein in der Zeile, und niemand wüsste, wofür. */
+.banner .ruf-feld { display: inline-block; white-space: nowrap; margin: 2px 14px 2px 0; }
 
 /* ── Hauptbereich: 1 bis 3 Spalten voller Panels ──────────────────────
    `main` nimmt den kompletten Rest der Höhe unter Kopf/Störungsband
@@ -3745,11 +3756,16 @@ function fertigOhneErgebnisAlle() {
 function feldMitHalle(c) {
   return c.location ? `${c.court} (${c.location})` : `${c.court}`;
 }
+const RUF_EINLEITUNG = "📣 Turnierleitung ans Feld gerufen: ";
+function rufFelder(courts) {
+  return (courts || [])
+    .filter((c) => c && c.official_call)
+    .map((c) => ({ courtId: c.court_id, name: `Feld ${feldMitHalle(c)}` }));
+}
 function rufText(courts) {
-  const felder = (courts || []).filter((c) => c && c.official_call);
+  const felder = rufFelder(courts);
   if (!felder.length) return "";
-  return "📣 Turnierleitung ans Feld gerufen: "
-    + felder.map((c) => `Feld ${feldMitHalle(c)}`).join(", ");
+  return RUF_EINLEITUNG + felder.map((f) => f.name).join(", ");
 }
 function stoerungsZeilen({ offline, ruf, fertig, meetingpoint }) {
   if (offline) return [offline];
@@ -3775,6 +3791,71 @@ function mpLeerlaufText() {
   if (!mp || !mp.strict || !mp.idle_since_ms) return "";
   if (serverNow() - mp.idle_since_ms < 60000) return "";
   return "Meetingpoint: Ein Feld ist frei, aber keine gerufene Partie ist spielbereit — bitte Spiele zum Meetingpoint rufen oder Anwesenheit prüfen.";
+}
+
+/** Was das Störungsband gerade zeigt — zum Vergleich, damit es nur bei
+ *  einer echten Änderung neu gezeichnet (und die Felderbox neu eingepasst)
+ *  wird. Seit das Band Knöpfe trägt, taugt sein `textContent` dafür nicht
+ *  mehr. */
+let bandStand = "";
+
+/**
+ * Zeichnet die Zeilen des Störungsbands. Die Ruf-Zeile bekommt hinter jedem
+ * Feld einen Knopf „zurücknehmen" — `rufe` ist `null`, wenn der Turnier-PC
+ * die Aktion nicht kennt (älterer Stand): Ein Knopf, der nichts tut und
+ * nichts sagt, wäre schlimmer als keiner.
+ *
+ * Über das DOM statt `innerHTML`: Feld- und Hallennamen kommen aus BTP.
+ */
+function zeichneBand(banner, zeilen, ruf, rufe) {
+  banner.replaceChildren(...zeilen.map((zeile) => {
+    const div = document.createElement("div");
+    if (!rufe || !ruf || zeile !== ruf) {
+      div.textContent = zeile;
+      return div;
+    }
+    div.append(RUF_EINLEITUNG);
+    rufe.forEach((feld) => {
+      // Ohne Komma: Der Knopf trennt die Felder schon, und ein Komma hinter
+      // einem Knopf läse sich wie ein Satzrest.
+      const gruppe = document.createElement("span");
+      gruppe.className = "ruf-feld";
+      gruppe.append(feld.name);
+      const knopf = document.createElement("button");
+      knopf.type = "button";
+      knopf.className = "ruf-weg";
+      knopf.textContent = "zurücknehmen";
+      knopf.title = `Ruf an ${feld.name} zurücknehmen — am Zähl-Tablet geht das Megafon aus`;
+      knopf.addEventListener("click", () => nimmRufZurueck(feld.courtId));
+      gruppe.append(knopf);
+      div.append(gruppe);
+    });
+    return div;
+  }));
+}
+
+/**
+ * Den Ruf nach der Turnierleitung eines Felds zurücknehmen — aus dem Band
+ * oder aus dem ⋯-Menü der Kachel. MIT Rückfrage: Das ist die gefährliche
+ * Richtung, denn am Feld wartet womöglich noch jemand auf Hilfe.
+ *
+ * Kennung mit Zeitstempel statt 20-s-Fenster: Ruft das Feld gleich wieder
+ * und die Turnierleitung nimmt erneut zurück, ist das eine NEUE Entscheidung
+ * — das Fenster gäbe nur die gemerkte alte Antwort zurück, ohne zu handeln.
+ */
+function nimmRufZurueck(courtId) {
+  const feld = ((state && state.courts) || []).find((x) => x.court_id === courtId);
+  const name = feld ? `Feld ${feldMitHalle(feld)}` : "diesem Feld";
+  if (!confirm(`Ruf nach der Turnierleitung an ${name} zurücknehmen?\n\n`
+    + `Am Zähl-Tablet geht das Megafon aus. Bitte nur, wenn die Sache `
+    + `erledigt ist oder jemand zum Feld geht.`)) {
+    return;
+  }
+  send(
+    `clear-call-${courtId}-${Date.now()}`,
+    { action: "clear_official_call", courtId },
+    `Ruf an ${name} zurückgenommen.`,
+  );
 }
 
 function renderConnection() {
@@ -3805,7 +3886,7 @@ function renderConnection() {
   // Verglichen wird der Text, nicht nur die Sichtbarkeit: Seit das Band
   // mehrere Zeilen trägt, ändert auch eine dazukommende zweite Meldung
   // seine Höhe.
-  const vorher = banner.classList.contains("show") ? banner.textContent : "";
+  const vorher = bandStand;
   // Das Störungsband trägt alles, was niemand übersehen darf — mit klarem
   // Vorrang: Ohne Verbindung ist jede andere Meldung wertlos, weil der
   // gezeigte Stand alt sein kann. Sonst stehen die Meldungen untereinander,
@@ -3818,6 +3899,8 @@ function renderConnection() {
   // Die Halle steht im Text, nicht im Filter: Die Zeilen ignorieren den
   // Hallenfilter ausdrücklich — sonst verschwiegen sie genau den Fall, für
   // den sie gebaut wurden (Gerät auf die andere Halle gestellt).
+  const rufe = rufFelder(state && state.courts);
+  const ruf = rufText(state && state.courts);
   const zeilen = stoerungsZeilen({
     // Genau sein: Die Uhren laufen weiter, sie messen echte Zeit. Stehen
     // geblieben sind Felder, Spielstände und Liste. „Die Anzeige ist
@@ -3827,13 +3910,19 @@ function renderConnection() {
       ? "Keine Verbindung zum Turnier-PC — Felder, Spielstände und Liste stehen auf dem letzten bekannten Stand."
       : "",
     // Megafon-Knopf am Zähl-Tablet. Verschwindet, sobald die Meldung am
-    // Tablet zurückgenommen wird oder das Spiel das Feld verlässt.
-    ruf: rufText(state && state.courts),
+    // Tablet oder hier zurückgenommen wird oder das Spiel das Feld verlässt.
+    ruf,
     fertig: fertigText(),
     meetingpoint: mpLeerlaufText(),
   });
-  const jetzt = zeilen.join("\n");
-  if (jetzt !== vorher) banner.textContent = jetzt;
+  // Der Knopf gehört zum Stand des Bands: Kommt die Fähigkeit des
+  // Turnier-PCs erst mit einem späteren Zustand, muss neu gezeichnet werden.
+  const mitKnopf = !!(state && state.can_clear_official_call);
+  const jetzt = zeilen.join("\n") + (mitKnopf ? "\n+knopf" : "");
+  if (jetzt !== vorher) {
+    bandStand = jetzt;
+    zeichneBand(banner, zeilen, ruf, mitKnopf ? rufe : null);
+  }
   banner.classList.toggle("show", zeilen.length > 0);
   if (jetzt !== vorher) scheduleFitCourts();
   // Der Poll-Takt hängt auch am Erfolg: Sobald ein Abruf misslingt, gilt
@@ -4397,6 +4486,13 @@ function courtCard(c, cellStyle) {
     feldEintraege.push(`<button type="button" data-free="${c.court_id}"
         title="Das Spiel zurück in die Warteliste, das Feld wird frei">${mi("zurueck")}Vom Feld nehmen</button>`);
   }
+  // Ruf nach der Turnierleitung zurücknehmen — zweiter Weg neben dem Knopf
+  // im Störungsband, direkt an der Kachel mit dem Abzeichen „TL gerufen".
+  // Nur wenn der Turnier-PC die Aktion kennt (Muster `can_lock_courts`).
+  if (state.can_clear_official_call && c.official_call) {
+    feldEintraege.push(`<button type="button" data-clearcall="${c.court_id}"
+        title="Die Meldung „TL gerufen“ beenden — am Zähl-Tablet geht das Megafon aus">${mi("zurueck")}Ruf zurücknehmen</button>`);
+  }
   // Feld sperren/freigeben (Spec `tl-web-felder-sperren`).
   //
   // Nur wenn der Turnier-PC die Aktion kennt: Der Relay wird bei jedem
@@ -4813,6 +4909,15 @@ function wireCourts(box) {
         return;
       }
       freeCourt(feld);
+    });
+    btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+  });
+
+  // Ruf nach der Turnierleitung zurücknehmen (Rückfrage in `nimmRufZurueck`).
+  scopeAll(box, "button[data-clearcall]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      nimmRufZurueck(Number(btn.dataset.clearcall));
     });
     btn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   });

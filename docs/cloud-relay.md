@@ -470,6 +470,39 @@ Wie bei der Feldsperre trägt der `TlState` ein additives Merkmal
 (`can_reload_tablets`), damit eine neue Seite an einem älteren Host keinen
 toten Knopf zeigt.
 
+**Ruf nach der Turnierleitung zurücknehmen** (seit v0.9.431): Der Ruf lebt
+am Tablet, der Relay hält ihn nicht vor — die Rücknahme braucht deshalb einen
+Weg vom Host **zum Tablet eines Felds**. Drei Frames:
+
+- `TlAction::clear_official_call { courtId }` (Gerät → Host),
+- `HostFrame::official_call_cleared { courtId }` (Host → Relay),
+- `ServerMsg::official_call_cleared` (Server → Tablet, ohne Nutzlast). Der
+  Relay stellt es **nur** dem Tablet zu, das dieses Feld gerade hält; hängt
+  keines dran, verfällt der Hinweis.
+
+Verloren geht dabei nichts: Der Host merkt sich die offene Rücknahme je Feld
+und hält einen wiedergemeldeten Ruf zurück, bis das Tablet „kein Ruf" meldet.
+Meldet ein Cloud-Tablet nach dem Neuverbinden den alten Ruf
+(`RelayFrame::Alert`), antwortet der Host darauf sofort wieder mit
+`official_call_cleared`. Zusätzlich schickt die `RufWacht` in
+`relay_client.rs` den Hinweis im Sweep für jedes Feld mit offener Rücknahme
+— je Host-Sitzung einmal, nach einem Abriss der Host-Leitung also erneut.
+
+Eine **Zustellbestätigung gibt es nicht**: Der Host erfährt nicht, ob der
+Relay den Hinweis einem Tablet zustellen konnte, und wiederholt ihn in
+derselben Sitzung nicht von sich aus. Die Strecke heilt sich über das Tablet:
+Es meldet seinen Zustand bei jedem Verbinden und — weil der Relay Meldungen
+nur vom Halter des Felds durchlässt (`is_holder` in `forward_alert`) — noch
+einmal, sobald es das Feld nach „Feld belegt" bekommen hat. Auf einen
+wiedergemeldeten Ruf folgt die Antwort oben, „kein Ruf" schließt die
+Rücknahme. Ablauf am Tablet: [tablet.md](tablet.md).
+
+Wie bei der Feldsperre trägt der `TlState` ein additives Merkmal
+(`can_clear_official_call`): Ein älterer Host verwürfe die Aktion still, die
+Seite zeigt Knopf und Menüeintrag deshalb nur, wenn es ankommt. Der Relay
+kommt mit dem Merge, vor dem Client-Release — ein Host, der das neue
+`HostFrame` schickt, trifft also nie auf einen Relay, der es nicht kennt.
+
 **Feldsperre** (Spec `tl-web-felder-sperren`, seit v0.9.258): eine neue
 `TlAction`-Variante `lock_court { courtId, locked }`. Der Relay braucht dafür
 **keine** Code-Änderung — er parst Aktionen typisiert und bekommt die Variante

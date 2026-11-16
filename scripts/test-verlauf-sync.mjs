@@ -246,9 +246,11 @@ const anzahl = (ruf, name) => ruf.filter((r) => r === name).length;
 }
 
 // ── Der Frame-Zweig ruft die geprüfte Funktion ────────────────────────
+// Danach folgt nur noch das Nachholen der Meldungen (✚, 📣) — das Gerät
+// hält das Feld jetzt sicher (geprüft in test-stoerungsband.mjs).
 assert.match(
   seite,
-  /if \(msg\.type === 'match_assigned'\) \{\s*beiMatchAssigned\(msg\);\s*\}/,
+  /if \(msg\.type === 'match_assigned'\) \{\s*beiMatchAssigned\(msg\);\s*meldungenNachholen\(\);\s*\}/,
   "ws.onmessage reicht match_assigned an beiMatchAssigned",
 );
 

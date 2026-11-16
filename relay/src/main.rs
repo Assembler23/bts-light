@@ -7141,6 +7141,16 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                 namespace.tablets.len()
             );
         }
+        HostFrame::OfficialCallCleared { court_id } => {
+            // Die Turnierleitung hat den Ruf dieses Felds zurückgenommen.
+            // Reiner Briefträger: Der Ruf lebt am Tablet, der Relay hält ihn
+            // nicht vor — es gibt hier also nichts zu räumen. Ohne
+            // verbundenes Tablet verfällt der Hinweis; der Turnier-PC sagt
+            // es erneut, sobald das Tablet seinen Ruf wieder meldet.
+            if let Some(t) = namespace.tablets.get(&court_id) {
+                let _ = t.send(text(&ServerMsg::OfficialCallCleared));
+            }
+        }
         HostFrame::MatchCleared {
             court_id,
             court_label,
@@ -13549,6 +13559,47 @@ mod tests {
             // Marke an, hielte sich jede Seite sofort wieder für veraltet.
             assert_eq!(marke, seiten_marke());
         }
+    }
+
+    #[tokio::test]
+    async fn die_ruecknahme_des_rufs_erreicht_nur_das_tablet_des_felds() {
+        let (broker, mut rx1, host) = broker_with_tablet(101).await;
+        let mut rx2 = {
+            let (tx, rx) = kanal_test();
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").expect("Namespace steht");
+            ns.tablets.insert(202, tx);
+            rx
+        };
+
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::OfficialCallCleared { court_id: 101 },
+            &host,
+        )
+        .await;
+
+        let Message::Text(t) = rx1.try_recv().expect("Feld 101 erfährt es") else {
+            panic!("Text-Frame erwartet")
+        };
+        assert_eq!(t.as_str(), r#"{"type":"official_call_cleared"}"#);
+        assert!(rx2.try_recv().is_err(), "Feld 202 hat damit nichts zu tun");
+
+        // Ein Feld ohne Tablet (oder eins, das es nicht gibt): kein Fehler,
+        // und vor allem kein neu angelegtes Feld im Namespace.
+        let felder_vorher = broker.namespaces.lock().await["ns1"].court_labels.len();
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::OfficialCallCleared { court_id: 999 },
+            &host,
+        )
+        .await;
+        assert_eq!(
+            broker.namespaces.lock().await["ns1"].court_labels.len(),
+            felder_vorher
+        );
     }
 
     #[tokio::test]
