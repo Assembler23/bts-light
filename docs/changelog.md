@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.440
+
+- **Ballzähler: Federball besser zu erkennen.** Das Symbol neben der Zahl der
+  verbrauchten Bälle ist neu gezeichnet — ein Federkranz mit Korkkappe statt
+  der dünnen Strichzeichnung. Es gilt am Zähl-Tablet und in der
+  Turnierleitungs-Oberfläche; an der Bedienung ändert sich nichts.
+
 ## v0.9.439
 
 - **Update im laufenden Turnier: wenige Sekunden statt zwanzig.** Liegt ein
