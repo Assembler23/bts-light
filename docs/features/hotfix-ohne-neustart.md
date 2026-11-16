@@ -117,7 +117,14 @@ Deshalb:
   abzweigt. Der Fix wird dorthin übernommen (Cherry-Pick) **und** regulär nach
   `main` gemergt — letzteres bringt ihn über den Relay-Deploy auch zu den
   Cloud-Geräten und in das nächste Release.
-- Jeder Push auf `hotfix/v*` startet den Paket-Job. Er **bricht ab**, wenn
+- Den Paket-Job startet ein Maintainer **von Hand auf `main`** und nennt den
+  Tag. Workflow und Bau-Skript kommen so aus `main`; der Hotfix-Zweig wird
+  nur als Daten gelesen (über git, nie ausgecheckt oder ausgeführt).
+  *Geändert am 16.11.2026 nach dem Security-Review von PR 3:* Die erste
+  Fassung („jeder Push auf `hotfix/v*` startet den Job") hätte Workflow und
+  Skript aus dem Zweig selbst laufen lassen — wer dort schreiben darf, hätte
+  die Liste fälschen können, die der Freigebende liest.
+- Der Job **bricht ab**, wenn
   sich gegenüber dem Tag ein Kern-Pfad geändert hat. Kern-Pfade sind
   `src-tauri/**` außer `src-tauri/assets/*.html`, dazu `relay-proto/**`,
   `Cargo.toml`, `Cargo.lock`.
@@ -132,9 +139,11 @@ Deshalb:
 ### E3 — Signiert wird erst nach Freigabe durch einen Maintainer
 
 Bisher signiert nur der Release-Lauf, den allein ein Tag-Push des Admins
-auslöst. Der Paket-Job baut sofort, wartet vor dem Signieren aber in einem
-geschützten GitHub-Environment (`seiten-hotfix`, nur für `hotfix/v*`) auf die
-Freigabe eines Maintainers. Erst danach wird signiert und veröffentlicht.
+auslöst. Der Paket-Job prüft und baut zur Probe sofort und zeigt den
+Unterschied der Seiten gegenüber dem Tag; vor dem Signieren wartet er in
+einem geschützten GitHub-Environment (`seiten-hotfix`, nur von `main` aus)
+auf die Freigabe eines Maintainers. Signiert wird nur, wenn der Bau danach
+dieselben Bytes ergibt wie der Probebau. Erst dann wird veröffentlicht.
 
 ### E4 — Umfang und Reichweite von Weg 1
 
@@ -259,8 +268,8 @@ dieser Reihenfolge und lehnt beim ersten Fehler ab:
 4. `format == 1` und `art == "seiten"`.
 5. Die Menge der Seitennamen ist exakt die der eingebauten Seiten. Namen
    werden nur gegen diese Liste verglichen, nie als Dateipfad benutzt.
-6. Jede Seite enthält ihre Pflicht-Platzhalter (z. B. `__SEITEN_MARKE__` in
-   `tablet.html`).
+6. Keine Seite ist leer, und jede enthält ihre Pflicht-Platzhalter (z. B.
+   `__SEITEN_MARKE__` in `tablet.html`).
 7. `kern` == eigene Version.
 8. `folge` > aktive Folge, und die Folge ist nicht gesperrt.
 
@@ -398,13 +407,19 @@ Weg 1 — Seiten:
 
 Paket-Job:
 
-- [ ] Ein Push auf `hotfix/vX.Y.Z` mit reiner HTML-Änderung erzeugt nach
-      Freigabe ein Paket mit `kern` = X.Y.Z und der richtigen Folge.
+- [ ] Ein von Hand auf `main` gestarteter Lauf für `vX.Y.Z` erzeugt bei
+      reiner HTML-Änderung auf `hotfix/vX.Y.Z` nach Freigabe ein Paket mit
+      `kern` = X.Y.Z und der richtigen Folge.
 - [ ] Ändert der Zweig einen Kern-Pfad gegenüber dem Tag, bricht der Job vor
       dem Signieren mit erklärender Meldung ab.
 - [ ] Ohne Freigabe im Environment wird nichts signiert und nichts
       veröffentlicht.
-- [ ] Ein Push auf `main` oder einen anderen Zweig startet den Job nicht.
+- [ ] Kein Push startet den Job; der Hotfix-Zweig wird im Lauf nie
+      ausgecheckt oder ausgeführt.
+- [ ] Eine verschobene Kern-Datei, ein Pfad mit Sonderzeichen und eine Seite,
+      die ein Verweis ist, führen jeweils zum Abbruch.
+- [ ] Liegt unter dem Paketnamen schon ein anderer Inhalt auf dem Server,
+      bricht der Lauf ab, statt zu überschreiben oder zu überspringen.
 - [ ] Ein vom Bau-Skript erzeugtes Paket besteht die Prüfung der App.
 
 Weg 2 — Kern:
@@ -531,7 +546,7 @@ Messung und Feldtest (nur am Windows-PC):
 ## Risiken & Rollback
 
 - **Signaturschlüssel außerhalb des Tag-Wegs.** Mit dem Paket-Job entsteht
-  signierter Code ohne Admin-Tag. Schranken: Environment nur für `hotfix/v*`,
+  signierter Code ohne Admin-Tag. Schranken: Handstart nur von `main`,
   Pflicht-Freigabe, Abbruch bei Kern-Diff, Inhalte entstehen ausschließlich
   aus dem Repo.
 - **Ein Seiten-Paket ändert das Verhalten aller Geräte dieses PCs auf
@@ -623,8 +638,9 @@ Versionsnummer je PR erst beim Merge festlegen und in `src-tauri/Cargo.toml`,
    `signatur.rs`, `minisign-verify` direkt. Ablage in `app_data_dir/seiten/`,
    volle Prüfung bei jedem Start. *security-reviewer.*
 3. **Paket-Job** — `scripts/build-seiten-paket.mjs`, `seiten-paket.yml`
-   (Auslöser `hotfix/v*`, Kern-Diff-Abbruch, Environment `seiten-hotfix`,
-   Upload erst Nutzlast, dann Index). *security-reviewer* (Secrets außerhalb
+   (Handstart auf `main` mit Tag, Zweig nur als Daten, Kern-Diff-Abbruch,
+   Environment `seiten-hotfix`, Upload erst Nutzlast, dann Index aus der
+   Server-Liste). *security-reviewer* (Secrets außerhalb
    des Release-Laufs).
 4. **Angebot, Banner, Seiten-Rückweg** — `update_check` liest `seiten.json`,
    Commands `seiten_uebernehmen`/`seiten_zurueck`, `updateBanner.mjs`,

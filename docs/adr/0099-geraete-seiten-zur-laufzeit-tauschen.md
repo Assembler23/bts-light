@@ -34,7 +34,10 @@ Kräfte:
   streng wachsende `folge` (Commits seit dem Tag). Das ist zugleich der
   Downgrade- und Replay-Schutz; der eingebaute Stand ist Folge 0.
 - **Signiert wird erst nach Freigabe** durch einen Maintainer (geschütztes
-  Environment, nur für `hotfix/v*`).
+  Environment, nur von `main` aus).
+- **Der Paket-Job wird von Hand auf `main` gestartet**, mit dem Tag als
+  Eingabe. Workflow und Bau-Skript kommen aus `main`; der Hotfix-Zweig wird
+  nur über git als Daten gelesen.
 - **Globaler Seitenstand** `static RwLock<Arc<Seitenstand>>` in
   `tablet/assets.rs`; die Marke ist Teil desselben `Arc` und wechselt atomar
   mit. Die `pub const` entfallen. Die Slave-Brücke nutzt dasselbe Modul.
@@ -65,6 +68,11 @@ Kräfte:
   ohne Internet funktionieren.
 - **Ohne Freigabe signieren.** Verworfen: Dann könnte jeder Push auf den
   Zweig Code an alle Installationen anbieten.
+- **Paket-Job bei jedem Push auf `hotfix/v*`** (erste Fassung). Verworfen
+  nach dem Security-Review vom 16.11.2026: Ein so ausgelöster Workflow läuft
+  mit Workflow-Datei und Skripten aus dem Zweig; wer dort schreiben darf,
+  könnte Prüfung und Zusammenfassung fälschen, und die Freigabe wäre teils
+  wirkungslos.
 
 ## Konsequenzen
 
