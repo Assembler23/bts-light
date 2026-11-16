@@ -91,6 +91,33 @@ struct Aufbau {
     daten: PathBuf,
 }
 
+/// Wie [`aufbau`], aber beide Dateien sind schon einmal gelaufen — so wie
+/// im Betrieb: Die alte läuft seit Stunden, die neue hat ihren Probelauf
+/// hinter sich. Ohne das mäßen die Schritte danach vor allem die Erstprüfung
+/// frischer Dateien durch den Virenscanner, nicht den Wechsel.
+fn aufbau_vorgewaermt() -> Aufbau {
+    let a = aufbau();
+    for datei in [&a.pfade.aktiv, &a.pfade.neu] {
+        tausch::probelauf_mit(datei, &[ARG_SELBSTTEST], MESS_OBERGRENZE)
+            .expect("Vorwärmen: Probelauf");
+    }
+    a
+}
+
+/// Zeit zwischen zwei Zeilen im Protokoll des Wächters (Millisekunden).
+fn zwischen(protokoll: &str, von: &str, bis: &str) -> Option<u64> {
+    let zeit = |muster: &str| -> Option<u64> {
+        protokoll
+            .lines()
+            .find(|z| z.contains(muster))?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    };
+    Some(zeit(bis)?.saturating_sub(zeit(von)?))
+}
+
 fn aufbau() -> Aufbau {
     let dir = tempfile::tempdir().unwrap();
     let name = if cfg!(windows) {
@@ -272,6 +299,13 @@ fn uebergabe_probe() {
         "MESSWERT ende-der-app-bis-ankunft-ms {}",
         angekommen.as_millis()
     );
+    if let Some(ms) = zwischen(
+        &protokoll(&a.daten),
+        "Wächter gestartet",
+        "neue Version gestartet",
+    ) {
+        println!("MESSWERT waechter-start-bis-neue-version-laeuft-ms {ms}");
+    }
     assert!(
         warte_bis(Duration::from_secs(5), || protokoll(&a.daten)
             .contains("angekommen nach"))
@@ -282,7 +316,7 @@ fn uebergabe_probe() {
     assert!(!a.pfade.defekt.exists());
 
     // ── 4. Fehlstart: N stirbt sofort → Rückfall ─────────────────────────
-    let b = aufbau();
+    let b = aufbau_vorgewaermt();
     let alt = sha256(&b.pfade.aktiv);
     tausch::tauschen(&b.pfade).unwrap();
     let seit = uebergabe_starten(&b, frist, "kind-stirbt");
@@ -298,6 +332,13 @@ fn uebergabe_probe() {
         "MESSWERT fehlstart-bis-rueckfall-ms {}",
         seit.elapsed().as_millis()
     );
+    if let Some(ms) = zwischen(
+        &protokoll(&b.daten),
+        "Wächter gestartet",
+        "neue Version gestartet",
+    ) {
+        println!("MESSWERT fehlstart-waechter-start-bis-neue-version-laeuft-ms {ms}");
+    }
     let z = tausch::zustand_lesen(&b.daten).unwrap();
     println!("Grund: {}", z.grund.clone().unwrap_or_default());
     assert!(z.grund.unwrap_or_default().contains("Code 3"));
@@ -319,7 +360,7 @@ fn uebergabe_probe() {
     );
 
     // ── 5. Hänger: N meldet sich nie → Frist → Rückfall ──────────────────
-    let c = aufbau();
+    let c = aufbau_vorgewaermt();
     let alt = sha256(&c.pfade.aktiv);
     tausch::tauschen(&c.pfade).unwrap();
     let frist = Duration::from_millis(1500);
@@ -338,6 +379,20 @@ fn uebergabe_probe() {
         dauer.as_millis()
     );
     assert!(dauer >= frist, "nicht vor der Frist");
+    // Die Frist zählt ab dem START der neuen Version, nicht ab dem Versuch,
+    // sie zu starten: Blockiert der Virenscanner das Erzeugen des Prozesses,
+    // darf diese Zeit die Frist nicht aufzehren.
+    let gewartet = zwischen(
+        &protokoll(&c.daten),
+        "neue Version gestartet",
+        "Rückfall: die neue Version meldete sich nicht",
+    )
+    .expect("Protokoll nennt Start und Rückfall");
+    println!("MESSWERT haenger-start-bis-rueckfall-ms {gewartet} (Frist 1500)");
+    assert!(
+        gewartet + 50 >= frist.as_millis() as u64,
+        "der Wächter hat nur {gewartet} ms auf die neue Version gewartet"
+    );
     let z = tausch::zustand_lesen(&c.daten).unwrap();
     assert_eq!(
         (z.von.as_str(), z.nach.as_str()),
