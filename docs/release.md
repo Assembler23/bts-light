@@ -534,6 +534,74 @@ Die Regeln des Bau-Skripts (`scripts/build-seiten-paket.mjs`) prüft
 Prüfung der App besteht, hält der Rust-Test
 `paket_aus_dem_bauskript_besteht_die_app_pruefung` fest.
 
+## Kern-Artefakt und Datenformat (`release.yml`, Job `kern`)
+
+> Spec: [features/hotfix-ohne-neustart.md](features/hotfix-ohne-neustart.md) ·
+> ADR 0100/0101. Stand v0.9.436: Der Job veröffentlicht das Artefakt; die App
+> **nutzt** es noch nicht — der Kernwechsel ohne Installer folgt.
+
+Nach `publish` legt jeder Tag-Release zusätzlich ab (unter
+`download/bts-light/`):
+
+| Datei | Inhalt |
+|---|---|
+| `kern/bts-light-<version>.exe` | die nackte Programmdatei, aus dem fertigen Installer entnommen (`7z x`), damit sie mit der installierten Datei identisch ist |
+| `kern/kern-<version>.json` + `.sig` | der **Kern-Kopf**: Version, SHA-256 und Größe der Programmdatei, `rueckwaerts_lesbar_ab`. Signiert wird der Kopf, nicht die exe. |
+| `kern.json` | unsignierter Index: nur die neueste Version |
+
+Der Job läuft erst, wenn Installer und `latest.json` veröffentlicht sind, und
+darf scheitern (`continue-on-error`) — das Auto-Update dieses Releases hält
+er nicht auf. Ein Zeitlimit von 15 Minuten sorgt dafür, dass er auch den
+**nächsten** Release nicht lange blockiert (alle Release-Läufe teilen sich
+eine Sperre). **Ein Scheitern ist leise:** Der Lauf bleibt grün, es gibt nur
+eine Anmerkung. Nach einem Release also einmal nachsehen, ob `kern/` die neue
+Version enthält; fehlt sie, bietet die App für diese Version nur den
+Installer-Weg an.
+
+Bevor der Job etwas signiert, prüft er den heruntergeladenen Installer gegen
+dessen Signatur (`scripts/verify-minisign.mjs`, Updater-Schlüssel aus
+`tauri.conf.json`) und dass er zu dieser Version gehört. Der Installer liegt
+als Release-Asset offen; ohne diese Prüfung stellte der Job für eine
+ausgetauschte Datei eine echte Signatur aus. Hochgeladen wird erst die
+Nutzlast, dann der Index.
+
+### `release/datenformat.json` — darf man zurück?
+
+Alte und neue Version teilen sich `config.json` und die Stores. Ob eine App
+nach einem Update zur vorigen Version **zurück** darf, entscheidet
+`rueckwaerts_lesbar_ab`: die älteste Version, die die Daten der aktuellen noch
+lesen und damit fachlich richtig arbeiten kann. Dass sie neue Einstellungen
+nicht kennt und beim Speichern verliert, ist erlaubt. Der Wert wandert in den
+signierten Kern-Kopf; fehlt er, gilt „nicht lesbar".
+
+Damit die Angabe nicht still veraltet, vergleicht der Test
+`abdruck_weicht_ab_macht_rot` (`src-tauri/tests/datenformat_abdruck.rs`) einen
+**Abdruck** aller gespeicherten Formate mit dem Feld `abdruck` in derselben
+Datei. **Ändert ein PR ein gespeichertes Format, ist die CI rot**, und die
+Fehlermeldung nennt den neuen Abdruck. Dann sind zwei Dinge einzutragen:
+
+1. `abdruck` — der neue Wert aus der Meldung.
+2. `rueckwaerts_lesbar_ab` — bleibt, wenn die vorige Version die Daten weiter
+   lesen kann (ein neues Feld mit Standardwert ist der Normalfall). Auf die
+   **neue** Version setzen bei: neuer Enum-Variante, die gespeichert wird;
+   umbenanntem Feld oder geänderter Bedeutung; Einweg-Migration.
+
+Dazu eine neue Zeile in `begruendung`. Im PR prüft die CI zusätzlich gegen den
+Zielzweig (`scripts/check-datenformat.mjs`): Die Grenze **sinkt nie**, und ein
+geänderter Abdruck ohne geänderte Begründung ist ein Fehler — wer nur die Zahl
+aus der Meldung kopiert, hat nicht entschieden.
+
+Der Abdruck geht über die Definitionen aller Typen mit `Deserialize` in den
+Dateien der Liste `DATEIEN` im Test, dazu über eine Namensliste der
+`relay-proto`-Typen, die in gespeicherten Dateien stecken (Punktverlauf,
+Zettel-Ereignisse, Meetingpoint). Ein zweiter Test verlangt, dass **jede**
+Quelldatei mit einem `Deserialize`-Typ entweder dort oder in
+`NICHT_GESPEICHERT` steht — ein neuer Store kann also nicht unbemerkt
+entstehen. Grenzen: Der Abdruck erkennt Struktur, nicht jede
+Bedeutungsänderung (etwa einen anderen Standardwert hinter
+`#[serde(default = "…")]`), und ein neuer `relay-proto`-Typ in einem Store
+muss von Hand in die Namensliste.
+
 ## Benötigte GitHub-Secrets (einmalig eingerichtet)
 
 | Secret | Zweck |

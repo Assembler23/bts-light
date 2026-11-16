@@ -349,6 +349,11 @@ jobs:
       - name: Seiten-Paket – Bau-Skript und Workflow
         run: node scripts/test-seiten-paket.mjs
 
+      # Kern-Kopf (Spec hotfix-ohne-neustart): Bau-Skript, datenformat.json
+      # und dass der Release-Job `kern` den Installer-Weg nie aufhält.
+      - name: Kern-Kopf – Bau-Skript und Release-Job
+        run: node scripts/test-kern-kopf.mjs
+
       # Update-Banner, Seiten-Teil: jede Lage der Banner-Tabelle der Spec.
       - name: Update-Banner – Seiten-Zeile
         run: node scripts/test-update-banner.mjs
@@ -591,6 +596,21 @@ jobs:
 
       - name: Rust tests (Linux)
         run: cargo test --workspace
+
+      # Datenformat (ADR 0101): gegenüber dem Zielzweig darf die
+      # Lesbarkeits-Grenze nie sinken, und ein neuer Abdruck braucht eine neue
+      # Begründung. Der Rust-Test sieht nur den neuen Stand — diesen Vergleich
+      # kann er nicht ziehen.
+      - name: Datenformat – Grenze sinkt nicht
+        if: github.event_name == 'pull_request'
+        env:
+          ZIEL: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet --depth=1 origin "${ZIEL}"
+          git show FETCH_HEAD:release/datenformat.json > /tmp/datenformat-alt.json 2>/dev/null \
+            || rm -f /tmp/datenformat-alt.json
+          node scripts/check-datenformat.mjs /tmp/datenformat-alt.json release/datenformat.json
 
       # Die Pi-Skripte laufen nur unter Linux; hier werden sie wenigstens
       # gelesen. Ab Stufe "warning" - Hinweise (info/style) bleiben erlaubt.

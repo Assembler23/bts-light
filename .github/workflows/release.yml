@@ -271,3 +271,138 @@ jobs:
             rel/*-setup.exe \
             ${APKS} \
             bts-deploy@178.104.221.177:/var/www/badhub/public/download/bts-light/
+
+  # Kern-Artefakt für den Kernwechsel ohne Installer (Spec
+  # docs/features/hotfix-ohne-neustart.md, ADR 0100/0101): die nackte
+  # Programmdatei, dazu ein signierter Kopf, der sie per SHA-256 und Größe
+  # benennt und die Lesbarkeits-Grenze aus release/datenformat.json trägt.
+  #
+  # Läuft NACH `publish` und darf scheitern (`continue-on-error`): Der
+  # Installer-Weg und `latest.json` sind dann längst veröffentlicht. Ohne
+  # Kern-Artefakt bietet eine App nur den bisherigen Installer-Weg an.
+  #
+  # Die Programmdatei wird aus dem fertigen Installer entnommen, nicht aus
+  # dem Build-Verzeichnis — so ist sie mit der installierten Datei identisch.
+  kern:
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # Hartes Zeitlimit: Der Lauf hält die gemeinsame Release-Sperre. Ein
+    # hängender Upload dürfte sonst den NÄCHSTEN Release stundenlang
+    # aufhalten — gerade dann, wenn ein Fix dringend ist.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      HOST: bts-deploy@178.104.221.177
+      VERZEICHNIS: /var/www/badhub/public/download/bts-light
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Nur für das Signierwerkzeug (@tauri-apps/cli aus dem Lockfile).
+      - name: Signierwerkzeug installieren
+        run: npm ci --ignore-scripts
+
+      - name: Version aus dem Tag
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Kein Versions-Tag: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          GEBAUT=$(jq -r .version package.json)
+          if [ "${GEBAUT}" != "${VERSION}" ]; then
+            echo "::error::Tag ${VERSION} und package.json ${GEBAUT} weichen ab."
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Installer holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p rel
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" --dir rel \
+            --pattern '*-setup.exe' --pattern '*-setup.exe.sig'
+          ls -la rel
+
+      # Der Installer liegt als Release-Asset offen und ließe sich dort
+      # austauschen. Bevor dieser Job für seinen Inhalt eine Signatur
+      # ausstellt, muss er der sein, den der Build-Job signiert hat — und zu
+      # dieser Version gehören.
+      - name: Installer gegen seine Signatur prüfen
+        run: |
+          set -euo pipefail
+          SETUP=$(ls rel/*_"${VERSION}"_*-setup.exe)
+          test "$(echo "${SETUP}" | wc -l)" -eq 1
+          node scripts/verify-minisign.mjs "${SETUP}" "${SETUP}.sig"
+          echo "SETUP=${SETUP}" >> "${GITHUB_ENV}"
+
+      # 7z liest NSIS-Installer. Genau EINE bts-light.exe muss darin liegen.
+      - name: Programmdatei entnehmen und Kopf bauen
+        run: |
+          set -euo pipefail
+          command -v 7z > /dev/null || sudo apt-get install -y p7zip-full
+          7z i | head -3 || true
+          7z x -y -oauszug "${SETUP}" > /dev/null
+          mapfile -t TREFFER < <(find auszug -type f -iname 'bts-light.exe')
+          if [ "${#TREFFER[@]}" -ne 1 ]; then
+            echo "::error::Erwartet genau eine bts-light.exe im Installer, gefunden: ${#TREFFER[@]}"
+            find auszug -maxdepth 2 | head -50
+            exit 1
+          fi
+          mkdir -p kern
+          cp "${TREFFER[0]}" "kern/bts-light-${VERSION}.exe"
+          node scripts/build-kern-kopf.mjs kopf \
+            --exe "kern/bts-light-${VERSION}.exe" --version "${VERSION}" \
+            --datenformat release/datenformat.json --out "kern/kern-${VERSION}.json"
+
+      - name: Kopf signieren
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          npx --no-install tauri signer sign "kern/kern-${VERSION}.json" > /dev/null
+          test -s "kern/kern-${VERSION}.json.sig"
+
+      - name: SSH einrichten
+        env:
+          SCHLUESSEL: ${{ secrets.SSH_DEPLOY_KEY_V2 }}
+          BEKANNTE_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "${SCHLUESSEL}" > ~/.ssh/id_ed25519
+          printf '%s\n' "${BEKANNTE_HOSTS}" > ~/.ssh/known_hosts
+          printf 'Host *\n  StrictHostKeyChecking yes\n  BatchMode yes\n  ConnectTimeout 15\n' > ~/.ssh/config
+
+      # Erst die Nutzlast (Programmdatei, Kopf, Signatur) …
+      - name: Kern hochladen
+        run: |
+          set -euo pipefail
+          ssh "${HOST}" "mkdir -p '${VERZEICHNIS}/kern'"
+          rsync -av --timeout=120 --chmod=F644 \
+            "kern/bts-light-${VERSION}.exe" \
+            "kern/kern-${VERSION}.json" \
+            "kern/kern-${VERSION}.json.sig" \
+            "${HOST}:${VERZEICHNIS}/kern/"
+
+      # … dann der Index: Er darf nie auf einen Kern zeigen, der noch nicht
+      # vollständig da ist.
+      - name: Index hochladen
+        run: |
+          set -euo pipefail
+          node scripts/build-kern-kopf.mjs index --version "${VERSION}" --out kern.json
+          rsync -av --timeout=120 --chmod=F644 kern.json "${HOST}:${VERZEICHNIS}/"
