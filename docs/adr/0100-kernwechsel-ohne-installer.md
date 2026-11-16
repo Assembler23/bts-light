@@ -31,9 +31,11 @@ Befunde am Code:
   `bts-light.exe` → `bts-light.vorher.exe` und `neu` → `bts-light.exe`.
 - **Probelauf vor dem Angebot:** `bts-light.neu.exe --selbsttest`. Schlägt er
   fehl, wird der Tausch nicht angeboten.
-- **Strikte Reihenfolge:** alte App hält die Übertragung an und schließt die
-  Relay-Verbindung, tauscht, startet den Wächter und endet; erst danach
-  startet die neue App.
+- **Strikte Reihenfolge:** alte App **tauscht zuerst** (bei laufender
+  Übertragung), hält dann die Übertragung an und schließt die
+  Relay-Verbindung, startet den Wächter und endet; erst danach startet die
+  neue App. *(Geändert am 16.11.2026: Der Tausch stand ursprünglich nach dem
+  Anhalten, also in der Lücke — siehe „Vierter Lauf".)*
 - **Wächter** ist die alte Programmdatei mit `--waechter`, ohne Tauri und
   ohne Mutex. Er wartet auf das Ende der alten App, startet die neue und
   stellt die alte wieder her, wenn die neue vor ihrer Ankunftsmeldung endet
@@ -285,6 +287,48 @@ verdoppeln —, misst die Sonde seither getrennt:
 
 Bleibt auch nach 6 s Laufzeit eine Sperre von Sekunden, muss vor dem
 Anschluss geklärt werden, welcher der beiden Schritte hängt.
+
+### Vierter Lauf: Das Umbenennen blockiert unvorhersehbar — der Tausch wandert vor die Lücke (16.11.2026)
+
+Stand `2723aa5`, beide Umbenennungen einzeln gemessen:
+
+| Messung | laufende Datei beiseite | neue Datei einsetzen |
+|---|---|---|
+| nach 6 s Laufzeit der alten App | **3,79 s** (1 Versuch) | 3 ms (1 Versuch) |
+| Gegenprobe, 300 ms nach dem Start | 7 ms (1 Versuch) | **9,70 s** (1 Versuch) |
+
+Übrige Werte wie zuvor: neue Version 1,26 s nach dem Ende der alten
+angekommen, Fehlstart → alte Version nach 0,97 s wieder aktiv, Hänger →
+Rückfall 1531 ms nach dem Start bei 1500 ms Frist. Erster Start einer
+frischen Datei diesmal 5,2 s.
+
+**Befund:** Auf diesem Rechner blockiert in jedem Tausch **eine** der beiden
+Umbenennungen für Sekunden — mal die eine, mal die andere, jeweils als ein
+einziger, lange hängender Aufruf, der dann gelingt. Die Vermutung „hängt am
+frischen Start" ist damit widerlegt: Nach 6 s Laufzeit blockierte es
+ebenfalls. Was die Schutzsoftware in dieser Zeit tut, ist von außen nicht zu
+sehen; zu vermuten ist eine Nachprüfung von Programmdateien, die kurz zuvor
+zum ersten Mal liefen. Ob das auch für eine seit Stunden laufende Datei
+gilt, hat die Sonde nicht gemessen.
+
+**Entscheidung: Der Tausch findet vor dem Anhalten der Übertragung statt.**
+Die laufende App stört es nicht, wenn ihre Programmdatei umbenannt wird; sie
+läuft aus der umbenannten Datei weiter. Der Tausch braucht die angehaltene
+Übertragung nicht. Damit gilt:
+
+- Wie lange das Umbenennen dauert, ist für die Lücke **gleichgültig** — auch
+  10 s kosten keinen Ausfall, nur Wartezeit nach dem Klick.
+- Die Lücke besteht nur noch aus: Übertragung anhalten → App endet → 0,4 s
+  Nachlauf → neue Version starten (0,2 s) → Port binden. Gemessen mit
+  gespielter App: 1,3 bis 1,4 s vom Ende der alten bis zur Ankunft der neuen.
+- Scheitert der Tausch, ist nichts angehalten worden. Der Fall „Übertragung
+  nach gescheitertem Tausch wieder starten" entfällt.
+- Neue Grenze: Stürzt die App zwischen Tausch und Übergabe ab, startet beim
+  nächsten Mal die neue Version ohne Wächter — wie nach einem Installer-Lauf.
+
+Offen bleibt der **Rückfall**: Dort benennt der Wächter um, während niemand
+überträgt. Gemessen mit geprüften Dateien 1 bis 2 s; blockiert die
+Schutzsoftware dort ebenso, verlängert das nur den Fehlerfall.
 
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
 
