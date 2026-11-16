@@ -101,9 +101,19 @@ Binärdateien — `bts-light` und `bts-relay` —, und die tragen verschiedene
 Versionen. Ein Versionsvergleich meldete im Cloud-Betrieb dauernd „veraltet",
 obwohl die Seite dieselbe ist.
 
-**Warum über das *unersetzte* `TABLET_HTML`:** Sonst trüge jedes Feld eine
+**Warum über das *unersetzte* `tablet.html`:** Sonst trüge jedes Feld eine
 eigene Marke (der Platzhalter ist Teil des Textes) und keine passte je zur
 anderen.
+
+**Wo die Marke lebt (seit v0.9.431):** Seiten und Marke stecken gemeinsam in
+einem `Seitenstand` (`tablet/assets.rs`); jeder Abruf holt mit
+`assets::aktiv()` **einen** Schnappschuss und liest beides daraus. Die Marke
+wird einmal je Stand berechnet, nicht je Lebenszeichen. Der Stand ist
+austauschbar — Vorarbeit für
+[`hotfix-ohne-neustart`](hotfix-ohne-neustart.md) (ADR 0099): Wechselt er zur
+Laufzeit, wechselt die Marke atomar mit, und die Tablets bemerken es am
+nächsten `Pong`. Bis das Seiten-Paket eingebaut ist, gilt immer der in der
+Binärdatei steckende Stand.
 
 ### Teil 2 — Fernbefehl (v0.9.268)
 

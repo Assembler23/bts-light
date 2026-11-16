@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.431
+
+- **Intern: Geräte-Seiten austauschbar gemacht.** Tablet-, Monitor-, TL-Seite
+  und die übrigen Seiten des Turnier-PCs kommen nicht mehr aus festen
+  Konstanten, sondern aus einem gemeinsamen Seitenstand, der auch die Marke
+  des Versionsabgleichs trägt. Am Verhalten ändert sich nichts. Es ist der
+  erste Baustein für „Hotfix ohne Neustart" (Spec
+  `features/hotfix-ohne-neustart.md`): Später lässt sich ein Fix an einer
+  Seite im laufenden Turnier einspielen, ohne bts-light neu zu starten.
+
 ## v0.9.430
 
 - **Turnierleitungs-Oberfläche mit einem Klick am Turnier-PC.** In der
