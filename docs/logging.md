@@ -201,6 +201,23 @@ Ohne Paket im Verzeichnis erscheint keine Zeile.
 Ein Netzfehler beim Suchen oder Laden erzeugt bewusst **keine** Zeile —
 offline ist in der Halle der Normalfall.
 
+### Wechsel ohne Installer (seit v0.9.439)
+
+| Zeile | Bedeutung |
+|---|---|
+| `Kernwechsel auf vX vorbereitet (Probelauf bestanden, Rückweg möglich/nicht möglich)` | Die neue Programmdatei liegt geprüft daneben; das Banner bietet „Jetzt wechseln" an. |
+| `Kernwechsel ohne Installer nicht möglich: …` | Kein Angebot; es bleibt beim Installations-Weg. Dauerhafte Gründe (kein neuer Versuch): nur unter Windows, kein Schreibrecht, Kopf oder Programmdatei abgelehnt, Probelauf gescheitert. Vorübergehende (bis zu vier Versuche, je Prüflauf einer): kein Kern-Artefakt veröffentlicht, Netz weg. |
+| `Kernwechsel auf vX: Programmdatei getauscht` | Schritt 1 des Wechsels — die Übertragung läuft noch. |
+| `Kernwechsel auf vX: Wächter gestartet (Prozess N), App endet` | Die Übertragung ist angehalten; ab hier zählt die Lücke. |
+| `Kernwechsel: Ankunft von vX gemeldet` | Die neue Version läuft und hat sich beim Wächter gemeldet. |
+| `Kernwechsel abgebrochen: …` | Es wurde nicht gewechselt. Die Programmdatei ist unverändert oder wurde zurückgelegt; ließ sie sich nicht zurücklegen, steht das im Text. |
+
+Der Wächter selbst schreibt nicht in dieses Log (er läuft ohne die App),
+sondern nach `uebergabe-waechter.log` im App-Datenverzeichnis: Start,
+„neue Version gestartet", „angekommen nach N ms" oder „Rückfall: …". Die
+Lücke des Wechsels steht wie beim Installer-Weg in der Zeile
+`Wiederanlauf nach Update: Tablet-Port wieder offen, Lücke N ms`.
+
 ### Wiederanlauf nach einem Update (seit v0.9.434)
 
 Lief die Übertragung, als ein Update eingebaut wurde, startet der Kern sie

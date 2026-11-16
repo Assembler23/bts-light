@@ -366,11 +366,15 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     Lückenmessung (#553, v0.9.434) sowie Kern-Artefakt im Release-Job und
     Datenformat-Wächter (v0.9.436) sind da. Das Messwerkzeug (PR 7a,
     v0.9.437) ist da und unter Linux und auf dem Windows-Runner der CI
-    durchgelaufen (laufende Datei umbenennbar, Wächter überlebt). **Nächster Schritt: die
-    Sonde am Windows-PC laufen lassen** (`cargo test -p bts-light --test
-    uebergabe_probe -- --ignored --nocapture`) und die Werte in ADR 0100
-    eintragen. Danach der scharfe Tausch mit Wächter (7b), Kern-Rückweg und
-    Aufräumen (8), Abschluss mit Feldtest (9).
+    durchgelaufen (laufende Datei umbenennbar, Wächter überlebt). Die Sonde lief auf dem
+    Windows-Runner der CI und viermal an einem Windows-11-Rechner mit
+    Unternehmens-Schutzsoftware (ADR 0100): Annahmen halten, der Tausch
+    wandert vor das Anhalten. **Der Kernwechsel ist angeschlossen (PR 7b,
+    v0.9.439):** Vorladen, Probelauf, „Jetzt wechseln", Wächter, Rückfall,
+    Uninstall-Hook. **Noch nie mit der vollen App gelaufen** — das geht erst,
+    wenn zwei Versionen mit Kern-Artefakt veröffentlicht sind. Es fehlen
+    Kern-Rückweg, Sperrliste und Aufräumen (8) und der Abschluss mit Feldtest
+    (9).
   - Nebenbefund für später: `latest.json` ist unsigniert und
     `require_signed_version` nicht gesetzt.
 

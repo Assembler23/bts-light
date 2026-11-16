@@ -537,8 +537,10 @@ Prüfung der App besteht, hält der Rust-Test
 ## Kern-Artefakt und Datenformat (`release.yml`, Job `kern`)
 
 > Spec: [features/hotfix-ohne-neustart.md](features/hotfix-ohne-neustart.md) ·
-> ADR 0100/0101. Stand v0.9.436: Der Job veröffentlicht das Artefakt; die App
-> **nutzt** es noch nicht — der Kernwechsel ohne Installer folgt.
+> ADR 0100/0101. Seit v0.9.439 nutzt die App das Artefakt: Sie lädt es nach
+> einem gefundenen Update zusätzlich, prüft es und bietet dann „Jetzt
+> wechseln" an ([erste-schritte.md](erste-schritte.md#updates)). Fehlt es,
+> bleibt es beim Installer.
 
 Nach `publish` legt jeder Tag-Release zusätzlich ab (unter
 `download/bts-light/`):

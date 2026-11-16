@@ -200,6 +200,8 @@ pub struct UpdateInfo {
     pub app_version: String,
     /// Stand der Geräte-Seiten (Spec `hotfix-ohne-neustart`).
     pub seiten: crate::seiten_angebot::SeitenInfo,
+    /// Kernwechsel ohne Installer: Stand und Meldung nach einem Wechsel.
+    pub kern: crate::kern_tausch::KernInfo,
 }
 
 /// Zustandsmaschine des Update-Ablaufs. Lebt im `AppState`; die
@@ -289,6 +291,7 @@ impl UpdateManager {
         occupied_courts: usize,
         sync_running: bool,
         seiten: crate::seiten_angebot::SeitenInfo,
+        kern: crate::kern_tausch::KernInfo,
     ) -> UpdateInfo {
         let (phase, version, notes, message) = match self.phase() {
             Phase::Idle => ("idle", None, None, None),
@@ -309,6 +312,7 @@ impl UpdateManager {
             install_on_exit: self.install_on_exit(),
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             seiten,
+            kern,
         }
     }
 }
@@ -472,7 +476,14 @@ mod tests {
         assert_eq!(m.paket(), None);
         assert_eq!(m.paket_fuer_beenden(), None);
         assert_eq!(
-            m.info(0, false, seiten_info()).version.as_deref(),
+            m.info(
+                0,
+                false,
+                seiten_info(),
+                crate::kern_tausch::KernTausch::default().info()
+            )
+            .version
+            .as_deref(),
             Some("1.0.0")
         );
     }
@@ -523,7 +534,12 @@ mod tests {
     fn info_spiegelt_phase_und_umfeld() {
         let m = UpdateManager::default();
         m.set_phase(Phase::Error("offline".into()));
-        let i = m.info(3, true, seiten_info());
+        let i = m.info(
+            3,
+            true,
+            seiten_info(),
+            crate::kern_tausch::KernTausch::default().info(),
+        );
         assert_eq!(i.phase, "error");
         assert_eq!(i.message.as_deref(), Some("offline"));
         assert_eq!(i.occupied_courts, 3);
@@ -532,7 +548,12 @@ mod tests {
 
         m.paket_bereit("2.0.0".into(), None, vec![]);
         m.set_install_on_exit(true);
-        let i = m.info(0, false, seiten_info());
+        let i = m.info(
+            0,
+            false,
+            seiten_info(),
+            crate::kern_tausch::KernTausch::default().info(),
+        );
         assert_eq!(i.phase, "ready");
         assert_eq!(i.version.as_deref(), Some("2.0.0"));
         assert!(i.install_on_exit);

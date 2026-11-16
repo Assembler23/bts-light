@@ -330,6 +330,34 @@ Offen bleibt der **Rückfall**: Dort benennt der Wächter um, während niemand
 überträgt. Gemessen mit geprüften Dateien 1 bis 2 s; blockiert die
 Schutzsoftware dort ebenso, verlängert das nur den Fehlerfall.
 
+### Anschluss ans Banner (PR 7b, v0.9.439): was bewusst so ist
+
+Nach Security- und Code-Review angenommen und hier festgehalten:
+
+- **Der Probelauf läuft ohne Klick.** Er führt eine Datei aus, die gegen
+  einen gültig signierten Kopf geprüft ist — dieselbe Vertrauensbasis wie der
+  Installer, nur ohne Zutun. Ohne ihn gäbe es weder die Gewissheit, dass das
+  System die Datei ausführt, noch das Vorwärmen (siehe Messung).
+- **Ein Prozess desselben Windows-Benutzers ist keine Grenze.** Zwischen der
+  letzten Prüfung der neuen Datei und dem Umbenennen könnte er sie
+  austauschen — er könnte aber ebenso `bts-light.exe` selbst ersetzen.
+- **Kein Widerruf signierter Versionen.** Der Kopf muss neuer sein als die
+  laufende Version und genau die Version nennen, die der Updater meldet;
+  eine zurückgezogene, echt signierte Version bleibt ladbar, solange sie auf
+  dem Server liegt. Zurückgezogene Kern-Dateien gehören dort gelöscht. Das
+  ist enger als der Installer-Weg, bei dem `latest.json` die Version frei
+  behaupten kann (`require_signed_version` ist aus).
+- **Ankunft heißt: Das Fenster hat einen Befehl gerufen.** Stürzt die neue
+  Version danach ab, rollt niemand zurück.
+- **Während des Wechsels ist der Installer-Weg gesperrt**, und das Fenster
+  lässt sich nicht schließen: Zwei Wege zugleich hinterließen die
+  Programmdatei in unbestimmtem Zustand.
+- **Nach einem Rückfall** startet die alte Version die Übertragung nur, wenn
+  sie vor dem Wechsel lief.
+- **Der Wechsel selbst ist bis zum ersten Release-Paar ungeprüft**: Er
+  braucht eine installierte Version mit Wächter und eine neuere mit
+  Kern-Artefakt.
+
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
 
 - **Der Wächter wartet auf das Ende des Prozesses, nicht nur auf das
