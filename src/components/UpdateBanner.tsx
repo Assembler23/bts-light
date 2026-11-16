@@ -10,6 +10,7 @@ import {
 import { Download, FileCheck2 } from "lucide-react";
 import {
   kernWechseln,
+  kernZurueck,
   seitenSuchen,
   seitenUebernehmen,
   seitenZurueck,
@@ -52,6 +53,8 @@ interface UpdateState {
   seitenFehlerWeg: () => void;
   /** Auf die vorgeladene Version wechseln (ohne Installer). */
   wechseln: () => Promise<void>;
+  /** Zurück zur Vorversion wechseln. */
+  zurueckwechseln: () => Promise<void>;
   /** Die einmalige Meldung der Kern-Zeile schließen. */
   kernMeldungWeg: () => Promise<void>;
 }
@@ -223,6 +226,17 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     await lesen();
   }, [lesen]);
 
+  // Rückweg zur Vorversion: wie der Wechsel — gelingt er, endet die App.
+  const zurueckwechseln = useCallback(async () => {
+    setInstallError("");
+    try {
+      await kernZurueck();
+    } catch (e) {
+      setInstallError(String(e));
+    }
+    await lesen();
+  }, [lesen]);
+
   useEffect(() => {
     const id = setInterval(() => void lesen(), leseTaktMs(phase));
     return () => clearInterval(id);
@@ -243,6 +257,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         seitenFehler,
         seitenFehlerWeg,
         wechseln,
+        zurueckwechseln,
         kernMeldungWeg,
       }}
     >
@@ -342,6 +357,7 @@ function KernBanner() {
     setInstallOnExit,
     installError,
     wechseln,
+    zurueckwechseln,
     kernMeldungWeg,
   } = useUpdate();
   // Ein Klick genügt: Während der Wechsel anläuft, sind die Knöpfe aus.
@@ -357,6 +373,7 @@ function KernBanner() {
     doch_nicht: () => setInstallOnExit(false),
     verstanden: kernMeldungWeg,
     schliessen: kernMeldungWeg,
+    kern_zurueck: zurueckwechseln,
   };
   const druecken = async (k: KernKnopf) => {
     setBeschaeftigt(true);
@@ -396,7 +413,7 @@ function KernBanner() {
               return (
                 <button
                   key={k}
-                  disabled={beschaeftigt}
+                  disabled={beschaeftigt || (zeile.aus ?? []).includes(k)}
                   onClick={() => void druecken(k)}
                   className={
                     haupt
@@ -408,7 +425,7 @@ function KernBanner() {
                         }`
                   }
                 >
-                  {KNOPF[k]}
+                  {zeile.namen?.[k] ?? KNOPF[k]}
                 </button>
               );
             })}

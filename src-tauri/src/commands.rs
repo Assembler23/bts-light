@@ -3528,6 +3528,23 @@ pub fn update_check(app: AppHandle, state: State<'_, AppState>) {
                 return;
             }
         };
+        if st.kern.ist_zurueckgenommen(&update.version) {
+            // Auf Wunsch zurückgenommen: weder laden noch anbieten — auch
+            // nicht über den Installer. Eine neuere Version kommt wieder.
+            tracing::info!(
+                "Update v{} wurde zurückgenommen und wird nicht erneut angeboten",
+                update.version
+            );
+            if bereit.is_some() {
+                st.update.paket_verwerfen();
+                *st.update_handle
+                    .lock()
+                    .expect("Update-Mutex nicht vergiftet") = None;
+            }
+            st.kern.verwerfen();
+            st.update.set_phase(Phase::Current);
+            return;
+        }
         if bereit.as_ref().map(|(v, _)| v.as_str()) == Some(update.version.as_str()) {
             // Paket liegt schon da — nur die Phase zurückdrehen.
             st.update.set_phase(Phase::Ready {
@@ -3782,6 +3799,7 @@ pub async fn kern_wechseln(app: AppHandle) -> Result<(), String> {
                 WechselFehler::NichtBereit => {
                     return Err("Es liegt keine neue Programmdatei bereit.".to_string())
                 }
+                WechselFehler::Abgelehnt(grund) => return Err(grund),
                 WechselFehler::VorTausch(grund) => {
                     st.kern.wechsel_nicht_begonnen();
                     grund
@@ -3806,11 +3824,27 @@ pub fn kern_wechselt(app: &AppHandle) -> bool {
     app.state::<AppState>().kern.wechselt()
 }
 
+/// Gegenstück zur Sperre in `update_install_now`: Hat der Installer-Weg
+/// schon begonnen, beginnt kein Tausch mehr. Beide Seiten setzen erst ihren
+/// eigenen Stand und sehen dann nach dem anderen — so merkt es bei
+/// gleichzeitigen Klicks mindestens eine.
+fn installer_laeuft_nicht(state: &AppState) -> Result<(), String> {
+    match state.update.phase() {
+        crate::update::Phase::Installing { .. } => {
+            Err("das Update wird gerade über das Installationsprogramm eingebaut".to_string())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Wo der Wechsel scheiterte — danach richtet sich, was vom Angebot bleibt.
 #[derive(Debug)]
 enum WechselFehler {
     /// Es lag nichts bereit (oder ein Wechsel läuft schon).
     NichtBereit,
+    /// Der Rückweg wurde gar nicht erst begonnen — mit dem Grund für die
+    /// Turnierleitung.
+    Abgelehnt(String),
     /// Vor dem Tausch: nichts verändert, das Angebot bleibt.
     VorTausch(String),
     /// Nach dem Tausch: zurückgenommen; es bleibt beim Installer-Weg.
@@ -3829,6 +3863,7 @@ fn kern_wechseln_lauf(app: &AppHandle) -> Result<(), WechselFehler> {
     // warten, bis der Wechsel durch oder gescheitert ist. Zwei Wege zugleich
     // hinterließen Dateien in unbestimmtem Zustand.
     let vor = WechselFehler::VorTausch;
+    installer_laeuft_nicht(&state).map_err(vor)?;
     let kopf = state
         .kern_kopf
         .lock()
@@ -3864,7 +3899,59 @@ fn kern_wechseln_lauf(app: &AppHandle) -> Result<(), WechselFehler> {
     })?;
     tracing::info!("Kernwechsel auf v{version}: Programmdatei getauscht");
 
-    // 2. Marker: Lief die Übertragung, nimmt die neue Version sie wieder auf.
+    // Die eben beiseitegelegte Datei ist ab jetzt die Vorversion — eintragen,
+    // damit die neue Version einen Rückweg anbieten kann. Noch vor der Lücke.
+    let rw_alt = crate::rueckweg::lesen(&daten);
+    match std::fs::read(&pfade.vorher) {
+        Ok(bytes) => {
+            let mut rw = rw_alt.clone();
+            rw.merke(&version, eigene, &crate::rueckweg::sha256_hex(&bytes));
+            if let Err(e) = crate::rueckweg::schreiben(&daten, &rw) {
+                tracing::warn!("Rückweg nicht eingetragen ({e}) – nach dem Wechsel gibt es keinen");
+            }
+        }
+        Err(e) => tracing::warn!("Vorversion nicht lesbar ({e}) – kein Rückweg nach dem Wechsel"),
+    }
+
+    match uebergabe_einleiten(app, &state, &pfade, daten.clone(), &version) {
+        Ok(()) => Ok(()),
+        Err((mut grund, running)) => {
+            // Ohne Wächter kein Wechsel: zurücktauschen und weiter übertragen.
+            match tausch::zurueckfallen(&pfade) {
+                // Die beiseitegelegte Datei ist die geprüfte neue, kein
+                // Defekt — sie muss nicht liegen bleiben.
+                Ok(()) => {
+                    let _ = std::fs::remove_file(&pfade.defekt);
+                }
+                Err(z) => {
+                    grund =
+                        format!("{grund}; die alte Programmdatei ließ sich nicht zurücklegen ({z})")
+                }
+            }
+            let _ = crate::rueckweg::schreiben(&daten, &rw_alt);
+            uebertragung_wieder_starten(app, &state, running, &mut grund);
+            Err(WechselFehler::NachTausch(grund))
+        }
+    }
+}
+
+/// Der Schluss jeder Übergabe, nachdem die Programmdateien getauscht sind:
+/// Marker schreiben, Übertragung anhalten, Wächter aus `vorher` starten.
+/// Danach endet die App.
+///
+/// Startet der Wächter nicht, ist der Marker wieder weg; zurück kommen der
+/// Grund und ob die Übertragung lief — das Zurücktauschen ist Sache des
+/// Aufrufers.
+fn uebergabe_einleiten(
+    app: &AppHandle,
+    state: &AppState,
+    pfade: &crate::tausch::Pfade,
+    daten: std::path::PathBuf,
+    nach: &str,
+) -> Result<(), (String, bool)> {
+    use crate::tausch;
+    let eigene = env!("CARGO_PKG_VERSION");
+    // Marker: Lief die Übertragung, nimmt die andere Version sie wieder auf.
     let running = state.status.lock().map(|s| s.running).unwrap_or(false);
     let marker_pfad = update_resume_pfad(app);
     if let Err(e) = crate::update::write_resume(
@@ -3879,15 +3966,15 @@ fn kern_wechseln_lauf(app: &AppHandle) -> Result<(), WechselFehler> {
         tracing::warn!("Wiederanlauf-Marker nicht geschrieben: {e}");
     }
 
-    // 3. Übertragung anhalten — die Lücke beginnt.
+    // Übertragung anhalten — die Lücke beginnt.
     state.tablet.flush_scores();
-    stop_sync_kern(&state);
+    stop_sync_kern(state);
 
-    // 4. Wächter aus der ALTEN Programmdatei starten.
+    // Wächter aus der Programmdatei starten, die eben noch aktiv war.
     let args = tausch::WaechterArgs {
         daten,
         von: eigene.to_string(),
-        nach: version.clone(),
+        nach: nach.to_string(),
         frist: tausch::ANKUNFT_FRIST_START,
         eltern_pid: Some(std::process::id()),
         kind_args: Vec::new(),
@@ -3896,7 +3983,7 @@ fn kern_wechseln_lauf(app: &AppHandle) -> Result<(), WechselFehler> {
     match tausch::waechter_starten(&pfade.vorher, &args) {
         Ok(waechter) => {
             tracing::info!(
-                "Kernwechsel auf v{version}: Wächter gestartet (Prozess {}), App endet",
+                "Kernwechsel auf v{nach}: Wächter gestartet (Prozess {}), App endet",
                 waechter.pid()
             );
             *state
@@ -3906,29 +3993,207 @@ fn kern_wechseln_lauf(app: &AppHandle) -> Result<(), WechselFehler> {
             Ok(())
         }
         Err(e) => {
-            // Ohne Wächter kein Wechsel: zurücktauschen und weiter übertragen.
             crate::update::remove_resume(&marker_pfad);
-            let mut grund = format!("der Wächter ließ sich nicht starten ({e})");
+            Err((
+                format!("der Wächter ließ sich nicht starten ({e})"),
+                running,
+            ))
+        }
+    }
+}
+
+fn uebertragung_wieder_starten(
+    app: &AppHandle,
+    state: &AppState,
+    running: bool,
+    grund: &mut String,
+) {
+    if running {
+        if let Err(start) = start_sync_kern(app, state) {
+            *grund = format!("{grund}; die Übertragung ließ sich nicht wieder starten ({start})");
+        }
+    }
+}
+
+/// So lange darf der Probelauf der Vorversion vor einem Rückweg dauern. Sie
+/// ist auf diesem Rechner schon gelaufen — länger heißt: Sie startet nicht.
+const RUECKWEG_PROBE_FRIST: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// „Zurück zu vY": Die Vorversion wird wieder aktiv, die laufende wird
+/// zurückgenommen und nicht erneut angeboten. Derselbe Ablauf wie der
+/// Wechsel, mit vertauschten Rollen — einschließlich Wächter: Läuft die
+/// Vorversion nicht an, läuft danach wieder diese.
+#[tauri::command]
+pub async fn kern_zurueck(app: AppHandle) -> Result<(), String> {
+    let handle = app.clone();
+    let ergebnis = tauri::async_runtime::spawn_blocking(move || kern_zurueck_lauf(&handle))
+        .await
+        .map_err(|e| WechselFehler::NachTausch(e.to_string()));
+    match ergebnis.and_then(|e| e) {
+        Ok(()) => {
+            app.exit(0);
+            Ok(())
+        }
+        Err(fehler) => {
+            let st = app.state::<AppState>();
+            let grund = match fehler {
+                WechselFehler::Abgelehnt(grund) => return Err(grund),
+                WechselFehler::NichtBereit => {
+                    return Err("Es liegt keine vorige Version bereit.".to_string())
+                }
+                WechselFehler::VorTausch(grund) => {
+                    st.kern.rueckweg_nicht_begonnen();
+                    grund
+                }
+                WechselFehler::NachTausch(grund) => {
+                    st.kern.rueckweg_gescheitert();
+                    grund
+                }
+            };
+            tracing::warn!("Rückweg abgebrochen: {grund}");
+            Err(format!("Der Rückweg wurde nicht ausgeführt ({grund})."))
+        }
+    }
+}
+
+fn kern_zurueck_lauf(app: &AppHandle) -> Result<(), WechselFehler> {
+    use crate::{rueckweg, tausch};
+    let state = app.state::<AppState>();
+    let version = state
+        .kern
+        .nimm_fuer_rueckweg()
+        .map_err(|g| WechselFehler::Abgelehnt(g.to_string()))?;
+    // Ab hier ist der Installer-Weg gesperrt, wie beim Wechsel.
+    let vor = WechselFehler::VorTausch;
+    installer_laeuft_nicht(&state).map_err(vor)?;
+    let pfade = crate::kern_tausch::eigene_pfade().map_err(vor)?;
+    let daten = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| vor(format!("App-Datenverzeichnis fehlt ({e})")))?;
+    let eigene = env!("CARGO_PKG_VERSION");
+
+    // Seit dem Start kann sich alles geändert haben: neu urteilen, die Datei
+    // gegen ihre Prüfsumme halten und sie zur Probe starten.
+    let rw_alt = rueckweg::lesen(&daten);
+    let urteil = rueckweg::urteil(
+        &rw_alt,
+        eigene,
+        rueckweg::eigene_grenze(),
+        pfade.vorher.is_file(),
+    );
+    if urteil
+        != (rueckweg::Urteil::Erlaubt {
+            version: version.clone(),
+        })
+    {
+        return Err(vor("die vorige Version steht nicht mehr bereit".into()));
+    }
+    rueckweg::vorher_passt(&pfade, &rw_alt).map_err(vor)?;
+    tausch::probelauf_mit(
+        &pfade.vorher,
+        &[tausch::ARG_SELBSTTEST],
+        RUECKWEG_PROBE_FRIST,
+    )
+    .map_err(|e| {
+        vor(format!(
+            "die vorige Version ließ sich nicht zur Probe starten ({e})"
+        ))
+    })?;
+    // Die laufende Datei wird gleich die neue „vorher".
+    let eigene_sha = std::fs::read(&pfade.aktiv)
+        .ok()
+        .map(|b| rueckweg::sha256_hex(&b));
+
+    // 1. Tauschen — bei laufender Übertragung.
+    tausch::zurueckwechseln(&pfade).map_err(|e| match e {
+        tausch::TauschFehler::Beiseitelegen(_)
+        | tausch::TauschFehler::Einsetzen { zurueck: true, .. } => vor(e.to_string()),
+        tausch::TauschFehler::Einsetzen { zurueck: false, .. } => {
+            WechselFehler::NachTausch(e.to_string())
+        }
+    })?;
+    tracing::info!("Rückweg auf v{version}: Programmdatei getauscht");
+
+    // 2. Eintragen: v{version} läuft, daneben liegt diese Version. Gesperrt
+    //    wird sie erst, wenn die Vorversion angekommen ist
+    //    (`rueckweg_auffrischen`) — läuft die nicht an, läuft diese wieder
+    //    und darf dann nicht gesperrt sein.
+    let mut rw = rw_alt.clone();
+    match &eigene_sha {
+        Some(sha) => rw.merke(&version, eigene, sha),
+        None => rw.ohne_vorher(),
+    }
+    if let Err(e) = rueckweg::schreiben(&daten, &rw) {
+        tracing::warn!("Rückweg nicht eingetragen ({e})");
+    }
+
+    // 3.–4. Anhalten und Wächter.
+    match uebergabe_einleiten(app, &state, &pfade, daten.clone(), &version) {
+        Ok(()) => Ok(()),
+        Err((mut grund, running)) => {
+            // Zurück auf den Stand vor dem Klick: diese Version wieder
+            // aktiv, die Vorversion wieder daneben, der Eintrag wie vorher.
             match tausch::zurueckfallen(&pfade) {
-                // Die beiseitegelegte Datei ist die geprüfte neue, kein
-                // Defekt — sie muss nicht liegen bleiben.
                 Ok(()) => {
-                    let _ = std::fs::remove_file(&pfade.defekt);
+                    if let Err(e) = std::fs::rename(&pfade.defekt, &pfade.vorher) {
+                        tracing::warn!("Vorversion nicht zurückgelegt ({e})");
+                    }
                 }
                 Err(z) => {
-                    grund =
-                        format!("{grund}; die alte Programmdatei ließ sich nicht zurücklegen ({z})")
+                    grund = format!("{grund}; die Programmdatei ließ sich nicht zurücklegen ({z})")
                 }
             }
-            if running {
-                if let Err(start) = start_sync_kern(app, &state) {
-                    grund = format!(
-                        "{grund}; die Übertragung ließ sich nicht wieder starten ({start})"
-                    );
-                }
-            }
+            let _ = rueckweg::schreiben(&daten, &rw_alt);
+            uebertragung_wieder_starten(app, &state, running, &mut grund);
             Err(WechselFehler::NachTausch(grund))
         }
+    }
+}
+
+/// Liest `rueckweg.json` und sagt dem Banner, ob eine Vorversion bereitliegt
+/// und was zurückgenommen ist.
+fn rueckweg_auffrischen(app: &AppHandle) {
+    use crate::rueckweg;
+    let Ok(daten) = app.path().app_data_dir() else {
+        return;
+    };
+    let eigene = env!("CARGO_PKG_VERSION");
+    // Kam diese Version über einen Rückweg an, wird die zurückgenommene
+    // jetzt gesperrt.
+    let zurueckgenommene =
+        crate::kern_tausch::ruecknahme_aus(crate::tausch::zustand_lesen(&daten).as_ref(), eigene);
+    let rw = rueckweg::sperren_pflegen(&daten, eigene, zurueckgenommene.as_deref());
+    let vorher_da = crate::kern_tausch::eigene_pfade().is_ok_and(|p| p.vorher.is_file());
+    // Nur wo auch getauscht werden kann — sonst ließe sich der Knopf
+    // drücken, aber nichts passierte.
+    let urteil = if cfg!(windows) {
+        rueckweg::urteil(&rw, eigene, rueckweg::eigene_grenze(), vorher_da)
+    } else {
+        rueckweg::Urteil::Keiner
+    };
+    app.state::<AppState>()
+        .kern
+        .rueckweg_setzen(urteil, rw.gesperrt);
+}
+
+/// Vor einem Installer-Lauf die laufende Programmdatei als Vorversion
+/// sichern (Spec E8). Scheitert das, läuft das Update trotzdem — nur ohne
+/// Rückweg.
+fn vorversion_sichern(app: &AppHandle, nach: &str) {
+    let eigene = env!("CARGO_PKG_VERSION");
+    let Ok(daten) = app.path().app_data_dir() else {
+        return;
+    };
+    let Ok(pfade) = crate::kern_tausch::eigene_pfade() else {
+        return;
+    };
+    if crate::tausch::tausch_moeglich(&pfade, cfg!(windows)).is_err() {
+        return;
+    }
+    match crate::rueckweg::vor_installer_sichern(&pfade, &daten, eigene, nach) {
+        Ok(()) => tracing::info!("Vorversion v{eigene} für den Rückweg gesichert"),
+        Err(e) => tracing::warn!("Vorversion nicht gesichert – nach dem Update kein Rückweg: {e}"),
     }
 }
 
@@ -3963,6 +4228,8 @@ fn kern_ankunft_melden(app: &AppHandle, state: &AppState) {
             state
                 .kern
                 .start(crate::tausch::zustand_lesen(&daten).as_ref(), eigene);
+            // Nach einem Rückweg: die zurückgenommene Version sperren.
+            rueckweg_auffrischen(app);
         }
     }
 }
@@ -3974,10 +4241,18 @@ pub fn kern_start(app: &AppHandle) {
     let Ok(daten) = app.path().app_data_dir() else {
         return;
     };
-    app.state::<AppState>().kern.start(
-        crate::tausch::zustand_lesen(&daten).as_ref(),
-        env!("CARGO_PKG_VERSION"),
-    );
+    let eigene = env!("CARGO_PKG_VERSION");
+    app.state::<AppState>()
+        .kern
+        .start(crate::tausch::zustand_lesen(&daten).as_ref(), eigene);
+    // Aufräumen, bevor das Fenster nach Updates fragt: Das Vorladen legt
+    // gleich wieder eine Datei unter demselben Namen ab.
+    if let Ok(pfade) = crate::kern_tausch::eigene_pfade() {
+        for zeile in crate::rueckweg::aufraeumen(&pfade, &daten, eigene, &std::env::temp_dir()) {
+            tracing::info!("Aufräumen beim Start: {zeile}");
+        }
+    }
+    rueckweg_auffrischen(app);
 }
 
 /// Baut das geladene Update jetzt ein: Live-Stand sichern, Wiederanlauf-
@@ -4006,6 +4281,22 @@ pub async fn update_install_now(app: AppHandle, state: State<'_, AppState>) -> R
     state.update.set_phase(Phase::Installing {
         version: paket.version.clone(),
     });
+    // Hat inzwischen ein Wechsel oder Rückweg begonnen (zweiter Klick an
+    // anderer Stelle), tritt der Installer zurück.
+    if state.kern.wechselt() {
+        state.update.set_phase(Phase::Ready {
+            version: paket.version.clone(),
+            notes,
+        });
+        return Err(WECHSEL_LAEUFT.to_string());
+    }
+    // Die laufende Programmdatei als Vorversion sichern — noch bei laufender
+    // Übertragung.
+    {
+        let (handle, nach) = (app.clone(), paket.version.clone());
+        let _ =
+            tauri::async_runtime::spawn_blocking(move || vorversion_sichern(&handle, &nach)).await;
+    }
     state.tablet.flush_scores();
     let running = state.status.lock().map(|s| s.running).unwrap_or(false);
     let marker_pfad = update_resume_pfad(&app);
@@ -4070,6 +4361,7 @@ pub fn update_beim_beenden(app: &AppHandle) {
     let Some(paket) = state.update.paket_fuer_beenden() else {
         return;
     };
+    vorversion_sichern(app, &paket.version);
     let dir = std::env::temp_dir();
     match crate::update::installer_ablegen(&dir, &paket.version, &paket.bytes)
         .and_then(|pfad| crate::update::installer_stumm_starten(&pfad))

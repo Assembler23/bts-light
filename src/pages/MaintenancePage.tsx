@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { appVersion, exportIdentity, importIdentity, openLogDir } from "../api";
 import { useUpdate } from "../components/UpdateBanner";
-import { KNOPF, wartungSeiten } from "../io/updateBanner.mjs";
+import { KNOPF, wartungKern, wartungSeiten } from "../io/updateBanner.mjs";
 
 /** Einheitlicher Aktions-Button mit Icon, Beschriftung und Tooltip. */
 function ActionButton(props: {
@@ -45,8 +45,11 @@ export function MaintenancePage() {
     info: updateStand,
     seitenZurueck,
     seitenFehler,
+    zurueckwechseln,
+    installError,
   } = useUpdate();
   const seitenStand = wartungSeiten(updateStand);
+  const kernStand = wartungKern(updateStand);
   const [updateChecked, setUpdateChecked] = useState(false);
   const [version, setVersion] = useState("");
   // Identitäts-Umzug (ADR 0006): Statusmeldung + Datei für die Import-Bestätigung.
@@ -191,6 +194,30 @@ export function MaintenancePage() {
                   label={KNOPF.zurueck}
                   onClick={() => void seitenZurueck()}
                   title="Die Geräte-Seiten auf den vorigen Stand zurücksetzen. Der jetzige Stand wird nicht erneut angeboten."
+                />
+              </div>
+            )}
+          </div>
+        )}
+        {/* Kern-Rückweg: Vorversion und zurückgenommene Versionen. */}
+        {kernStand && (
+          <div className="flex flex-col gap-1.5 border-t border-slate-100 pt-3">
+            {kernStand.hinweise.map((h) => (
+              <p key={h} className="text-xs text-slate-500">
+                {h}
+              </p>
+            ))}
+            {installError !== "" && (
+              <p className="text-xs text-red-700">{installError}</p>
+            )}
+            {kernStand.knopf && (
+              <div>
+                <ActionButton
+                  icon={Undo2}
+                  label={kernStand.knopf}
+                  disabled={!kernStand.erlaubt}
+                  onClick={() => void zurueckwechseln()}
+                  title="Zur vorigen Version der App zurückwechseln. Die jetzige Version wird danach nicht erneut angeboten."
                 />
               </div>
             )}

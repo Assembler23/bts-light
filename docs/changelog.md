@@ -4,6 +4,26 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.441
+
+- **Zurück zur vorigen Fassung der App.** Macht ein Update Ärger, führt ein
+  Klick zurück: Direkt nach dem schnellen Wechsel steht **Zurück zu v…** im
+  Banner, dauerhaft unter **Wartung**. BTS Light hebt dafür genau eine vorige
+  Fassung neben dem Programm auf — auch vor einem Update über das
+  Installationsprogramm („Jetzt neu starten", „Beim Beenden einbauen"). Der
+  Weg zurück unterbricht wie der schnelle Wechsel nur wenige Sekunden; läuft
+  die vorige Fassung nicht an, läuft danach wieder die jetzige.
+- **Zurückgenommen heißt zurückgenommen.** Eine Fassung, von der du
+  zurückgewechselt bist, wird nicht noch einmal angeboten — die nächste
+  neuere schon. Unter Wartung steht, welche Fassung das war.
+- **Grauer Knopf mit Begründung**, wenn die vorige Fassung die Daten der
+  neuen nicht lesen kann.
+- **Aufräumen beim Start:** Reste eines früheren Wechsels, eine veraltete
+  vorige Fassung und alte Installationsprogramme im Temp-Ordner verschwinden
+  von selbst.
+- Der Rückweg gilt erst ab dieser Fassung: Wer per schnellem Wechsel von
+  v0.9.440 kommt, hat für diesen einen Schritt noch keinen.
+
 ## v0.9.440
 
 - **Ballzähler: Federball besser zu erkennen.** Das Symbol neben der Zahl der

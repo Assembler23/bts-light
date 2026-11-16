@@ -214,6 +214,39 @@ vor, nimm beim nächsten Mal **Beim Beenden einbauen** und sag uns Bescheid.
 <!-- pruef: "ließ sich nicht starten. bts-light läuft wieder mit" in src/io/updateBanner.mjs -->
 <!-- pruef: "Verstanden" in src/io/updateBanner.mjs -->
 
+### Zurück zur vorigen Fassung
+
+Macht eine neue Fassung Ärger, kommst du mit einem Klick zur vorigen zurück:
+BTS Light hebt genau **eine** vorige Fassung neben dem Programm auf — nach dem
+schnellen Wechsel genauso wie nach einem Update über das Installationsprogramm.
+
+- Direkt nach dem schnellen Wechsel steht der Knopf **Zurück zu v…** im Banner
+  neben „Schließen".
+- Dauerhaft steht er unter **Wartung**, im Abschnitt mit der Versionsangabe.
+
+Der Weg zurück läuft wie der schnelle Wechsel: wenige Sekunden Unterbrechung,
+die Tablets zählen weiter, die Übertragung setzt von selbst wieder ein. Drei
+Dinge solltest du vorher wissen:
+
+- **Die zurückgenommene Fassung wird dir nicht noch einmal angeboten** — weder
+  zum schnellen Wechsel noch über das Installationsprogramm. Die nächste
+  neuere Fassung bekommst du wieder wie gewohnt.
+- **Einstellungen, die es erst seit der neuen Fassung gibt, gehen verloren**,
+  sobald die vorige Fassung das nächste Mal speichert.
+- **Manchmal ist der Knopf grau.** Dann speichert die neue Fassung ihre Daten
+  in einer Form, die die vorige nicht lesen kann; daneben steht der Satz
+  „Zurück zu v… ist nicht möglich".
+
+<!-- pruef: "Zurück zu v${vorher}" in src/io/updateBanner.mjs -->
+<!-- pruef: "wurde zurückgenommen und wird nicht erneut angeboten" in src/io/updateBanner.mjs -->
+<!-- pruef: "ist nicht möglich: v${info.app_version} speichert Daten in einer Form" in src/io/updateBanner.mjs -->
+
+Gibt es keinen Knopf, liegt keine passende vorige Fassung bereit — etwa nach
+einer Neuinstallation von Hand oder wenn BTS Light im Installationsordner
+nicht schreiben darf. Die Sperre greift erst, wenn auch die vorige Fassung sie
+kennt (ab v0.9.441); kehrst du zu einer älteren zurück, bietet sie dir das
+Update wieder an.
+
 Hast du „Beim Beenden einbauen" gewählt und es dir anders überlegt, nimmt
 **„Doch nicht beim Beenden"** die Vormerkung zurück.
 

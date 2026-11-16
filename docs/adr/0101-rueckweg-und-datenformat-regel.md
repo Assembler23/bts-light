@@ -71,3 +71,40 @@ Version `config.json` und alle Stores im App-Datenverzeichnis:
   Schritt keinen Kern-Rückweg in der App. Das Banner sagt das schon im
   Angebot, also vor dem Klick — die Grenze steht im geladenen Kopf.
 - Die Sperrliste lebt im App-Datenverzeichnis je PC.
+
+## Umsetzung des Kern-Rückwegs (PR 8, v0.9.441)
+
+- **Was die Vorversion ist, steht in `rueckweg.json`** (App-Datenverzeichnis):
+  Version, die laufen soll, Version und SHA-256 der Datei
+  `bts-light.vorher.exe`, Sperrliste. Passt der Eintrag nicht zur laufenden
+  Version, gilt die Datei als veraltet und wird beim Start verworfen.
+- **Die Grenze der laufenden Version ist eingebettet** (`release/datenformat.json`
+  zur Bauzeit) — dieselbe Quelle wie der Kern-Kopf. So gilt die Regel auch
+  nach einem Update über den Installer, bei dem nie ein Kopf geladen wurde.
+- **Der Rückweg ist ein Tausch mit vertauschten Rollen**, samt Wächter: Läuft
+  die Vorversion nicht an, läuft danach wieder die zurückgenommene. Vor dem
+  Tausch wird die Vorversion gegen ihre Prüfsumme gehalten und zur Probe
+  gestartet.
+- **Die Prüfsumme ist kein Schutz vor einem Angreifer**, nur vor einer
+  vertauschten oder beschädigten Datei: Sie liegt im selben Benutzerprofil
+  wie die Datei. Die Vorversion war zuvor selbst das laufende Programm.
+- **Zurückgenommen sperrt beide Wege** — Tausch und Installer. Eine Version,
+  die der Wächter zurückrollte (ADR 0100), bleibt dagegen über den Installer
+  erreichbar.
+- **Gesperrt wird erst bei der Ankunft der Vorversion**, nicht beim Klick:
+  Läuft sie nicht an, läuft die zurückgenommene Version wieder und darf
+  dann nicht gesperrt sein. Die laufende Version steht nie auf der Liste.
+- **Der Rückweg fasst die vorgeladene Datei nicht an** (drei Umbenennungen
+  über eine Zwischenablage `bts-light.vorher.exe.tausch`): Bricht er ab,
+  bleibt ein bereitliegendes Update bereit.
+- **Der Uninstall-Hook lässt die Vorversion im Update-Modus liegen.** Im
+  Update-Modus ruft der Installer den Deinstallierer nach dem Tauri-Template
+  gar nicht auf; die Bedingung ist eine zweite Sicherung.
+- **Die Sperre wirkt nur, wo die Vorversion sie kennt** (ab v0.9.441). Ein
+  Rückweg auf eine ältere Version bietet das Update wieder an.
+- **Vor jedem Installer-Lauf** kopiert die App ihre Programmdatei als
+  Vorversion. Scheitert das (kein Schreibrecht), läuft das Update ohne
+  Rückweg.
+- **Ungeprüft:** Der Rückweg ist noch nie mit der vollen App gelaufen, und ob
+  der Installer die daneben liegende Vorversion unangetastet lässt, zeigt
+  erst ein echter Lauf.

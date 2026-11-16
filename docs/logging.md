@@ -211,6 +211,12 @@ offline ist in der Halle der Normalfall.
 | `Kernwechsel auf vX: Wächter gestartet (Prozess N), App endet` | Die Übertragung ist angehalten; ab hier zählt die Lücke. |
 | `Kernwechsel: Ankunft von vX gemeldet` | Die neue Version läuft und hat sich beim Wächter gemeldet. |
 | `Kernwechsel abgebrochen: …` | Es wurde nicht gewechselt. Die Programmdatei ist unverändert oder wurde zurückgelegt; ließ sie sich nicht zurücklegen, steht das im Text. |
+| `Rückweg auf vY: Programmdatei getauscht` | Die Vorversion liegt wieder an ihrem Platz, die laufende ist die neue Vorversion. Danach folgen dieselben Zeilen wie beim Wechsel (Wächter, Ankunft). |
+| `Rückweg abgebrochen: …` | Es wurde nicht zurückgewechselt; im Text steht, ob etwas zurückgelegt werden musste. |
+| `Vorversion vX für den Rückweg gesichert` | Vor einem Update über das Installationsprogramm wurde die laufende Programmdatei daneben gelegt. |
+| `Vorversion nicht gesichert – nach dem Update kein Rückweg: …` | Das Update läuft trotzdem, nur ohne Rückweg. |
+| `Update vX wurde zurückgenommen und wird nicht erneut angeboten` | Die Update-Prüfung fand eine Version, von der hier zurückgewechselt wurde. |
+| `Aufräumen beim Start: …` | Je entfernter Datei eine Zeile (Rest eines Vorladens, nicht angelaufene Programmdatei, veraltete Vorversion, alter Installer) — oder warum sie sich nicht entfernen ließ. |
 
 Der Wächter selbst schreibt nicht in dieses Log (er läuft ohne die App),
 sondern nach `uebergabe-waechter.log` im App-Datenverzeichnis: Start,

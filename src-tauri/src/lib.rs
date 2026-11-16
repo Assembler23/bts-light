@@ -13,6 +13,7 @@ pub mod kern_tausch;
 pub mod log_upload;
 pub mod openai_tts;
 pub mod print;
+pub mod rueckweg;
 pub mod seiten_angebot;
 pub mod seiten_paket;
 pub mod signatur;
@@ -151,6 +152,7 @@ pub fn run() {
             commands::seiten_zurueck,
             commands::update_meldung_weg,
             commands::kern_wechseln,
+            commands::kern_zurueck,
             commands::take_wiederanlauf,
             commands::get_status,
             commands::wifi_status,

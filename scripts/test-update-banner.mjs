@@ -12,6 +12,7 @@ import {
   kernZeile,
   seitenZeile,
   unterbrechungsHinweis,
+  wartungKern,
   wartungSeiten,
   wechselHinweis,
 } from "../src/io/updateBanner.mjs";
@@ -122,6 +123,9 @@ const kern = (teil = {}) => ({
   meldung: "keine",
   meldung_version: null,
   meldung_grund: null,
+  zurueck_version: null,
+  zurueck_erlaubt: false,
+  zurueckgenommen: [],
   ...teil,
 });
 const app = (teil = {}, kernTeil = {}) => ({
@@ -213,5 +217,76 @@ assert.equal(KNOPF.verstanden, "Verstanden");
 // Läuft die Übertragung nicht, behauptet der Text es auch nicht.
 k = kernZeile(app({ sync_running: false }, { meldung: "zurueckgefallen", meldung_version: "0.9.440" }));
 assert.equal(k.text, "v0.9.440 ließ sich nicht starten. bts-light läuft wieder mit v0.9.439.");
+
+// ── Kern-Rückweg ───────────────────────────────────────────────────────────
+
+const nachWechsel = (kernTeil) =>
+  kernZeile(
+    app(
+      { phase: "current", version: null, app_version: "0.9.441" },
+      { meldung: "gewechselt", meldung_version: "0.9.440", ...kernTeil },
+    ),
+  );
+
+// Nach Wechsel, Rückweg erlaubt: Knopf „Zurück zu vY" neben „Schließen".
+k = nachWechsel({ zurueck_version: "0.9.440", zurueck_erlaubt: true });
+assert.equal(k.text, "bts-light läuft jetzt mit v0.9.441.");
+assert.deepEqual(k.knoepfe, ["kern_zurueck", "schliessen"]);
+assert.equal(k.namen.kern_zurueck, "Zurück zu v0.9.440");
+assert.equal(k.aus, undefined);
+assert.deepEqual(k.zusatz, []);
+
+// Nach Wechsel, Rückweg gesperrt: Knopf sichtbar, aber aus — mit Grund.
+k = nachWechsel({ zurueck_version: "0.9.440", zurueck_erlaubt: false });
+assert.deepEqual(k.knoepfe, ["kern_zurueck", "schliessen"]);
+assert.deepEqual(k.aus, ["kern_zurueck"]);
+assert.deepEqual(k.zusatz, [
+  "Zurück zu v0.9.440 ist nicht möglich: v0.9.441 speichert Daten in einer Form, die v0.9.440 nicht lesen kann.",
+]);
+
+// Ohne Vorversion bleibt es bei „Schließen".
+assert.deepEqual(nachWechsel({}).knoepfe, ["schliessen"]);
+
+// Der Rückweg läuft: Das hat Vorrang vor der Meldung, auf der geklickt wurde.
+k = nachWechsel({ tausch: "wechselt", version: "0.9.440", zurueck_version: "0.9.440", zurueck_erlaubt: true });
+assert.equal(k.art, "wechselt");
+assert.equal(k.text, "Wechsel auf v0.9.440 läuft – bts-light ist gleich wieder da.");
+assert.deepEqual(k.knoepfe, []);
+
+// Nach dem Rückweg: Die alte Version sagt, was zurückgenommen wurde.
+k = kernZeile(
+  app(
+    { phase: "current", version: null, app_version: "0.9.440" },
+    { meldung: "zurueckgenommen", meldung_version: "0.9.441", zurueckgenommen: ["0.9.441"] },
+  ),
+);
+assert.equal(k.art, "zurueckgenommen");
+assert.equal(k.text, "v0.9.441 wurde zurückgenommen und wird nicht erneut angeboten.");
+assert.deepEqual(k.zusatz, ["bts-light läuft wieder mit v0.9.440."]);
+assert.deepEqual(k.knoepfe, ["schliessen"]);
+
+// Wartungsseite: dauerhaft, auch wenn das Banner längst geschlossen ist.
+assert.equal(wartungKern(null), null);
+assert.equal(wartungKern(app({ app_version: "0.9.441" })), null, "nichts zu sagen");
+let wk = wartungKern(app({ app_version: "0.9.441" }, { zurueck_version: "0.9.440", zurueck_erlaubt: true }));
+assert.equal(wk.knopf, "Zurück zu v0.9.440");
+assert.equal(wk.erlaubt, true);
+// Wie im Banner steht dabei, was gerade auf dem Spiel steht.
+assert.equal(
+  wk.hinweise[0],
+  "Vorher lief v0.9.440. Auf 3 Feldern laufen Spiele – der Wechsel unterbricht wenige Sekunden, die Übertragung läuft von selbst weiter.",
+);
+assert.match(wk.hinweise[1], /gehen dabei verloren/);
+assert.match(wk.hinweise[1], /v0\.9\.441 wird danach nicht erneut angeboten/);
+
+wk = wartungKern(app({ app_version: "0.9.441" }, { zurueck_version: "0.9.440", zurueck_erlaubt: false }));
+assert.equal(wk.knopf, "Zurück zu v0.9.440");
+assert.equal(wk.erlaubt, false, "Knopf sichtbar, aber aus");
+assert.match(wk.hinweise[0], /ist nicht möglich/);
+
+// Zurückgenommene Version: erklärt, warum „Nach Updates suchen" nichts findet.
+wk = wartungKern(app({ app_version: "0.9.440" }, { zurueckgenommen: ["0.9.441"] }));
+assert.equal(wk.knopf, null);
+assert.deepEqual(wk.hinweise, ["v0.9.441 wurde zurückgenommen und wird nicht erneut angeboten."]);
 
 console.log("OK — Update-Banner: alle Lagen der Seiten- und der Kern-Zeile geprüft.");

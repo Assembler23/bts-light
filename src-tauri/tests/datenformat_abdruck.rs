@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 /// einen neuen Store anlegt, trägt seine Datei hier ein.
 const DATEIEN: &[&str] = &[
     "config.rs",
+    "rueckweg.rs",
     "seiten_paket.rs",
     "tablet/exclusion.rs",
     "tablet/hall_assign.rs",
