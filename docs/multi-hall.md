@@ -350,7 +350,7 @@ Adressen ihrer Felder ohne Blick auf den Master):
 
 ### Court-Monitor-Pis der fernen Halle — Slave als Monitor-Brücke
 
-Die Court-Monitor-Pis (Kiosk-Skript aus `pi/setup-monitor.sh`) suchen den
+Die Court-Monitor-Pis (Kiosk-Skript `pi/paket/bin/bts-monitor.sh`) suchen den
 Anzeige-Server per **Subnetz-Scan auf `:8088/health`** im Hallennetz — sie
 kennen keine Cloud-URL. In der fernen Halle läuft aber **kein** LAN-Server
 (der Slave sagt nur an). Damit die Pis dort trotzdem ohne Extra-Rechner den

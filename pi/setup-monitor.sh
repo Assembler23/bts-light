@@ -18,6 +18,11 @@
 #   BTS_MONITOR_URL=http://bts-light.local:8088/monitor bash setup-monitor.sh
 #   curl -fsSL https://raw.githubusercontent.com/Assembler23/bts-light/main/pi/setup-monitor.sh | bash
 #
+# Kiosk-Skript, CEC-Dienst und Hinweisseite stehen nicht mehr in diesem
+# Skript, sondern als echte Dateien unter pi/paket/ (Liste: pi/paket/INHALT).
+# Liegt der Ordner nicht daneben (Skript einzeln geladen), holt es ihn aus
+# dem Repository.
+#
 # Anleitung: docs/pi-setup.md · Master-Image: docs/pi-master-image.md
 
 set -euo pipefail
@@ -44,6 +49,35 @@ if [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]; then
   echo "  dann dieses Skript erneut ausführen."
   exit 1
 fi
+
+# ─── Paketdateien finden ─────────────────────────────────────────────────
+# Die Dateien, die auf dem Pi landen, liegen unter pi/paket/ – dieselbe Quelle
+# für das Image und (später) für das Fernupdate. Wer nur dieses Skript geladen
+# hat (Anleitung docs/pi-setup.md), bekommt den Ordner aus dem Repository;
+# BTS_REPO_REF wählt Zweig oder Tag (Standard: main).
+SKRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+PAKET_DIR="${SKRIPT_DIR:+$SKRIPT_DIR/paket}"
+if [ -z "$PAKET_DIR" ] || [ ! -f "$PAKET_DIR/INHALT" ]; then
+  PAKET_REF="${BTS_REPO_REF:-main}"
+  PAKET_TMP="$(mktemp -d)"
+  trap 'rm -rf "$PAKET_TMP"' EXIT
+  command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 \
+    || { echo "FEHLER: curl und tar werden zum Laden der Paketdateien gebraucht (oder den Ordner paket/ neben dieses Skript legen)."; exit 1; }
+  echo "→ Paketdateien laden (Assembler23/bts-light, $PAKET_REF)…"
+  curl -fsSL "https://github.com/Assembler23/bts-light/archive/$PAKET_REF.tar.gz" \
+    | tar -xz -C "$PAKET_TMP" --strip-components=2 \
+        --wildcards --no-wildcards-match-slash '*/pi/paket' \
+    || { echo "FEHLER: Paketdateien konnten nicht geladen werden (Internet? Zweig: $PAKET_REF)."; exit 1; }
+  PAKET_DIR="$PAKET_TMP/paket"
+fi
+# Vollständigkeit vor der ersten Änderung am System prüfen – ein halb
+# geladener Ordner soll nicht mitten in der Einrichtung auffallen.
+[ -f "$PAKET_DIR/INHALT" ] || { echo "FEHLER: Paketdateien fehlen ($PAKET_DIR)."; exit 1; }
+while read -r _modus datei; do
+  case "$_modus" in ''|'#'*) continue ;; esac
+  [ -f "$PAKET_DIR/$datei" ] || { echo "FEHLER: Paketdatei fehlt: $datei"; exit 1; }
+done < "$PAKET_DIR/INHALT"
+echo "→ Paketdateien: $PAKET_DIR"
 
 # Boot-Partition finden (Bookworm: /boot/firmware, älter: /boot).
 BOOT_DIR="/boot/firmware"
@@ -136,189 +170,9 @@ fi
 # Standby → an – wer bewusst auf einen anderen Eingang schaltet, wird
 # nicht zurückgeholt. Abschalten je Karte: Datei bts-cec-aus.txt auf der
 # Boot-Partition anlegen. Läuft auf Pi Zero 2 W, 3B+, 4, 5 (/dev/cec0).
-sudo tee /usr/local/bin/bts-cec.sh >/dev/null <<'CEC'
-#!/usr/bin/env bash
-# bts-light Court-Monitor: TV per HDMI-CEC wecken und auf den Pi-Eingang holen.
-set -u
-DEV=/dev/cec0
-BOOT_DIR="/boot/firmware"; [ -d "$BOOT_DIR" ] || BOOT_DIR="/boot"
-# Startphase: so lange wird ein noch nicht eingeschalteter TV geweckt.
-START_FENSTER_S=180
-TAKT_S=5
+sudo install -m 755 "$PAKET_DIR/bin/bts-cec.sh" /usr/local/bin/bts-cec.sh
 
-log() { echo "bts-cec: $*"; }
-
-if [ -e "$BOOT_DIR/bts-cec-aus.txt" ]; then
-  log "abgeschaltet (bts-cec-aus.txt vorhanden)"; exit 0
-fi
-command -v cec-ctl >/dev/null || { log "cec-ctl fehlt (Paket v4l-utils)"; exit 0; }
-
-# Auf das CEC-Gerät warten (Treiber lädt evtl. nach dem Dienst).
-for _ in $(seq 1 60); do [ -e "$DEV" ] && break; sleep 2; done
-[ -e "$DEV" ] || { log "$DEV fehlt – kein CEC an diesem Pi/Image"; exit 0; }
-
-# Als Abspielgerät anmelden; der Kernel meldet sich selbst neu an, sobald
-# der TV seine Adresse (über HDMI) bekannt gibt.
-cec-ctl -d "$DEV" -s --playback -o "BTS Monitor" >/dev/null 2>&1 \
-  || log "Anmelden als Abspielgerät fehlgeschlagen (TV noch ohne Strom?)"
-
-# Physische Adresse dieses Eingangs, z. B. 1.0.0.0 (f.f.f.f = unbekannt).
-# Bewusst ohne -s: die Adresse steht im Info-Block, den -s weglässt.
-phys() { cec-ctl -d "$DEV" 2>/dev/null | awk -F': *' '/Physical Address/{print $2; exit}'; }
-# Leistungszustand des TVs: on | standby | to-on | to-standby | leer (keine Antwort).
-tv_zustand() {
-  cec-ctl -d "$DEV" -s --to 0 --give-device-power-status 2>/dev/null \
-    | awk '/pwr-state:/{print $2; exit}'
-}
-# TV einschalten und diesen Eingang als aktiv melden.
-holen() {
-  local pa wecken="fehlgeschlagen" eingang="nicht gesendet"
-  cec-ctl -d "$DEV" -s --to 0 --image-view-on >/dev/null 2>&1 && wecken="ok"
-  pa="$(phys)"
-  [ "$pa" = "f.f.f.f" ] && pa=""
-  if [ -n "$pa" ]; then
-    # Active Source ist eine Rundsendung (an 15); Rückfall: direkt an den TV.
-    eingang="fehlgeschlagen"
-    { cec-ctl -d "$DEV" -s --to 15 --active-source "phys-addr=$pa" >/dev/null 2>&1 \
-      || cec-ctl -d "$DEV" -s --to 0 --active-source "phys-addr=$pa" >/dev/null 2>&1; } \
-      && eingang="ok"
-  fi
-  log "Grund: $1 · Wecken: $wecken · Eingang: $eingang (Adresse ${pa:-unbekannt})"
-}
-
-# ─── Fernschalten durch die Turnierleitung ───────────────────────────────
-# bts-light kann den TV an- und ausschalten (Seite „Court-Monitore"). Der
-# Browser kann kein CEC, deshalb fragt dieser Dienst selbst beim Turnier-PC
-# nach: Er meldet den Zustand des TVs und bekommt „an <Marke>", „aus <Marke>"
-# oder „-" zurück. Ausgeführt wird ein Befehl genau einmal, wenn sich die
-# Marke ändert – wer danach zur Fernbedienung greift, wird nicht überstimmt.
-# Die Adresse des PCs legt das Kiosk-Skript ab (nur im Hallennetz; bei einer
-# Cloud-Adresse gibt es die Datei nicht, dann wird nichts abgefragt).
-SERIAL="$(awk -F': ' '/^Serial/{print $2}' /proc/cpuinfo 2>/dev/null | tr -d '[:space:]')"
-[ -z "$SERIAL" ] && SERIAL="$(tr -d '\0' 2>/dev/null < /sys/firmware/devicetree/base/serial-number || true)"
-[ -z "$SERIAL" ] && SERIAL="$(hostname | tr -d '[:space:]')"
-GERAET="pi-${SERIAL}"
-# Nur eine echte Datei lesen (kein Verweis, keine Pipe): Dieser Dienst läuft
-# als root, die Datei schreibt der Kiosk-Benutzer – eine dort abgelegte Pipe
-# würde das Lesen sonst für immer anhalten.
-pc_basis() {
-  local f
-  for f in /run/user/*/bts-monitor-pc /tmp/bts-monitor-pc; do
-    if [ -f "$f" ] && [ ! -L "$f" ]; then
-      head -c 200 "$f" 2>/dev/null | head -1
-      return 0
-    fi
-  done
-}
-ERSTE_ABFRAGE=1    # bis zur ersten Antwort: „frisch gestartet" mitmelden
-LETZTE_MARKE=""
-BEFEHL=""
-# $1 = Zustand des TVs. Setzt BEFEHL auf an|aus, wenn ein neuer Befehl da ist.
-befehl_holen() {
-  BEFEHL=""
-  local basis antwort soll marke
-  basis="$(pc_basis)"
-  printf '%s' "$basis" | grep -Eq '^http://[0-9A-Za-z.:-]+$' || return 0
-  antwort=$(curl -fs --connect-timeout 1 --max-time 2 --max-filesize 64 \
-    "${basis}/pi-tv?device=${GERAET}&tv=${1:-unknown}&start=${ERSTE_ABFRAGE}" 2>/dev/null) || return 0
-  ERSTE_ABFRAGE=0
-  read -r soll marke <<<"$antwort"
-  case "$soll" in an|aus) ;; *) return 0 ;; esac
-  case "$marke" in ''|*[!0-9]*) return 0 ;; esac
-  [ "$marke" = "$LETZTE_MARKE" ] && return 0
-  LETZTE_MARKE="$marke"
-  BEFEHL="$soll"
-}
-ausschalten() {
-  if cec-ctl -d "$DEV" -s --to 0 --standby >/dev/null 2>&1; then
-    log "Grund: $1 · Ausschalten: ok"
-  else
-    log "Grund: $1 · Ausschalten: fehlgeschlagen"
-  fi
-}
-
-# Ab so vielen Sekunden ohne Antwort gilt der TV als aus (manche TVs
-# schweigen im Standby). Einzelne verlorene Antworten lösen nichts aus –
-# sonst würde ein bewusst umgeschalteter Eingang zurückgeholt.
-STUMM_ALS_AUS_S=30
-
-beginn=$(date +%s)
-startphase=1
-war_aus=0          # TV seit dem letzten „an" im Standby oder lange stumm
-zuletzt_antwort=$beginn
-grund="Start"      # wer das Wecken ausgelöst hat (fürs Protokoll)
-aus_rest=0         # so oft wird „aus" noch wiederholt, solange der TV „an" meldet
-while true; do
-  jetzt=$(date +%s)
-  zustand="$(tv_zustand)"
-  if [ -n "$zustand" ]; then
-    zuletzt_antwort=$jetzt
-  elif [ $(( jetzt - zuletzt_antwort )) -ge $STUMM_ALS_AUS_S ]; then
-    war_aus=1
-  fi
-  case "$zustand" in standby|to-standby) war_aus=1 ;; esac
-
-  befehl_holen "$zustand"
-  if [ "$BEFEHL" = "aus" ]; then
-    ausschalten "Turnierleitung"
-    # Kein Wecken mehr, und der noch „an" meldende TV darf nicht als
-    # „eben eingeschaltet" gelten – sonst holte ihn die Regel unten zurück.
-    startphase=0
-    war_aus=0
-    aus_rest=3
-    sleep "$TAKT_S"
-    continue
-  elif [ "$BEFEHL" = "an" ]; then
-    # Wie beim Start: wecken und wiederholen, bis der TV „an" meldet.
-    aus_rest=0
-    startphase=1
-    beginn=$jetzt
-    grund="Turnierleitung"
-  elif [ "$aus_rest" -gt 0 ]; then
-    # Manche TVs überhören den ersten Standby-Befehl.
-    if [ "$zustand" = "on" ]; then
-      aus_rest=$((aus_rest - 1))
-      ausschalten "Turnierleitung (Wiederholung)"
-      sleep "$TAKT_S"
-      continue
-    fi
-    aus_rest=0
-  fi
-
-  if [ "$startphase" = 1 ]; then
-    holen "$grund, TV: ${zustand:-keine Antwort}"
-    # Startphase endet erst bei echtem „on" (dabei eben geholt) – ein TV im
-    # Hochfahren („to-on") verwirft Befehle oft noch – oder nach dem Fenster.
-    if [ "$zustand" = "on" ] || [ $(( jetzt - beginn )) -ge $START_FENSTER_S ]; then
-      startphase=0
-      war_aus=0
-      log "Startphase beendet (TV: ${zustand:-keine Antwort})"
-    fi
-  elif { [ "$zustand" = "on" ] || [ "$zustand" = "to-on" ]; } && [ "$war_aus" = 1 ]; then
-    # TV kam aus dem Standby (oder war ohne Strom) → Eingang neu melden.
-    holen "TV eingeschaltet ($zustand)"
-    # Bei „to-on" noch einmal versuchen, sobald der TV wirklich „on" meldet.
-    [ "$zustand" = "on" ] && war_aus=0
-  fi
-  sleep "$TAKT_S"
-done
-CEC
-sudo chmod 755 /usr/local/bin/bts-cec.sh
-
-sudo tee /etc/systemd/system/bts-cec.service >/dev/null <<'UNIT'
-[Unit]
-Description=bts-light: TV per HDMI-CEC einschalten und auf den Pi-Eingang holen
-Documentation=https://github.com/Assembler23/bts-light/blob/main/docs/pi-setup.md
-After=local-fs.target
-
-[Service]
-ExecStart=/usr/local/bin/bts-cec.sh
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+sudo install -m 644 "$PAKET_DIR/units/bts-cec.service" /etc/systemd/system/bts-cec.service
 sudo systemctl daemon-reload
 sudo systemctl enable bts-cec.service >/dev/null 2>&1 || true
 echo "→ CEC-Dienst eingerichtet (bts-cec.service): TV wird beim Start geweckt, bts-light kann ihn schalten"
@@ -342,25 +196,7 @@ fi
 # ─── 4) Hinweisseite „noch keine Adresse" ────────────────────────────────
 ASSET_DIR="$HOME/.local/share/bts-monitor"
 mkdir -p "$ASSET_DIR"
-cat > "$ASSET_DIR/no-url.html" <<'HTML'
-<!doctype html><html lang="de" translate="no"><head><meta charset="utf-8">
-<meta name="google" content="notranslate">
-<title>Court-Monitor</title><style>
-html,body{margin:0;height:100%;background:#0b1120;color:#f8fafc;cursor:none;
-font-family:system-ui,sans-serif}
-.box{height:100%;display:flex;flex-direction:column;align-items:center;
-justify-content:center;gap:3vh;text-align:center;padding:6vmin}
-h1{font-size:6vmin;color:#fbbf24;margin:0}
-p{font-size:3.2vmin;color:#94a3b8;max-width:80vw;line-height:1.5;margin:0}
-code{background:#1e293b;color:#fbbf24;padding:.1em .4em;border-radius:.3em}
-</style></head><body><div class="box">
-<h1>Court-Monitor – noch nicht eingerichtet</h1>
-<p>Auf dieser SD-Karte ist noch keine Monitor-Adresse hinterlegt.
-Stecke die Karte in einen Computer und trage die Adresse in die Datei
-<code>bts-monitor-url.txt</code> ein (sie liegt direkt auf dem Karten-
-Laufwerk). Die Adresse steht in bts-light unter „Court-Monitore".</p>
-</div></body></html>
-HTML
+install -m 644 "$PAKET_DIR/share/no-url.html" "$ASSET_DIR/no-url.html"
 
 # ─── 5) Kiosk-Startskript ────────────────────────────────────────────────
 # Dauerschleife statt Einmal-Start (übernommen aus dem früheren gemeinsamen
@@ -368,233 +204,7 @@ HTML
 # startet ihn neu, wenn Chromium abstürzt oder der PC eine neue Adresse hat,
 # und sucht weiter, solange kein PC da ist („erst Pi, dann PC" ist egal).
 mkdir -p "$HOME/.local/bin"
-# Kopf mit den Werten aus der Einrichtung, Rumpf wörtlich (ohne Expansion).
-cat > "$HOME/.local/bin/bts-monitor.sh" <<EOF
-#!/usr/bin/env bash
-# Court-Monitor-Kiosk – aufgerufen vom Autostart (eingerichtet von setup-monitor.sh).
-BROWSER="$BROWSER"
-NO_URL_PAGE="file://$ASSET_DIR/no-url.html"
-EOF
-cat >> "$HOME/.local/bin/bts-monitor.sh" <<'EOF'
-set -u
-LOG="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor.log"
-CACHE="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor-ip"
-# Adresse des Turnier-PCs für den CEC-Dienst (bts-cec.sh fragt dort nach, ob
-# der TV an- oder ausgeschaltet werden soll). Nur im Hallennetz.
-PCDATEI="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor-pc"
-PORT_STANDARD=8088
-log() { echo "$(date '+%F %T') - $*" >> "$LOG"; }
-
-# Monitor-Adresse aus der Boot-Partition, bei jedem Start frisch gelesen
-# (am Computer editierbar, Leerzeichen werden entfernt).
-BOOT_DIR="/boot/firmware"; [ -d "$BOOT_DIR" ] || BOOT_DIR="/boot"
-URL="$(tr -d '[:space:]' < "$BOOT_DIR/bts-monitor-url.txt" 2>/dev/null || true)"
-
-# Geräte-Kennung = Hardware-Seriennummer (eine geklonte Karte bleibt je Pi
-# eindeutig). Format pi-<serial> wie beim früheren gemeinsamen Image, damit
-# bereits zugewiesene Monitore nach dem Neubespielen ihr Feld behalten.
-SERIAL="$(awk -F': ' '/^Serial/{print $2}' /proc/cpuinfo 2>/dev/null | tr -d '[:space:]')"
-[ -z "$SERIAL" ] && SERIAL="$(tr -d '\0' 2>/dev/null < /sys/firmware/devicetree/base/serial-number || true)"
-[ -z "$SERIAL" ] && SERIAL="$(hostname | tr -d '[:space:]')"
-DEVICE_ID="pi-${SERIAL}"
-
-# Adresse zerlegen: http://HOST[:PORT][/PFAD][?QUERY]
-REST="${URL#*://}"
-ANFRAGE=""
-case "$REST" in *\?*) ANFRAGE="?${REST#*\?}"; REST="${REST%%\?*}" ;; esac
-HOSTPORT="${REST%%/*}"
-PFAD="/${REST#*/}"; [ "$REST" = "$HOSTPORT" ] && PFAD="/monitor"
-PFAD="${PFAD}${ANFRAGE}"
-HOST="${HOSTPORT%%:*}"
-PORT="${HOSTPORT##*:}"; [ "$PORT" = "$HOSTPORT" ] && PORT=""
-
-# Erreichbar? Echte HTTP-Antwort; kein ping (Windows beantwortet ICMP nicht).
-erreichbar() {
-  local code
-  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 1 --max-time 2 "$1" 2>/dev/null)
-  [ -n "$code" ] && [ "$code" != "000" ]
-}
-
-# Eigenes /24 parallel auf :PORT/health absuchen – unabhängig von mDNS,
-# das über WLAN im Feld minutenlang hing.
-subnetz_suchen() {
-  local praefix n treffer="${XDG_RUNTIME_DIR:-/tmp}/bts-monitor-scan"
-  praefix=$(hostname -I 2>/dev/null | tr ' ' '\n' \
-    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1 | sed -E 's/\.[0-9]+$/./')
-  [ -z "$praefix" ] && return 1
-  rm -f "$treffer"
-  for n in $(seq 1 254); do
-    ( erreichbar "http://${praefix}${n}:$1/health" && echo "${praefix}${n}" > "$treffer" ) &
-    if [ $((n % 30)) -eq 0 ]; then wait; [ -s "$treffer" ] && break; fi
-  done
-  wait
-  [ -s "$treffer" ] && { head -1 "$treffer"; return 0; }
-  return 1
-}
-
-# Turnier-PC finden: gemerkte IP → Subnetz-Suche → mDNS (immer mit timeout).
-pc_ip() {
-  local ip port="$1"
-  ip=$(cat "$CACHE" 2>/dev/null)
-  if [ -n "$ip" ] && erreichbar "http://$ip:$port/health"; then echo "$ip"; return 0; fi
-  ip=$(subnetz_suchen "$port")
-  if [ -z "$ip" ]; then
-    ip=$(timeout 3 getent hosts "$HOST" 2>/dev/null | awk '{print $1; exit}')
-    [ -n "$ip" ] && ! erreichbar "http://$ip:$port/health" && ip=""
-  fi
-  [ -n "$ip" ] || return 1
-  [ "$ip" != "$(cat "$CACHE" 2>/dev/null)" ] && log "Turnier-PC gefunden: $ip"
-  echo "$ip" > "$CACHE"
-  echo "$ip"
-}
-
-# Ziel-Adresse dieses Durchlaufs (leer = nichts erreichbar).
-ziel() {
-  local ip port sep
-  case "$PFAD" in *\?*) sep="&" ;; *) sep="?" ;; esac
-  if [ "$HOST" = "bts-light.local" ]; then
-    # Standardfall: den PC selbst suchen, Pfad und Parameter (z. B. ?ansage=)
-    # aus der Datei übernehmen.
-    port="${PORT:-$PORT_STANDARD}"
-    ip=$(pc_ip "$port") || return 1
-    echo "http://$ip:$port" > "$PCDATEI"
-    echo "http://$ip:$port${PFAD}${sep}device=${DEVICE_ID}"
-  else
-    # Feste Adresse (IP oder Cloud): so nehmen, wie sie in der Datei steht.
-    erreichbar "$URL" || return 1
-    # Feste Adresse im Hallennetz → der CEC-Dienst darf dort nachfragen;
-    # eine Cloud-Adresse (https) kennt die Abfrage nicht.
-    case "$URL" in
-      http://*) echo "http://$HOSTPORT" > "$PCDATEI" ;;
-      *) rm -f "$PCDATEI" ;;
-    esac
-    echo "${URL}${sep}device=${DEVICE_ID}"
-  fi
-}
-
-# Log an den Turnier-PC (der leitet es an die Cloud weiter) – nur im LAN-Fall.
-log_senden() {
-  local ip port="${PORT:-$PORT_STANDARD}"
-  ip=$(cat "$CACHE" 2>/dev/null); [ -n "$ip" ] || return 0
-  tail -n 800 "$LOG" 2>/dev/null | curl -s --max-time 8 -X POST \
-    -H "Content-Type: text/plain" --data-binary @- \
-    "http://${ip}:${port}/pi-log?device=${DEVICE_ID}" >/dev/null 2>&1 || true
-}
-
-BROWSER_PID=""
-starten() {
-  [ -n "$BROWSER_PID" ] && kill "$BROWSER_PID" 2>/dev/null && sleep 1
-  # Nach einem Stromausfall Chromiums „Wiederherstellen?"-Frage unterdrücken.
-  local pref="$HOME/.config/chromium/Default/Preferences"
-  [ -f "$pref" ] && sed -i \
-    's/"exited_cleanly":false/"exited_cleanly":true/;s/"exit_type":"[^"]*"/"exit_type":"Normal"/' \
-    "$pref" 2>/dev/null
-  # --autoplay-policy: Ton ohne Tippen — die Monitor-Seiten sprechen mit
-  # ?ansage=<Halle> in der Adresse die Ansagen ihrer Halle (Spec
-  # ansage-im-browser, E1b). Am TV gibt es niemanden, der „Ton freischalten"
-  # drückt; ohne das Flag bleibt die Seite stumm und zeigt einen Hinweis.
-  "$BROWSER" --no-memcheck \
-    --kiosk --incognito --noerrdialogs --disable-infobars \
-    --disable-session-crashed-bubble --no-first-run \
-    --check-for-update-interval=31536000 \
-    --disable-features=Translate,TranslateUI --disable-translate \
-    --lang=de-DE --accept-lang=de-DE,de \
-    --autoplay-policy=no-user-gesture-required \
-    "$1" >/dev/null 2>&1 &
-  BROWSER_PID=$!
-}
-
-# Bild im 16:9-Modus. Manche HD-Ready-Fernseher (1366×768) melden dem Pi
-# 1024×768 als Wunschmodus; der TV zieht das 4:3-Bild dann breit — Kreise
-# werden oval, und die Namen haben ein Viertel weniger Platz (Feldfoto
-# 12.11.2026). Bietet der TV einen 16:9-Modus an, nehmen wir den größten.
-# Rührt nichts an, wenn das Bild schon breit ist, der TV keinen solchen
-# Modus meldet oder kein X läuft (Desktop-Variante mit Wayland).
-# Liest die Ausgabe von `xrandr --current` und gibt „<Ausgang> <Modus>" aus.
-breitbild_modus() {
-  awk '
-    /^[^ ]+ connected/ {
-      aus = ""; if (gefunden) next
-      for (i = 3; i <= NF; i++) if ($i ~ /^[0-9]+x[0-9]+\+/) {
-        split($i, t, /[x+]/)
-        if (t[1] * 9 < t[2] * 16 * 0.95) { aus = $1; gefunden = 1 }
-      }
-      next
-    }
-    /^[^ ]/ { aus = "" ; next }
-    aus != "" && $1 ~ /^[0-9]+x[0-9]+$/ {
-      split($1, m, "x"); v = m[1] / m[2]
-      if (v > 1.7 && v < 1.8 && m[1] * m[2] > beste) { beste = m[1] * m[2]; modus = $1; ziel = aus }
-    }
-    END { if (modus != "") print ziel, modus }
-  '
-}
-if [ -z "${WAYLAND_DISPLAY:-}" ] && command -v xrandr >/dev/null; then
-  WAHL="$(xrandr --current 2>/dev/null | breitbild_modus)"
-  if [ -n "$WAHL" ]; then
-    # shellcheck disable=SC2086
-    set -- $WAHL
-    xrandr --output "$1" --mode "$2" 2>/dev/null \
-      && log "Bildmodus auf $2 gestellt (TV meldete 4:3)" \
-      || log "Bildmodus $2 ließ sich nicht setzen"
-    set --
-  fi
-fi
-
-command -v unclutter >/dev/null && unclutter -idle 0.5 -root &
-log "Kiosk gestartet (Gerät $DEVICE_ID, Adresse ${URL:-keine})"
-
-if [ -z "$URL" ]; then
-  # Keine Adresse hinterlegt → Hinweisseite, Chromium bei Absturz neu starten.
-  while true; do
-    { [ -z "$BROWSER_PID" ] || ! kill -0 "$BROWSER_PID" 2>/dev/null; } && starten "$NO_URL_PAGE"
-    sleep 10
-  done
-fi
-
-# Auf eine eigene IP warten (kein Internet-Zwang).
-for _ in $(seq 1 60); do
-  hostname -I 2>/dev/null | grep -qE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' && break
-  sleep 2
-done
-log "Netz: $(hostname -I 2>/dev/null)"
-
-# Dauerschleife. Ein EINZELNER Aussetzer beendet den Kiosk nicht (sonst
-# flackert er bei WLAN-Wacklern) – erst nach FEHL_GRENZE Runden. Eine
-# erfolglose Runde dauert mit Subnetz-Suche ~20–30 s, zusammen ~1–1,5 min.
-AKTUELL=""
-FEHL=0
-FEHL_GRENZE=3
-TAKT=0
-while true; do
-  TAKT=$((TAKT + 1))
-  BESTE="$(ziel || true)"
-  if [ -n "$BESTE" ]; then
-    FEHL=0
-    if [ "$BESTE" != "$AKTUELL" ] || [ -z "$BROWSER_PID" ] || ! kill -0 "$BROWSER_PID" 2>/dev/null; then
-      log "Anzeige: $BESTE"
-      starten "$BESTE"
-      AKTUELL="$BESTE"
-    fi
-  else
-    FEHL=$((FEHL + 1))
-    [ $((FEHL % 6)) -eq 1 ] && log "noch kein Turnier-PC – suche weiter (Versuch $FEHL)"
-    if [ -n "$AKTUELL" ] && [ "$FEHL" -ge "$FEHL_GRENZE" ]; then
-      log "Turnier-PC seit $FEHL Versuchen weg – Kiosk beendet, suche weiter"
-      kill "$BROWSER_PID" 2>/dev/null
-      AKTUELL=""
-    fi
-  fi
-  # Log gleich beim ersten Durchlauf und danach alle ~5 min an den PC.
-  if [ $(( (TAKT - 1) % 30 )) -eq 0 ]; then
-    log_senden &
-    # Log kurz halten, damit es die Karte nicht füllt.
-    tail -n 2000 "$LOG" > "$LOG.neu" 2>/dev/null && mv "$LOG.neu" "$LOG"
-  fi
-  sleep 10
-done
-EOF
-chmod +x "$HOME/.local/bin/bts-monitor.sh"
+install -m 755 "$PAKET_DIR/bin/bts-monitor.sh" "$HOME/.local/bin/bts-monitor.sh"
 
 # ─── 6) Variant-spezifischer Autostart ───────────────────────────────────
 if [ "$VARIANT" = "desktop" ]; then
@@ -615,19 +225,7 @@ else
   echo "→ Console-Autologin auf tty1 eingerichtet (raspi-config B2)"
 
   # 6b) .xinitrc startet den minimalen WM + Kiosk-Skript.
-  cat > "$HOME/.xinitrc" <<XINIT
-#!/bin/sh
-# bts-light Court-Monitor: X-Session, gestartet via 'startx' aus .bash_profile.
-# Kein DPMS, kein Screensaver — TV soll dauerhaft anzeigen.
-xset -dpms
-xset s off
-xset s noblank
-# Minimaler Window-Manager (sonst rendert Chromium nicht zuverlaessig fullscreen).
-matchbox-window-manager -use_titlebar no &
-# Kiosk starten.
-exec "\$HOME/.local/bin/bts-monitor.sh"
-XINIT
-  chmod +x "$HOME/.xinitrc"
+  install -m 755 "$PAKET_DIR/xinitrc" "$HOME/.xinitrc"
   echo "→ ~/.xinitrc geschrieben"
 
   # 6c) .bash_profile-Hook: bei tty1-Login automatisch 'startx'.
