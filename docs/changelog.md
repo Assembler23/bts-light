@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.429
+
+- **TL-Web: „Aufgaben" aus der Standardansicht.** Das Panel mit den
+  Vorschlägen zur kampflosen Wertung nach einer Spielaufgabe stand fast immer
+  leer da. Im Standardprofil ist es jetzt ausgeblendet (einschaltbar im
+  Profil-Editor); in gespeicherten Profilen erscheint es nur noch, solange ein
+  Vorschlag offen ist. Die Vorschläge stehen weiterhin in der App am
+  Turnier-PC.
+- **TL-Web: „Spielzeiten" steht im Standardprofil unten** in der zweiten
+  Spalte, hinter „Anfangszeiten". Gespeicherte Profile bleiben, wie sie sind.
+
 ## v0.9.428
 
 - **Gong vor der Ansage ist voreingestellt aus.** Bisher wollte ihn kein

@@ -110,10 +110,12 @@ export function zeitplanLage(schedule, nowMs) {
 /**
  * Panels, die unsichtbar bleiben, bis man sie im Profil einschaltet (ADR
  * 0094). Jedes andere Panel, das in einem Profil fehlt, wird sichtbar
- * ergänzt — sonst bliebe ein neues Panel für alle unauffindbar. Dieses hier
- * soll nach dem Update in keiner bestehenden Ansicht ungefragt auftauchen.
+ * ergänzt — sonst bliebe ein neues Panel für alle unauffindbar. „Zeitplan"
+ * soll nach dem Update in keiner bestehenden Ansicht ungefragt auftauchen;
+ * „Aufgaben" (Walkover-Vorschläge) ist seit v0.9.429 aus der Standardansicht
+ * genommen — die Vorschläge stehen weiterhin in der App am Turnier-PC.
  */
-export const PANEL_STANDARD_AUS = ["zeitplan"];
+export const PANEL_STANDARD_AUS = ["zeitplan", "walkovers"];
 
 /** Sichtbarkeit eines Panels, das im Profil (noch) nicht vorkommt. */
 export function panelStandardSichtbar(key) {
