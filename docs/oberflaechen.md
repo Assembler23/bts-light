@@ -78,6 +78,16 @@ einem zweiten PC. Die Cloud lässt nur einen zu: Tablets und Monitore, die
 Sekunden von selbst. Er erscheint erst, wenn die Lage länger als 30 Sekunden
 anhält.
 <!-- pruef: "Ein anderer PC ist mit diesem Turnier verbunden" in src-tauri/src/tablet/ws_verbindung.rs -->
+
+Derselbe rote Balken meldet seit v0.9.434, wenn bts-light den Anschluss für
+die Geräte im Hallennetz nicht öffnen konnte: **Der Tablet-Server konnte Port
+8088 nicht öffnen**. Dann erreichen Tablets und Monitore im Hallennetz diesen
+PC nicht, obwohl die Übertragung läuft. Meist läuft bts-light doppelt oder ein
+anderes Programm belegt den Anschluss: das andere Programm schließen, dann die
+Übertragung stoppen und neu starten. Bisher stand das nur in der Logdatei.
+
+<!-- pruef: "Der Tablet-Server konnte Port {} nicht öffnen" in src-tauri/src/commands.rs -->
+<!-- pruef: "pub const TABLET_PORT: u16 = 8088" in src-tauri/src/tablet/server.rs -->
 <!-- pruef: "badhub hat die Anmeldung vorübergehend gesperrt" in src-tauri/src/commands.rs -->
 <!-- pruef: "Übertragung an badhub angehalten: Passwort prüfen" in src-tauri/src/commands.rs -->
 <!-- pruef: "Der Server verlangt eine eigene Anmeldung" in src-tauri/src/commands.rs -->

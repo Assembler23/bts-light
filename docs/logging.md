@@ -201,6 +201,21 @@ Ohne Paket im Verzeichnis erscheint keine Zeile.
 Ein Netzfehler beim Suchen oder Laden erzeugt bewusst **keine** Zeile —
 offline ist in der Halle der Normalfall.
 
+### Wiederanlauf nach einem Update (seit v0.9.434)
+
+Lief die Übertragung, als ein Update eingebaut wurde, startet der Kern sie
+beim nächsten Programmstart selbst und misst die Unterbrechung:
+
+| Zeile | Bedeutung |
+|---|---|
+| `Wiederanlauf nach Update: Übertragung vom Kern gestartet, N ms nach dem Anhalten der Vorversion` | Der Start ist angestoßen. |
+| `Wiederanlauf nach Update: Tablet-Port wieder offen, Lücke N ms (Anhalten der Vorversion → Port offen)` | Die Geräte im Hallennetz erreichen den PC wieder. **Das ist die Zahl für den Vergleich** zwischen Installer-Weg und Kernwechsel. Nur mit LAN-Server; im reinen Cloud-Betrieb fehlt die Zeile. |
+| `Wiederanlauf nach Update nicht möglich: …` | Die Übertragung lief, die Startbedingungen sind aber nicht erfüllt (z. B. Passwort fehlt). Der Grund steht auch im Fenster. |
+| `Wiederanlauf nach Update gescheitert: …` | Der Start selbst schlug fehl. |
+
+Die Lücke beginnt mit dem Schreiben des Wiederanlauf-Markers, also kurz vor
+dem Ende der alten Version — sie ist eher etwas zu groß als zu klein.
+
 ## Automatischer Upload (Standard an, abwählbar)
 
 Im Setup steht **„Diagnose-Logs senden"**. Ist der Schalter an, lädt

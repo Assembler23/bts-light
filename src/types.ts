@@ -1170,6 +1170,19 @@ export interface TabletInfo {
    * über 30 s abweist, weil ein anderer PC dasselbe Turnier hält.
    */
   cloud_hinweis?: string | null;
+  /**
+   * Hinweis zum LAN-Server: gesetzt, wenn der Tablet-Port sich nicht öffnen
+   * ließ, obwohl die Übertragung läuft.
+   */
+  lan_hinweis?: string | null;
+}
+
+/** Ergebnis des Wiederanlaufs nach einem Update (Rust:
+ *  commands::WiederanlaufMeldung). Der Kern startet die Übertragung selbst;
+ *  das Fenster erfährt hier nur, ob es geklappt hat. */
+export interface WiederanlaufMeldung {
+  gestartet: boolean;
+  fehler: string | null;
 }
 
 /** Ein kampflos wertbares Spiel (Rust: tablet::state::WalkoverCandidate). */
