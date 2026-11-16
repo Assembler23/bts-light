@@ -355,6 +355,21 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Umgesetzt, aber noch nicht abgenommen
 
+- **Hotfix ohne Neustart** — Spec:
+  [features/hotfix-ohne-neustart.md](features/hotfix-ohne-neustart.md)
+  (ADR 0099–0101). **In Umsetzung, Stand 16.11.2026:**
+  - *Weg 1 (Seiten-Paket) ist komplett* (#554, v0.9.431–433): Geräte-Seiten
+    lassen sich per signiertem Paket ohne Neustart tauschen, mit Rückweg.
+    Offen: Environment `seiten-hotfix` (Admin), erster echter Lauf des
+    Paket-Jobs, Banner und Wartungsseite in der laufenden App ansehen.
+  - *Weg 2 (Kernwechsel ohne Installer):* Wiederanlauf im Kern und
+    Lückenmessung (#553, v0.9.434) sowie Kern-Artefakt im Release-Job und
+    Datenformat-Wächter (v0.9.436) sind da. Es fehlen das Messwerkzeug am
+    Windows-PC (PR 7a), der scharfe Tausch mit Wächter (7b), Kern-Rückweg
+    und Aufräumen (8), Abschluss mit Feldtest (9).
+  - Nebenbefund für später: `latest.json` ist unsigniert und
+    `require_signed_version` nicht gesetzt.
+
 - **Verletzungsunterbrechung: Uhr am Tablet + Eintrag im Spielbericht** — Spec:
   [features/verletzungsunterbrechung.md](features/verletzungsunterbrechung.md)
   (freigegeben 14.11.2026, ADR 0095; **umgesetzt in v0.9.417–420**: Zettel-Renderer, Richtzeit,
@@ -630,17 +645,6 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
-- **Hotfix ohne Neustart** — Spec:
-  [features/hotfix-ohne-neustart.md](features/hotfix-ohne-neustart.md)
-  (freigegeben 16.11.2026, ADR 0099–0101). Zwei Wege, einen Fix im laufenden
-  Turnier einzuspielen: Geräte-Seiten zur Laufzeit durch ein signiertes Paket vom
-  Hotfix-Zweig tauschen (keine Lücke, nur LAN, jeder PC für sich) und Kernwechsel ohne Installer (Umbenennen-Tausch, Ziel
-  Median ≤ 3 s, Start-Wächter stellt die alte Version wieder her). Dazu ein
-  Ein-Klick-Rückweg: Seiten immer, Kern nur bei „rückwärts lesbar". Neun PRs; Weg 1
-  (PR 1–4) ohne Windows lieferbar, vor dem scharfen Kernwechsel eine Messung am
-  Windows-PC. Vorab vom Admin: Environment `seiten-hotfix` und Schreibrecht auf
-  `hotfix/v*`. Nebenbefund für später: `latest.json` ist unsigniert und
-  `require_signed_version` nicht gesetzt.
 - **Pi-Fernupdate** — Spec:
   [features/pi-fernupdate.md](features/pi-fernupdate.md)
   (freigegeben 16.11.2026, ADR 0102/0103). Die Monitor-Pis holen neue Skripte auf

@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.436
+
+- **Intern: Vorarbeit für den Wechsel ohne Installer.** Ein Release legt
+  künftig zusätzlich die Programmdatei und einen signierten „Kern-Kopf" ab,
+  der sie per Prüfsumme benennt. bts-light kann beides prüfen, nutzt es aber
+  noch nicht. Dazu wacht ein Test darüber, dass bei jeder Änderung an
+  gespeicherten Einstellungen entschieden wird, ob man danach noch zur
+  vorigen Version zurück kann. Für den Betrieb ändert sich nichts.
+
 ## v0.9.435
 
 - **TL-Web: Ruf nach der Turnierleitung zurücknehmen.** Ruft ein Feld über
