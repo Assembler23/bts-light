@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.432
+
+- **Intern: Seiten-Paket prüfen und ablegen.** bts-light kann ein signiertes
+  Paket mit allen Geräte-Seiten prüfen (Signatur des Updater-Schlüssels über
+  die rohen Bytes, Größendeckel, exakt dieselbe Seitenmenge, keine leere
+  Seite, Platzhalter, genau diese App-Version, steigende Folge) und im App-Datenverzeichnis
+  ablegen. Ein abgelegtes Paket wird bei jedem Start neu geprüft; jeder
+  Fehler führt zu den eingebauten Seiten. Noch lädt und bietet die App kein
+  Paket an — das folgt. Zweiter Baustein für „Hotfix ohne Neustart".
+
 ## v0.9.431
 
 - **Intern: Geräte-Seiten austauschbar gemacht.** Tablet-, Monitor-, TL-Seite
