@@ -658,7 +658,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   auch als Sprachdienst „Lokal (ohne Internet)" wählbar) und Ansagen vorab laden
   (laufend für die nächsten Spiele, auf Knopfdruck fürs ganze Turnier). Sechs
   Abschnitte E0–E5; **E0 ist eine Messung** und entscheidet, ob die Offline-Stimme
-  ohne GPL-Code trägt.
+  ohne GPL-Code trägt. Stand 16.11.2026: Das erste Messwerkzeug
+  (`tests/tts_ausfall_probe.rs`, Zeit bis zum Fehler je Ausfallart) ist gebaut und
+  unter Linux probegelaufen; **offen ist der Lauf am Windows-Turnier-PC** und das
+  zweite Werkzeug (`tests/offline_stimme_probe.rs`).
 - **Pi-Fernupdate** — Spec:
   [features/pi-fernupdate.md](features/pi-fernupdate.md)
   (freigegeben 16.11.2026, ADR 0102/0103). Die Monitor-Pis holen neue Skripte auf
