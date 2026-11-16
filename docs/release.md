@@ -439,6 +439,101 @@ das Netz.
 **Grenze des Checks:** Er macht das Vergessen sichtbar, ersetzt aber keine
 Zustellung. Wer das Repo zwei Tage nicht öffnet, sieht auch das rote Kreuz nicht.
 
+## Hotfix an einer Geräte-Seite: Seiten-Paket (`seiten-paket.yml`)
+
+> Spec: [features/hotfix-ohne-neustart.md](features/hotfix-ohne-neustart.md) ·
+> ADR 0099. Stand: Der Paket-Job ist gebaut; die App **bietet** Pakete erst
+> mit dem nächsten Baustein an.
+
+Ein Fehler in `tablet.html`, `tl.html` oder einer anderen Geräte-Seite
+(`src-tauri/assets/*.html`) lässt sich als **Seiten-Paket** ausliefern: Der
+Turnier-PC tauscht die Seiten im laufenden Betrieb, ohne Neustart. Ein Paket
+gilt für **genau eine** veröffentlichte Version.
+
+**Ablauf:**
+
+1. Zweig `hotfix/vX.Y.Z` **am Tag** `vX.Y.Z` anlegen (nicht von `main`).
+2. Den Fix dorthin übernehmen (Cherry-Pick) und pushen. Erlaubt sind
+   Änderungen an den Seiten, an Doku, Tests und `src/io/*.mjs` — **nichts am
+   Kern**.
+3. Unter **Actions → Seiten-Paket → Run workflow** den Lauf **auf `main`**
+   starten und den Tag eintragen (`vX.Y.Z`).
+4. Der Job `pruefen` zeigt in seiner Zusammenfassung die geänderten Dateien
+   und den **Unterschied der Seiten** gegenüber dem Tag. Ein Maintainer liest
+   ihn und gibt im Environment `seiten-hotfix` frei. Erst dann signiert
+   `signieren` das Paket und lädt es hoch.
+5. **Den Fix auch nach `main` mergen.** Sonst fehlt er den Cloud-Geräten
+   (die bekommen ihre Seiten vom Relay) und im nächsten Release.
+
+**Warum von Hand und nicht bei jedem Push:** Ein Workflow, der bei einem Push
+auf `hotfix/v*` startet, läuft mit der Workflow-Datei und den Skripten **aus
+diesem Zweig**. Wer dort schreiben darf, könnte Prüfung und Zusammenfassung
+umbiegen, und die Freigabe läse eine gefälschte Liste. Beim Start von `main`
+kommen Workflow und Bau-Skript aus `main`; der Hotfix-Zweig wird nur als Daten
+gelesen — über git aus einem nackten Klon, nie ausgecheckt, nie ausgeführt
+(Security-Review 16.11.2026, weicht von der ersten Fassung der Spec ab).
+
+**Wann der Job abbricht** (vor dem Signieren, mit Erklärung im Log):
+
+- Der Zweig ändert gegenüber dem Tag einen **Kern-Pfad**: `src-tauri/**`
+  außer `src-tauri/assets/*.html`, `relay-proto/**`, `Cargo.toml`,
+  `Cargo.lock`. Auch eine Versionsnummer in `src-tauri/Cargo.toml` zählt —
+  beim Cherry-Pick weglassen. Verschieben zählt als Löschen und Anlegen.
+- Der Zweig stammt nicht vom Tag ab, oder der Tag trägt eine andere Version.
+- Seit dem Tag ist keine Geräte-Seite geändert.
+- Eine Seite ist keine gewöhnliche Datei (Verweis, Untermodul).
+- Der Tag ist älter als die Version, die Seiten-Pakete kennt.
+- Das Environment `seiten-hotfix` fehlt oder hat keine Pflicht-Freigabe.
+- Unter dem Paketnamen liegt auf dem Server schon ein **anderer** Inhalt
+  (Zweig neu geschrieben, gleiche Commit-Zahl). Ein veröffentlichtes Paket
+  wird nie ersetzt; ein weiterer Commit ergibt die nächste Folge.
+
+**Was entsteht** (unter `download/bts-light/` auf badhub.de):
+
+| Datei | Inhalt |
+|---|---|
+| `seiten/seiten-<kern>-<folge>.btsp` + `.sig` | das Paket (gzip-JSON mit allen Seiten) und seine Signatur. |
+| `seiten.json` | unsignierter Index: je Version die neueste Folge, höchstens die drei jüngsten Versionen. Wird bei jedem Lauf aus den Dateien neu gebildet, die wirklich unter `seiten/` liegen. |
+
+Die **Folge** ist die Zahl der Commits auf dem Hotfix-Zweig seit dem Tag
+(`git rev-list --count vX.Y.Z..HEAD`). Sie wächst mit jedem Commit; die App
+nimmt nur eine höhere als die aktive. Derselbe Stand ergibt immer dieselben
+Bytes (als Bauzeit steht die Zeit des Commits im Paket); signiert wird nur,
+wenn der Bau nach der Freigabe dem Probebau davor gleicht. Hochgeladen wird
+erst das Paket, dann der Index.
+
+**Einmalig einzurichten (Admin) — vor dem ersten Lauf:**
+
+- Environment **`seiten-hotfix`** mit Pflicht-Freigabe („Required
+  reviewers", ohne Selbstfreigabe) und der Zweig-Regel **nur `main`**. Ohne
+  die Zweig-Regel ließe sich der Workflow auch „von" einem anderen Zweig
+  starten — dann liefe wieder dessen Fassung.
+- Schreibrecht auf `hotfix/v*` für die, die Hotfixes vorbereiten.
+- Die Secrets, die der Job liest: `TAURI_SIGNING_PRIVATE_KEY`,
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `SSH_DEPLOY_KEY_V2`,
+  `SSH_KNOWN_HOSTS`.
+
+> **Zur Schranke:** Die Freigabe schützt nur, wenn der Signaturschlüssel
+> **im Environment** liegt und nicht (auch) als Repo-Secret. Ein Repo-Secret
+> kann jeder Workflow auf jedem Zweig lesen — auch einer, den jemand mit
+> Schreibrecht neu anlegt. Der Release-Lauf liest den Schlüssel heute als
+> Repo-Secret; das ist eine bestehende Lage, kein Teil dieses Jobs. Wer sie
+> schließen will, legt den Schlüssel in Environments (eines für den
+> Release-Lauf, `seiten-hotfix` für diesen Job) und löscht das Repo-Secret.
+
+> **Noch nicht im Betrieb gelaufen** (Stand 16.11.2026): Der Workflow braucht
+> das Environment und einen echten Hotfix-Zweig. Offen sind bis zum ersten
+> Lauf: ob das Signierwerkzeug auf dem Linux-Runner so startet, ob der Job
+> die Schutzregeln des Environments lesen darf, und die Rechte von
+> `bts-deploy` für das Unterverzeichnis `seiten/`. Ein Lauf, der auf die
+> Freigabe wartet, hält spätere Veröffentlichungen auf — ablehnen statt
+> liegen lassen.
+
+Die Regeln des Bau-Skripts (`scripts/build-seiten-paket.mjs`) prüft
+`scripts/test-seiten-paket.mjs` in der CI; dass ein so gebautes Paket die
+Prüfung der App besteht, hält der Rust-Test
+`paket_aus_dem_bauskript_besteht_die_app_pruefung` fest.
+
 ## Benötigte GitHub-Secrets (einmalig eingerichtet)
 
 | Secret | Zweck |

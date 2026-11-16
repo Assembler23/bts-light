@@ -928,6 +928,53 @@ mod tests {
         );
     }
 
+    /// Der Bau-Weg der CI gegen die Prüfung der App: `scripts/
+    /// build-seiten-paket.mjs` baut aus den echten Seiten ein Paket, und
+    /// `pruefen` muss es annehmen. Driften Skript und App auseinander (Feld
+    /// umbenannt, Seite vergessen), wäre sonst jedes veröffentlichte Paket
+    /// auf jedem Turnier-PC wertlos — und das fiele erst im Turnier auf.
+    #[test]
+    fn paket_aus_dem_bauskript_besteht_die_app_pruefung() {
+        let dir = tempfile::tempdir().unwrap();
+        let datei = dir.path().join("seiten.btsp");
+        let wurzel = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let lauf = std::process::Command::new("node")
+            .arg(wurzel.join("scripts").join("build-seiten-paket.mjs"))
+            .arg("nutzlast")
+            .arg("--aus-dateien")
+            .arg(&wurzel)
+            .args(["--kern", KERN, "--folge", "7"])
+            .args(["--commit", "0123456789abcdef0123456789abcdef01234567"])
+            .arg("--out")
+            .arg(&datei)
+            .output()
+            .expect("node muss für diesen Test vorhanden sein");
+        assert!(
+            lauf.status.success(),
+            "Bau-Skript gescheitert: {}",
+            String::from_utf8_lossy(&lauf.stderr)
+        );
+
+        let bytes = std::fs::read(&datei).unwrap();
+        let schluessel = Testschluessel::neu(1);
+        let paket = pruefen(
+            &bytes,
+            &schluessel.signieren(&bytes),
+            &schluessel.oeffentlich(),
+            &erwartung(),
+        )
+        .expect("ein Paket aus dem Bau-Skript muss die Prüfung bestehen");
+        assert_eq!(paket.folge, 7);
+        assert_eq!(paket.commit, "0123456789abcdef0123456789abcdef01234567");
+        // Unverändert gebaut: derselbe Inhalt wie eingebaut, also auch
+        // dieselbe Marke — die Tablets lüden nach so einem Paket nicht neu.
+        let eingebaut = assets::aktiv();
+        for s in Seite::ALLE {
+            assert_eq!(paket.stand.seite(*s), eingebaut.seite(*s), "{s:?}");
+        }
+        assert_eq!(paket.stand.marke(), eingebaut.marke());
+    }
+
     #[test]
     fn leere_seite_abgelehnt() {
         // `tl.html` hat keinen Platzhalter — ohne diese Prüfung ginge eine

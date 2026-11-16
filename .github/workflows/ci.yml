@@ -342,6 +342,13 @@ jobs:
       - name: Relay-Deploy-Pfade vollständig
         run: node scripts/test-relay-deploy-pfade.mjs
 
+      # Seiten-Paket (Spec hotfix-ohne-neustart): Kern-Pfad-Regel samt
+      # Umgehungsversuchen an einem echten Mini-Repository, Seitenliste gegen
+      # assets.rs, Index, und dass der Workflow nur von Hand läuft, den
+      # Hotfix-Zweig nie auscheckt und Secrets erst nach der Freigabe liest.
+      - name: Seiten-Paket – Bau-Skript und Workflow
+        run: node scripts/test-seiten-paket.mjs
+
       # Ansage-Seite im Browser (Spec ansage-im-browser): Bestandsaufnahme,
       # Hallen-Pflicht, nichts Falsches oder Verfallenes sprechen, Praesenz
       # nur mit Stimme und Ton, Abspiel-Kern mit Fristen - und die
