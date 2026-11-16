@@ -630,6 +630,20 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Pi-Fernupdate** — Spec:
+  [features/pi-fernupdate.md](features/pi-fernupdate.md)
+  (freigegeben 16.11.2026, ADR 0102/0103). Die Monitor-Pis holen neue Skripte auf
+  Knopfdruck vom Turnier-PC, statt dass jede SD-Karte neu bespielt wird: signiertes
+  Paket in der App, fester Updater-Kern am Pi, stromausfallfester Tausch,
+  automatischer Rückfall. Nur LAN am Haupt-PC, nur eigene Skripte (kein
+  Betriebssystem, keine Startparameter). Drei PRs; **PR 1 ist umgesetzt** (die
+  Pi-Dateien liegen als echte Dateien unter `pi/paket/`, ohne Verhaltensänderung —
+  Probestart eines daraus gebauten Images auf Zero 2 W und 3 B+ steht aus). Danach
+  PR 2 (Paket, Signatur, Auslieferung) und PR 3 (Updater-Kern, Image, Oberfläche)
+  mit einer letzten Kartenrunde. Vorab vom Admin: Schlüsselpaare und Secret
+  `PI_PAKET_SIGNING_KEY`. Vor dem Image-Release Pflichttests am echten Pi
+  (Signaturprüfung, Stecker ziehen in jeder Phase).
+
 - **Stream-Werbung (zweite OBS-Ebene)** — Spec:
   [features/stream-werbung.md](features/stream-werbung.md)
   (freigegeben 12.11.2026, ADR 0092). Transparente Sponsoren-Ebene für OBS unter

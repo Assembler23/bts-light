@@ -21,7 +21,10 @@ for (const name of seiten) {
 }
 
 // Die Hinweisseite des Pi („noch keine Adresse") und die Richtlinie.
+// Die Seite liegt seit dem Umbau als echte Datei unter pi/paket/, die
+// Richtlinie schreibt weiter das Einrichtungsskript.
+const piSeite = readFileSync(new URL("../pi/paket/share/no-url.html", import.meta.url), "utf8");
+assert.match(piSeite, /<html lang="de" translate="no">/, "Pi-Hinweisseite ohne translate=\"no\"");
 const pi = readFileSync(new URL("../pi/setup-monitor.sh", import.meta.url), "utf8");
-assert.match(pi, /<html lang="de" translate="no">/, "Pi-Hinweisseite ohne translate=\"no\"");
 assert.match(pi, /"TranslateEnabled": false/, "Pi-Richtlinie TranslateEnabled fehlt");
 console.log(`\n${seiten.length} Seiten + Pi-Skript geprüft.`);

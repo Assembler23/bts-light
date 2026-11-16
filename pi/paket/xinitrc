@@ -1,0 +1,10 @@
+#!/bin/sh
+# bts-light Court-Monitor: X-Session, gestartet via 'startx' aus .bash_profile.
+# Kein DPMS, kein Screensaver — TV soll dauerhaft anzeigen.
+xset -dpms
+xset s off
+xset s noblank
+# Minimaler Window-Manager (sonst rendert Chromium nicht zuverlaessig fullscreen).
+matchbox-window-manager -use_titlebar no &
+# Kiosk starten.
+exec "$HOME/.local/bin/bts-monitor.sh"

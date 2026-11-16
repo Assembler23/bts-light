@@ -96,7 +96,11 @@ Anzeige. Dafür gibt es ein fertiges Skript.
    curl -fsSLO https://raw.githubusercontent.com/Assembler23/bts-light/main/pi/setup-monitor.sh
    ```
    (Du kannst es vorher mit `cat setup-monitor.sh` ansehen — es ist kurz
-   und kommentiert.)
+   und kommentiert. Die Dateien, die es auf dem Pi ablegt — Kiosk-Skript,
+   CEC-Dienst, Hinweisseite —, lädt es beim Ausführen selbst aus dem
+   bts-light-Repository nach; sie liegen dort unter
+   [`pi/paket/`](https://github.com/Assembler23/bts-light/tree/main/pi/paket).)
+   <!-- pruef: "archive/$PAKET_REF.tar.gz" in pi/setup-monitor.sh -->
 3. Skript ausführen:
    ```
    bash setup-monitor.sh
@@ -172,7 +176,7 @@ erzeugen** an sein, und für Sprache am Pi braucht es Azure. Mehr dazu:
 
 Damit der Pi **ohne Tippen** Ton abspielen darf, startet das Kiosk-Skript
 Chromium mit `--autoplay-policy=no-user-gesture-required`.
-<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/setup-monitor.sh -->
+<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/paket/bin/bts-monitor.sh -->
 
 **Pis, die vor v0.9.313 eingerichtet wurden, haben dieses Flag noch nicht.**
 Sie zeigen im Ansage-Modus unten links „Ton gesperrt …" und sprechen nicht.
@@ -216,7 +220,7 @@ Das geht nur im Hallennetz — mit einer Cloud-Adresse in
 `bts-monitor-url.txt` fragt der Pi nicht nach. Karten, die vor v0.9.406
 bespielt wurden, können das noch nicht: neu bespielen oder
 `setup-monitor.sh` noch einmal laufen lassen.
-<!-- pruef: "pi-tv" in pi/setup-monitor.sh -->
+<!-- pruef: "pi-tv" in pi/paket/bin/bts-cec.sh -->
 
 Dafür muss CEC **am TV eingeschaltet** sein. Der Menüpunkt heißt je Marke
 anders: Samsung **Anynet+**, LG **SimpLink**, Sony **Bravia Sync**,
@@ -226,7 +230,7 @@ Philips **EasyLink**, Panasonic **VIERA Link**, sonst meist „HDMI-CEC" oder
 - **Abschalten** für eine Karte (z. B. ein TV, der damit Unsinn macht): auf
   dem Karten-Laufwerk eine leere Datei `bts-cec-aus.txt` anlegen. Wirkt
   ab dem nächsten Start des Pi.
-  <!-- pruef: "bts-cec-aus.txt" in pi/setup-monitor.sh -->
+  <!-- pruef: "bts-cec-aus.txt" in pi/paket/bin/bts-cec.sh -->
 - **Was tut der Dienst gerade?** `journalctl -u bts-cec` im Terminal.
 
 Das Skript setzt außerdem `vc4.force_hotplug=1` in `cmdline.txt`: Der Pi gibt

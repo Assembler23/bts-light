@@ -194,7 +194,7 @@ Arbeitsspeicher (`tablet/tv.rs`, `TvStore`) — nach einem Neustart von
 bts-light gibt es keinen Befehl. Die Adresse des Turnier-PCs legt das
 Kiosk-Skript für den Dienst in `bts-monitor-pc` ab.
 <!-- pruef: "/pi-tv" in src-tauri/src/tablet/server.rs -->
-<!-- pruef: "bts-monitor-pc" in pi/setup-monitor.sh -->
+<!-- pruef: "bts-monitor-pc" in pi/paket/bin/bts-monitor.sh -->
 <!-- handbuch:an -->
 
 **Direkt-Variante:** Wer einen Monitor fest auf ein Feld nageln will,
@@ -1224,7 +1224,7 @@ Spec: [features/ansage-im-browser.md](features/ansage-im-browser.md), Etappe E1b
   „Ton freischalten"; der Pi startet Chromium deshalb mit
   `--autoplay-policy=no-user-gesture-required` (siehe
   [pi-setup.md](pi-setup.md), „Ton für Ansagen am TV").
-<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/setup-monitor.sh -->
+<!-- pruef: "--autoplay-policy=no-user-gesture-required" in pi/paket/bin/bts-monitor.sh -->
 
 **Adresse eintragen:** In `bts-monitor-url.txt` auf der Karte des Pi, z. B.
 
