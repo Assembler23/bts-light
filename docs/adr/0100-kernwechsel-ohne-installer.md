@@ -375,15 +375,18 @@ Die 1825 ms sind das Warten auf das Ende der alten App plus der Start der
 neuen Datei; die 908 ms decken sich mit den Läufen unter Linux (755 und
 940 ms).
 
+Am Bildschirm dauerte der ganze Wechsel nach Beobachtung der Turnierleitung
+„nur wenige Sekunden" — die in der Sonde gemessene Blockade beim Umbenennen
+(bis 10 s) fiel in diesem Lauf nicht auf. Gemessen ist das nicht.
+
 **Was dieser Lauf nicht belegt:**
 
 - Die Lücke der Übertragung (Erfolgskriterium: Median höchstens 3 s) steht
   im normalen Log (`Wiederanlauf nach Update: … Lücke N ms`) und liegt
   nicht vor. Sie beginnt kurz **vor** dem Start des Wächters (Anhalten der
   Übertragung) und endet, wenn der Tablet-Port wieder offen ist.
-- Ob die Übertragung beim Wechsel lief, welcher Rechner es war und wie
-  lange es vom Klick bis zum Verschwinden des Fensters dauerte, ist nicht
-  festgehalten.
+- Ob die Übertragung beim Wechsel lief und welcher Rechner es war, ist
+  nicht festgehalten.
 - Es ist ein einzelner Lauf, kein Median, und kein Hallen-PC.
 
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
