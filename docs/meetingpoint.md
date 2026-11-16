@@ -173,6 +173,12 @@ Personen von Hand ein- und auschecken. Oben schaltet **✓ nur spielbereite** di
 Liste auf eingecheckte Partien um (je Gerät gemerkt).
 <!-- pruef: "✓ nur spielbereite" in src-tauri/assets/tl.html -->
 
+Eine gerufene Partie steht **gelb** in der Liste. Sind alle da, wird die Zeile
+**grün** (seit v0.9.426) — so sieht man auf einen Blick, welche Partien aufs
+Feld können. Hat jemand der Zeile von Hand eine andere Farbe gegeben, bleibt
+diese stehen. In BTP ändert sich dadurch nichts; dort bleibt die Partie gelb.
+<!-- pruef: ".row.spielbereit { --hl: #86efac;" in src-tauri/assets/tl.html -->
+
 **Turnier-PC (In Vorbereitung):** Jede gerufene Partie zeigt je Person einen
 Knopf (antippen = von Hand ein-/auschecken) und **spielbereit**, sobald alle
 da sind.

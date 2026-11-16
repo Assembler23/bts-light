@@ -303,7 +303,11 @@ Zwei Meldungen gehen vom Tablet an die Turnierleitung, beide ohne PIN:
   das Zeichen 📣). Er meldet, dass jemand ans Feld kommen soll. Es erscheint
   eine Rückfrage, damit nichts aus Versehen ausgelöst wird. Der Knopf
   erscheint, sobald die Aufstellung bestätigt ist — ohne Spiel und während
-  der Seitenwahl fehlt er.
+  der Seitenwahl fehlt er. Die Turnierleitung sieht den Ruf am Turnier-PC und
+  auf ihren eigenen Geräten oben als Meldung mit der Feldnummer. Hat sich die
+  Sache erledigt, den Knopf noch einmal antippen und **Meldung zurücknehmen**
+  wählen — sie verschwindet dann überall.
+  <!-- pruef: "Meldung zurücknehmen" in src-tauri/assets/tablet.html -->
   <!-- pruef: /<span class="txt" data-t>Turnierleitung<\/span>/ in src-tauri/assets/tablet.html -->
 
 Beide Meldungen erscheinen bei der Turnierleitung in einer Leiste, die auf

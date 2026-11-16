@@ -986,6 +986,12 @@ Beide Meldungen erscheinen zusätzlich in einer **app-weiten Leiste** in
 bts-light – auf jeder Seite, mit Feldnummer. Aufgelöst werden sie am
 Tablet (Behandlung „Weiterspielen" bzw. Meldung zurücknehmen).
 
+Der Ruf nach der Turnierleitung steht seit v0.9.426 außerdem im
+**Störungsband der Turnierleitungs-Oberfläche** (TL-Web), mit Feld und Halle
+— siehe [turnierleitung-web.md](turnierleitung-web.md). Am Protokoll ändert
+sich nichts: Es ist derselbe `official_call`, der schon das Abzeichen „TL
+gerufen" an der Feld-Kachel speist.
+
 ## Spiel abbrechen (Aufgabe)
 
 Gibt ein:e Spieler:in verletzungsbedingt auf, beendet **„Spiel abbrechen"**

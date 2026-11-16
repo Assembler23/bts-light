@@ -222,10 +222,14 @@ header {
 .auto.off { border-color: #fed7aa; background: #fffbeb; color: #9a3412; }
 .auto.off::before { background: var(--warn); }
 
-/* Störungsband: nimmt die volle Breite, damit es niemand übersieht. */
+/* Störungsband: nimmt die volle Breite, damit es niemand übersieht.
+   `pre-line`: Mehrere Meldungen stehen als eigene Zeilen untereinander
+   (Ruf vom Feld, „Ergebnis fehlt", Meetingpoint) — eine verdrängt die
+   andere nicht mehr. */
 .banner {
   display: none; flex: none; padding: 10px 16px; font-weight: 650;
   background: #fef2f2; color: #7f1d1d; border-bottom: 1px solid #fecaca;
+  white-space: pre-line;
 }
 .banner.show { display: block; }
 
@@ -673,6 +677,12 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
 }
 .row.hl-1 .draw, .row.hl-2 .draw, .row.hl-3 .draw,
 .row.hl-4 .draw, .row.hl-5 .draw, .row.hl-6 .draw { color: #1f2937; }
+/* Spielbereit (Meetingpoint: alle eingecheckt): Die gerufene Zeile schlägt
+   von Aufruf-Gelb auf Grün um — wann genau, entscheidet `spielbereitGruen`.
+   Bewusst ein anderer Ton als BTPs Hand-Grün (`.hl-5`, ein Mint): Das eine
+   hat jemand gesetzt, das andere ist ein Zustand. */
+.row.spielbereit { --hl: #86efac; background: var(--hl); border-color: color-mix(in srgb, var(--hl) 70%, #000 30%); }
+.row.spielbereit .draw { color: #1f2937; }
 /* In der Feldkachel nur eine Marke: Ihr Vollton gehört der Halle und dem
    Zustand (Sperre, Räumung, Warnung). */
 .hl-chip {
@@ -3539,6 +3549,34 @@ function fertigOhneErgebnisAlle() {
     .sort((a, b) => a.decided_since_ms - b.decided_since_ms);
 }
 
+// ── Inline-Kopie von src/io/stoerungsband.mjs ───────────────────────────
+// Kanonische Fassung samt Tests im Modul; `scripts/test-stoerungsband.mjs`
+// vergleicht das Verhalten.
+function feldMitHalle(c) {
+  return c.location ? `${c.court} (${c.location})` : `${c.court}`;
+}
+function rufText(courts) {
+  const felder = (courts || []).filter((c) => c && c.official_call);
+  if (!felder.length) return "";
+  return "📣 Turnierleitung ans Feld gerufen: "
+    + felder.map((c) => `Feld ${feldMitHalle(c)}`).join(", ");
+}
+function stoerungsZeilen({ offline, ruf, fertig, meetingpoint }) {
+  if (offline) return [offline];
+  return [ruf, fertig, meetingpoint].filter(Boolean);
+}
+
+/** „Ergebnis fehlt" als Zeile fürs Störungsband; leer, wenn kein Feld so
+ *  aussieht. */
+function fertigText() {
+  const fertig = fertigOhneErgebnisAlle();
+  if (!fertig.length) return "";
+  const kopf = fertig.length === 1
+    ? `Feld ${feldMitHalle(fertig[0])}: Spiel sieht fertig aus, aber es kam kein Ergebnis.`
+    : `${fertig.length} Felder ohne Ergebnis: ${fertig.map(feldMitHalle).join(", ")}.`;
+  return `${kopf} Bitte am Feld nachsehen.`;
+}
+
 /** Strikter Meetingpoint-Modus: Ein Feld steht frei, aber keine Partie ist
  *  spielbereit (ADR 0073). Erst nach einer Minute, damit der normale
  *  Wechsel zwischen zwei Spielen keinen Alarm auslöst. */
@@ -3574,39 +3612,40 @@ function renderConnection() {
   // nicht bei jedem `renderConnection()` (das läuft bei jedem Abruf, auch
   // wenn sich am Banner gar nichts ändert — inklusive der reinen
   // 304-„unverändert"-Antwort, die sonst ohne Neupassung bliebe).
-  const warSichtbar = banner.classList.contains("show");
-  // Das Störungsband trägt beides — mit klarem Vorrang: Ohne Verbindung ist
-  // jede andere Meldung wertlos, weil der gezeigte Stand alt sein kann.
+  // Verglichen wird der Text, nicht nur die Sichtbarkeit: Seit das Band
+  // mehrere Zeilen trägt, ändert auch eine dazukommende zweite Meldung
+  // seine Höhe.
+  const vorher = banner.classList.contains("show") ? banner.textContent : "";
+  // Das Störungsband trägt alles, was niemand übersehen darf — mit klarem
+  // Vorrang: Ohne Verbindung ist jede andere Meldung wertlos, weil der
+  // gezeigte Stand alt sein kann. Sonst stehen die Meldungen untereinander,
+  // der Ruf vom Feld zuerst (dort wartet gerade jemand).
   //
   // Bewusst hier und nicht in einem eigenen Panel: Ein Panel lässt sich per
   // Profil ausblenden und einklappen — und dann fehlte die Meldung genau in
   // der Lage, für die sie gedacht ist. Das Band ist immer da.
-  const fertig = level === "offline" ? [] : fertigOhneErgebnisAlle();
-  if (level === "offline") {
+  //
+  // Die Halle steht im Text, nicht im Filter: Die Zeilen ignorieren den
+  // Hallenfilter ausdrücklich — sonst verschwiegen sie genau den Fall, für
+  // den sie gebaut wurden (Gerät auf die andere Halle gestellt).
+  const zeilen = stoerungsZeilen({
     // Genau sein: Die Uhren laufen weiter, sie messen echte Zeit. Stehen
     // geblieben sind Felder, Spielstände und Liste. „Die Anzeige ist
     // eingefroren" wäre falsch und würde beim Blick auf die laufende Uhr
     // sofort unglaubwürdig.
-    banner.textContent =
-      "Keine Verbindung zum Turnier-PC — Felder, Spielstände und Liste stehen auf dem letzten bekannten Stand.";
-    banner.classList.add("show");
-  } else if (fertig.length) {
-    // Die Halle steht im Text, nicht im Filter: Diese Zeile ignoriert den
-    // Hallenfilter ausdrücklich — sonst verschwiege sie genau den Fall, für
-    // den sie gebaut wurde (Gerät auf die andere Halle gestellt).
-    const nenne = (c) => (c.hall ? `${c.court} (${c.hall})` : c.court);
-    const kopf = fertig.length === 1
-      ? `${nenne(fertig[0])}: Spiel sieht fertig aus, aber es kam kein Ergebnis.`
-      : `${fertig.length} Felder ohne Ergebnis: ${fertig.map(nenne).join(", ")}.`;
-    banner.textContent = `${kopf} Bitte am Feld nachsehen.`;
-    banner.classList.add("show");
-  } else if (mpLeerlaufText()) {
-    banner.textContent = mpLeerlaufText();
-    banner.classList.add("show");
-  } else {
-    banner.classList.remove("show");
-  }
-  if (banner.classList.contains("show") !== warSichtbar) scheduleFitCourts();
+    offline: level === "offline"
+      ? "Keine Verbindung zum Turnier-PC — Felder, Spielstände und Liste stehen auf dem letzten bekannten Stand."
+      : "",
+    // Megafon-Knopf am Zähl-Tablet. Verschwindet, sobald die Meldung am
+    // Tablet zurückgenommen wird oder das Spiel das Feld verlässt.
+    ruf: rufText(state && state.courts),
+    fertig: fertigText(),
+    meetingpoint: mpLeerlaufText(),
+  });
+  const jetzt = zeilen.join("\n");
+  if (jetzt !== vorher) banner.textContent = jetzt;
+  banner.classList.toggle("show", zeilen.length > 0);
+  if (jetzt !== vorher) scheduleFitCourts();
   // Der Poll-Takt hängt auch am Erfolg: Sobald ein Abruf misslingt, gilt
   // der Push-Kanal als nicht mehr tragend (`pushAktiv`) und die Seite
   // fragt wieder alle zwei Sekunden — sonst dauerte das Erkennen einer
@@ -5504,10 +5543,18 @@ function queueRow(m, topMatchId) {
   parts.push(`<span class="row-actions">${aktionen.join("")}</span>`);
 
   const selected = picked && picked.match.match_id === m.match_id;
-  return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}${offen ? " offen" : ""}${hlKlasse(m.highlight || 0)}"
+  return `<div class="row${m.blocked ? " blocked" : ""}${pickable ? " pick" : ""}${offen ? " offen" : ""}${spielbereitGruen(m) ? " spielbereit" : hlKlasse(m.highlight || 0)}"
                data-match="${m.match_id}" data-id="${m.match_id}"
                ${pickable ? `tabindex="0" role="button" aria-selected="${!!selected}"` : ""}>
             ${parts.join("")}</div>`;
+}
+
+// ── Inline-Kopie von src/io/spielbereitFarbe.mjs ────────────────────────
+// Kanonische Fassung samt Tests im Modul; `scripts/test-spielbereit-farbe.mjs`
+// vergleicht das Verhalten.
+function spielbereitGruen(m) {
+  if (!m || !m.prep_call || !m.meetingpoint || !m.meetingpoint.bereit) return false;
+  return (m.highlight || 0) <= 1;
 }
 
 // ── Meetingpoint (Spec meetingpoint-spielbereit) ─────────────────────────
