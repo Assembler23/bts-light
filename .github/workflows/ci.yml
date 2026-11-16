@@ -77,6 +77,11 @@ jobs:
       - name: Besetzung im Aufruf (JS)
         run: node scripts/test-vorbereitung-besetzung.mjs
 
+      # TP-Datei im Setup (Spec tp-datei-finden, ADR 0097): Entscheidung über
+      # eine gewählte oder in BTP gefundene Datei, Meldungen der Suche.
+      - name: TP-Datei-Wahl (JS)
+        run: node scripts/test-tp-wahl.mjs
+
       # BWF-Aufschlag-Positionierung des Tablets (Plan 12b) — reiner
       # Node-Test der sicherheitskritischen Positionslogik.
       - name: Tablet-Aufschlagpositionen (JS)
@@ -424,6 +429,12 @@ jobs:
       # weil je eine allein den echten Vorfall verschluckt haette.
       - name: Release-Faellig-Regel (JS)
         run: node scripts/test-version-tagged.mjs
+
+      # Tuersteher des Workflows "Release ausloesen": Er taggt mit einem
+      # Schluessel, der das Tag-Ruleset umgehen darf — jeder Hinderungsgrund
+      # und jeder Lesefehler muss sperren.
+      - name: Release-Freigabe-Regel (JS)
+        run: node scripts/test-release-freigabe.mjs
 
       # Haelt fest, dass die Update-Notes die ganze Strecke seit dem letzten
       # Tag abdecken — vorher sah der Nutzer nur den getaggten Eintrag, und

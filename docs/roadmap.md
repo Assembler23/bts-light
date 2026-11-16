@@ -299,7 +299,7 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 - **Demofeld: weitere Übungsszenarien** (Spec `tablet-demofeld`, v0.9.416).
   Szenarien sind ein Eintrag in `DEMO_SZENARIEN` (`tablet.html`). Denkbar
-  sind ein Satz bis 15 bzw. 11, eine Aufgabe in der Behandlungspause, ein
+  sind ein Satz bis 11 (bis 15 gibt es seit v0.9.422), eine Aufgabe in der Behandlungspause, ein
   Fehlaufschlag mit Karte oder ein Seitenfehler zum Korrigieren.
 
 - **Ergebnis-Write ohne CourtID löscht den Spielort.** Messung 09.11.2026
@@ -764,7 +764,18 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   - **Turnier-Kennung aus der Datei — ✅ umgesetzt in v0.9.302:** GUID per
     Byte-Muster `LinkCode` aus der TP-Datei (kein Jet-Parser); Übernahme im
     Setup, Ablehnung fremder Dateien vor dem Senden (Ergänzung in der
-    Takt-Spec). Offen: Datei über den BTP-Prozess selbst finden.
+    Takt-Spec).
+  - **TP-Datei selbst finden — ✅ umgesetzt in v0.9.423 (PR 1) und v0.9.424 (PR 2):**
+    Pfad aus den offenen Datei-Handles von `btp.exe` (gemessen, Sonde
+    `tests/btp_tp_pfad_probe.rs`). PR 1: Suche beim Öffnen des Setups und per
+    Knopf, Schalter „TP-Datei automatisch finden", Rückfrage bei
+    abweichender Kennung. PR 2: Suche bei App-Start,
+    Übertragungs-Start und im 60-s-Takt, Banner außerhalb des Setups,
+    Schreibpfad mit Schreibzähler. **Offen:** Feldtest am Windows-PC
+    (Banner, Neustart nach „Ja", Pfadwechsel bei laufender Übertragung). Spec [features/tp-datei-finden.md](features/tp-datei-finden.md),
+    ADR [0096](adr/0096-tp-pfad-aus-den-handles-von-btp.md) ·
+    [0097](adr/0097-tp-automatik-kennung-nur-bei-gleichheit-oder-leer.md) ·
+    [0098](adr/0098-tp-automatik-schreibpfad-mit-schreibzaehler.md).
   - **Reihenfolge:** badhub B1–B4 zuerst (`AFFECTS` badhub), dann bts-light L1 — eingehalten.
   - **Vor dem Feldtest:** Messung A2 (Kopie bei BTP-Eingaben), Jet-Nachlauf.
     Lizenzfrage aus badhub-ADR 0047 **geprüft 28.10.2026** (badhub

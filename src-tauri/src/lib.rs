@@ -14,6 +14,7 @@ pub mod openai_tts;
 pub mod print;
 pub mod sync;
 pub mod tablet;
+pub mod tp_finden;
 pub mod tts_teile;
 pub mod tts_text;
 pub mod tts_verbrauch;
@@ -226,6 +227,11 @@ pub fn run() {
             commands::set_court_ad_style,
             commands::read_tournament_logo,
             commands::tp_file_check,
+            commands::tp_datei_finden,
+            commands::tp_finden_status,
+            commands::tp_finden_pruefen,
+            commands::tp_finden_antwort,
+            commands::tp_finden_hinweis_weg,
             commands::tp_upload_now,
             commands::tp_upload_status,
             commands::monitor_devices,

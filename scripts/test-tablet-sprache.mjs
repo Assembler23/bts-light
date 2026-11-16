@@ -139,6 +139,24 @@ for (const [de, en] of Object.entries(EN)) {
   assert.deepEqual(platzhalter(en), platzhalter(de), `Platzhalter weichen ab bei „${de}"`);
 }
 
+// Schlupflöcher der Erfassung oben, je eines:
+// (a) `t("…")` mit doppelten Anführungszeichen sähe weder die Literal- noch
+//     die Ausdrucks-Suche — die Seite schreibt Texte einheitlich mit '…'.
+assert.ok(!/(?<![\w.$])t\("/.test(ohneWoerterbuch), 't("…") gefunden: Texte für t() stehen in einfachen Anführungszeichen');
+// (b) Jeder Platzhalter eines Übungsspiel-Texts muss aus `demoTextWerte`
+//     kommen, sonst stünde „{m6}" wörtlich auf dem Bildschirm.
+{
+  const werte = new Function(funktion("demoTextWerte") + "\nreturn demoTextWerte;")()({ ziel: 21, cap: 30, pause: 11 });
+  for (const [text, woher] of schluessel) {
+    if (!String(woher).startsWith("DEMO_SZENARIEN.text")) continue;
+    for (const p of platzhalter(text)) assert.ok(p in werte, `Übungsspiel-Text „${text}": demoTextWerte liefert {${p}} nicht`);
+  }
+}
+// (c) Das Wort im Verlauf-Graphen wird nachträglich ersetzt; ändert sich der
+//     SVG-Text, bliebe der Graph still deutsch.
+assert.ok(funktion("timelineSetSvg").includes(" Ballwechsel</text>"), "timelineSetSvg schreibt nicht mehr „N Ballwechsel“ — Ersetzung beim Verlauf nachziehen");
+assert.ok(ohneWoerterbuch.includes(".replace(' Ballwechsel<', ' ' + t('Ballwechsel') + '<')"));
+
 // ── 3. Keine Mischtexte mehr ─────────────────────────────────────────────
 for (const rest of ["fillBilingual", "megaphoneSubtitle", "megaphone-subtitle", "t-en", "s-en",
   "Confirm presence", "Back to interval", "· Walkover", "Scoreboard:", "· Umpire", "Service judge",

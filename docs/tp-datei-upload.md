@@ -36,6 +36,42 @@ Einstellungen → Abschnitt **„TP-Datei (Turnierdatenbank)“**, direkt hinter
 BTP-Verbindung.
 <!-- pruef: "TP-Datei (Turnierdatenbank)" in src/pages/SetupWizard.tsx -->
 
+**Im Normalfall musst du nichts wählen.** Läuft BTP auf demselben PC und ist
+dein Turnier dort geöffnet, findet bts-light die Datei beim Öffnen der
+Einstellungen selbst und trägt sie ein. Darunter steht dann **„In BTP
+gefunden: …"** mit dem Dateinamen. Wie bei jeder Änderung gilt sie erst nach
+**Speichern**.
+<!-- pruef: "In BTP gefunden: " in src/pages/SetupWizard.tsx -->
+
+- **TP-Datei automatisch finden** (Häkchen, voreingestellt an) schaltet diese
+  Suche. Wählst du die Datei von Hand, entfernst sie oder verneinst eine
+  Rückfrage der Suche, geht das Häkchen aus — deine Wahl gilt dann, bis du
+  es wieder setzt.
+  <!-- pruef: "TP-Datei automatisch finden" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: "finden_automatisch: true" in src-tauri/src/config.rs -->
+- **In BTP geöffnete Datei suchen** sucht sofort, auch bei ausgeschaltetem
+  Häkchen.
+  <!-- pruef: "In BTP geöffnete Datei suchen" in src/pages/SetupWizard.tsx -->
+
+Findet die Suche nichts, sagt sie warum:
+
+| Meldung | Was zu tun ist |
+|---|---|
+| „BTP läuft nicht auf diesem PC." | BTP starten und das Turnier öffnen, dann erneut suchen. |
+| „In BTP ist kein Turnier geöffnet." | Das Turnier in BTP öffnen. |
+| „BTP läuft als Administrator — bitte die Datei von Hand wählen." | Windows lässt bts-light dann nicht nachsehen. Datei von Hand wählen oder BTP normal starten. |
+| „BTP läuft auf einem anderen PC — bitte die Datei von Hand wählen." | Die BTP-Adresse zeigt nicht auf diesen PC (nur `127.0.0.1`/`localhost` zählt). Datei von Hand wählen. |
+| „… liegt auf einem Netzlaufwerk — bitte die Datei von Hand wählen." | Dateien im Netz öffnet die Suche aus Sicherheitsgründen nicht selbst. Datei von Hand wählen. |
+| „BTP hat nicht geantwortet — bitte die Datei von Hand wählen." | Selten; Datei von Hand wählen. |
+<!-- pruef: "BTP läuft nicht auf diesem PC." in src/io/tpWahl.mjs -->
+<!-- pruef: "In BTP ist kein Turnier geöffnet." in src/io/tpWahl.mjs -->
+<!-- pruef: "BTP läuft als Administrator" in src/io/tpWahl.mjs -->
+<!-- pruef: "BTP läuft auf einem anderen PC" in src/io/tpWahl.mjs -->
+<!-- pruef: "liegt auf einem Netzlaufwerk" in src/io/tpWahl.mjs -->
+
+Die Suche gibt es nur unter Windows und nicht im Slave-Modus. Von Hand geht es
+so:
+
 1. **TP-Datei wählen** öffnet den Dateidialog. Wähle die Datei, die in BTP
    geöffnet ist — meist unter *Dokumente* oder dort, wo du das Turnier
    angelegt hast; die Endung ist `.TP`.
@@ -55,7 +91,7 @@ des einen Turniers unter der Kennung eines anderen.
 <!-- pruef: "Datei neu wählen" in src/pages/SetupWizard.tsx -->
 
 **Die Kennung steht auch in der Datei.** BTP trägt die turnier.de-Kennung in
-die Turnierdatei ein, und bts-light liest sie beim Wählen mit:
+die Turnierdatei ein, und bts-light liest sie beim Wählen und beim Finden mit:
 
 - Ist unter „1 · Liveticker-Ziel“ noch keine Kennung eingetragen, übernimmt
   bts-light sie aus der Datei und sagt **„Turnier-Kennung aus der Datei
@@ -69,10 +105,18 @@ die Turnierdatei ein, und bts-light liest sie beim Wählen mit:
   Kennung oben durch die aus der Datei und speichert die Datei; **Abbrechen**
   speichert nichts. Vor dem Klick kurz prüfen: Ist das die richtige Datei —
   oder die vom Vorjahr? Die Kennung steuert auch Liveticker, Check-In und
-  Aushang; deshalb übernimmt bts-light sie nie still, sondern nur nach
+  Aushang; deshalb ersetzt bts-light eine eingetragene Kennung nie still, sondern nur nach
   deiner Bestätigung. Dieselbe Rückfrage kommt, wenn oben etwas steht, das
   keine Kennung ist (etwa eine halbe Adresse).
   <!-- pruef: "gehört zu Turnier" in src/pages/SetupWizard.tsx -->
+- Hat bts-light die Datei **selbst gefunden** und sie nennt gar keine Kennung
+  (Turnier noch nicht auf turnier.de veröffentlicht), fragt es ebenfalls:
+  „… nennt keine Turnier-Kennung. Trotzdem für Turnier … verwenden?" **Datei
+  verwenden** speichert die Datei, die Kennung oben bleibt.
+  <!-- pruef: "nennt keine Turnier-Kennung. Trotzdem für Turnier" in src/pages/SetupWizard.tsx -->
+- Verneinst du eine Rückfrage zu einer **gefundenen** Datei, ändert sich
+  nichts und das Häkchen „TP-Datei automatisch finden" geht aus — sonst
+  käme dieselbe Frage beim nächsten Öffnen wieder.
   <!-- pruef: "Kennung übernehmen" in src/pages/SetupWizard.tsx -->
 
 Eine Datei ohne Kennung (Turnier nicht mit turnier.de verknüpft) lässt sich
@@ -86,6 +130,44 @@ gerade geschriebene Datei nicht immer vollständig.
 
 Im **Ansage-Slave-Modus** gibt es den Abschnitt nicht: Nur der Master lädt
 hoch ([Master und Slave](master-slave.md)).
+
+### Die Suche läuft mit
+
+Solange **TP-Datei automatisch finden** an ist, sieht bts-light von selbst
+nach, welche Datei in BTP geöffnet ist: beim Programmstart, beim Start der
+Übertragung und danach **jede Minute**, solange die Übertragung läuft.
+<!-- pruef: /TP_FINDEN_TAKT: Duration = Duration::from_secs\(60\)/ in src-tauri/src/commands.rs -->
+
+- **Dieselbe Turnier-Kennung, anderer Ort** (Datei verschoben oder in BTP
+  unter neuem Namen gespeichert): bts-light übernimmt den neuen Pfad ohne
+  Zutun. Die Übertragung läuft weiter; ein angehaltener automatischer Upload
+  startet wieder. Oben im Fenster steht dann ein blauer Hinweis **„TP-Datei
+  gewechselt: In BTP ist jetzt … geöffnet"**, bis du ihn wegklickst. Stimmt
+  die Datei nicht — etwa weil du versehentlich eine Sicherungskopie geöffnet
+  hast —, öffne in BTP wieder die richtige.
+  <!-- pruef: "TP-Datei gewechselt: In BTP ist jetzt" in src/components/TpFundBanner.tsx -->
+- **Ein anderes Turnier ist in BTP geöffnet** (oder die Datei nennt keine
+  Kennung): Nichts ändert sich von allein. Oben im Fenster erscheint auf jeder
+  Seite ein orangefarbener Balken „In BTP ist … geöffnet. Die Datei gehört zu
+  Turnier …, eingetragen ist …. Datei und Kennung übernehmen?"
+  <!-- pruef: "Datei und Kennung übernehmen?" in src/io/tpWahl.mjs -->
+  - **Ja, übernehmen** ersetzt Datei und Turnier-Kennung. Läuft die
+    Übertragung, startet bts-light sie dabei kurz neu — der Balken sagt das
+    vorher an. Danach zeigen Liveticker, Check-In und Aushang auf das neue
+    Turnier.
+    <!-- pruef: "Ja, übernehmen" in src/components/TpFundBanner.tsx -->
+    <!-- pruef: "Die Übertragung startet dabei kurz neu." in src/io/tpWahl.mjs -->
+  - **Nein** lässt alles, wie es ist, und schaltet die Suche aus. Der
+    automatische Upload sendet die fremde Datei ohnehin nie.
+  - Schließt du die fremde Datei in BTP wieder und öffnest dein Turnier,
+    verschwindet der Balken von selbst.
+- **Noch keine Turnier-Kennung eingetragen:** Außerhalb der Einstellungen
+  trägt bts-light nichts ein. Öffne die Einstellungen — dort übernimmt es
+  Datei und Kennung sichtbar, und du speicherst.
+
+Kurz in eine andere Datei schauen (etwa die vom Vorjahr) ist damit
+ungefährlich: Solange du die Frage nicht mit Ja beantwortest, bleibt dein
+Turnier eingetragen.
 
 ## Senden: der Knopf im Status-Fenster
 

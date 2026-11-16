@@ -235,11 +235,14 @@ Verzeichnis auf badhub.de schreiben.
    - `src-tauri/Cargo.toml` → `version` (liefert `CARGO_PKG_VERSION`,
      das der Updater für den Versionsvergleich nutzt)
 2. Änderungen committen und pushen.
-3. Tag setzen und pushen:
+3. Tag setzen — per Knopf über den Workflow **„Release auslösen"**
+   (siehe [unten](#release-per-knopf-auslösen)):
    ```bash
-   git tag v0.3.0
-   git push origin main --tags
+   gh workflow run release-ausloesen.yml --ref main -f version=0.3.0
    ```
+   Von Hand (`git tag -a v0.3.0 -m "BTS Light v0.3.0" && git push origin v0.3.0`)
+   kann den Tag nur ein Admin setzen — das Ruleset „Release-Tags nur durch
+   Admins" sperrt `v*` für alle anderen.
 4. Der GitHub-Actions-Workflow `release.yml` erledigt den Rest:
    - baut den signierten Installer (`build`-Job, Windows),
    - legt ein GitHub-Release `v0.3.0` an,
@@ -249,8 +252,131 @@ Verzeichnis auf badhub.de schreiben.
 Installierte Clients sehen das Update beim nächsten Start (oder per
 Button) innerhalb weniger Sekunden.
 
-`workflow_dispatch` (Actions-Tab → „Run workflow") baut nur zum Test und
-veröffentlicht **nicht**.
+`workflow_dispatch` **von `release.yml`** (Actions-Tab → „Run workflow") baut
+nur zum Test und veröffentlicht **nicht**.
+
+### Release per Knopf auslösen
+
+Der Workflow **`release-ausloesen.yml`** setzt den Versions-Tag auf `main`.
+Starten kann ihn jeder mit Schreibrecht auf das Repo — Admin-Recht braucht es
+dafür nicht:
+
+- **Im Browser:** Actions → „Release auslösen" → „Run workflow" → Branch
+  `main`, im Feld die Version eintippen (`0.9.422`).
+- **Im Terminal:** `gh workflow run release-ausloesen.yml --ref main -f version=0.9.422`
+
+Die getippte Version ist die Bestätigung: Ein versehentlicher Klick soll kein
+Auto-Update auf allen Turnier-PCs auslösen. Getaggt wird nur, wenn **alles**
+davon zutrifft (`scripts/check-release-freigabe.mjs`, Tests in
+`scripts/test-release-freigabe.mjs`):
+
+| Prüfung | Warum |
+|---|---|
+| Lauf wurde auf `main` gestartet | es gilt die Regel, die auf `main` steht — nicht eine umgeschriebene auf einem Branch |
+| `main` hat sich seit dem Start nicht bewegt | getaggt wird der Commit des Laufs; die grüne CI soll zu ihm gehören |
+| Version in `Cargo.toml`, `tauri.conf.json`, `package.json` identisch, Form `X.Y.Z` | sonst ist der Tag zwangsläufig falsch |
+| getippte Version = Version auf `main` | bewusste Bestätigung |
+| Tag `vX.Y.Z` existiert noch nicht | ein Tag wird nie verschoben |
+| jüngster CI-Lauf auf `main` ist fertig, grün **und gehört zu diesem Commit** | kein Release aus einem roten oder ungeprüften Stand |
+
+Zur letzten Zeile: Direkt nach einem Merge ist der CI-Lauf für den neuen
+Commit noch nicht angelegt; die Abfrage fände den grünen Lauf des Vorgängers.
+Deshalb vergleicht die Regel den Commit des Laufs mit dem zu taggenden. Ein
+älterer Lauf genügt nur, wenn seither ausschließlich Dateien geändert wurden,
+für die `ci.yml` auf `main` gar nicht startet (`paths-ignore`: Markdown,
+`docs/`) — ein Test hält die beiden Listen deckungsgleich.
+
+Schlägt eine Prüfung fehl, nennt der Lauf **alle** Gründe und setzt keinen Tag.
+Geht alles durch, pusht der Job `taggen` einen annotierten Tag — und der löst
+wie bisher `release.yml` aus.
+
+**Weiterhin kein Auto-Tag:** Den Zeitpunkt bestimmt ein Mensch. Der Workflow
+nimmt nur die Übergabe an den Admin heraus, an der Versionen liegen blieben.
+
+#### Wie das ohne Admin-Recht geht
+
+Der Tag wird nicht mit dem Konto dessen gepusht, der den Knopf drückt, sondern
+mit einem **Deploy-Key**, der im Ruleset als Ausnahme (Bypass) eingetragen ist.
+Der private Schlüssel liegt als Secret `RELEASE_TAG_KEY` im **Environment
+`release-tag`**, das nur Läufe von `main` bedient. Darauf kommt es an: Ein
+gewöhnliches Repo-Secret könnte jeder mit Schreibrecht über einen umgeschriebenen
+Workflow auf einem eigenen Branch auslesen. So aber gilt: Wer taggen will, muss
+durch die Regel auf `main`.
+
+#### Worauf der Schutz beruht — und was er nicht leistet
+
+- **Er ist so stark wie der Schutz von `main`.** Wer eine Änderung an
+  `release-ausloesen.yml` oder der Regel nach `main` bringt, kann dort auch
+  einen Schritt einbauen, der den Schlüssel preisgibt. Stand 15.11.2026
+  verlangt `main` die Checks `build` und `secret scan`; ein zweites Paar Augen
+  (Pflicht-Review) ist **nicht** Teil dieses PRs. Wer das will, hat zwei
+  Stellschrauben: Pflicht-Review auf `main` (am besten mit `CODEOWNERS` für
+  `.github/workflows/` und `scripts/check-release-freigabe.mjs`) oder
+  „Required reviewers" am Environment — letzteres hält auch dann, wenn `main`
+  kompromittiert ist.
+- **Der Schlüssel selbst kann mehr als der Workflow.** Er steht in der
+  Bypass-Liste des Tag-Rulesets und darf `v*`-Tags deshalb anlegen,
+  **verschieben und löschen**; „ein Tag wird nie verschoben" gilt für den
+  Workflow, nicht für den Schlüssel. Wer ihn in die Hand bekommt, kann einen
+  beliebigen Commit taggen — und `release.yml` läuft dann in der Fassung
+  **dieses** Commits, mit Signaturschlüssel und Upload nach badhub.de. Ein
+  Leck des Schlüssels ist also gleichbedeutend mit einem fremden Auto-Update
+  für alle Installationen. Deshalb: nur im Environment, nie als Repo-Secret,
+  lokale Kopien löschen.
+- **Neu ist dieses Risiko nur zum Teil.** Die Release-Secrets
+  (`TAURI_SIGNING_PRIVATE_KEY`, `SSH_DEPLOY_KEY_V2`) sind Repo-Secrets;
+  `release.yml` lässt sich per `workflow_dispatch` von jedem Branch starten.
+  Sie ebenfalls in ein auf `main` und `v*`-Tags beschränktes Environment zu
+  legen, wäre ein eigener, sinnvoller Schritt.
+
+Warum nicht der `GITHUB_TOKEN`: Ein damit gesetzter Tag löst `release.yml` nicht
+aus (GitHub verhindert Workflow-Ketten), und am Ruleset scheitert er ohnehin.
+
+#### Einmalige Einrichtung (nur Admin, ca. 10 Minuten)
+
+Bis das erledigt ist, bricht der Job `taggen` mit „Secret RELEASE_TAG_KEY
+fehlt" ab; es passiert nichts weiter.
+
+1. **Schlüsselpaar erzeugen** (lokal, ohne Passwort) und den öffentlichen Teil
+   als Deploy-Key **mit Schreibrecht** eintragen:
+   ```bash
+   ssh-keygen -t ed25519 -C "bts-light release-tag" -f release-tag -N ""
+   gh repo deploy-key add release-tag.pub --repo Assembler23/bts-light \
+     --title "Release-Tag (Workflow)" --allow-write
+   ```
+2. **Environment anlegen:** Settings → Environments → „New environment" →
+   Name exakt `release-tag`.
+   - „Deployment branches and tags" → **Selected branches and tags** → „Add
+     deployment branch or tag rule" → Typ **Branch**, Muster exakt `main`
+     (kein `main*`, kein Typ „Tag" — einen Tag namens `main` dürfte jeder mit
+     Schreibrecht anlegen). **Nicht auslassen** — das ist der eigentliche
+     Schutz. Danach darf in der Liste nur dieser eine Eintrag stehen.
+   - „Environment secrets" → `RELEASE_TAG_KEY` = Inhalt der Datei
+     `release-tag` (der **private** Schlüssel, komplett mit den
+     `-----BEGIN/END-----`-Zeilen).
+   - Gegenprobe: Unter Settings → Secrets and variables → Actions darf
+     `RELEASE_TAG_KEY` **nicht** als Repository-Secret auftauchen.
+   - *Optional:* „Required reviewers" → Admin eintragen. Dann wartet jeder
+     Lauf auf einen Klick des Admins (geht auch am Handy) — für den Fall, dass
+     der Zeitpunkt doch abgestimmt bleiben soll.
+3. **Ruleset öffnen:** Settings → Rules → Rulesets → „Release-Tags nur durch
+   Admins" → „Bypass list" → „Add bypass" → **Deploy keys** → speichern.
+4. Die beiden lokalen Dateien `release-tag` und `release-tag.pub` löschen.
+
+> **Falls „Deploy keys" in der Bypass-Liste nicht angeboten wird:** Dann eine
+> eigene kleine GitHub-App anlegen (nur Berechtigung „Contents: Read and
+> write", nur in diesem Repo installiert), sie in die Bypass-Liste aufnehmen
+> und im Job `taggen` statt `ssh-key` ein App-Token verwenden
+> (`actions/create-github-app-token`). App-ID und privater Schlüssel gehören
+> dann ebenfalls ins Environment `release-tag`.
+
+Auf Branches kann der Schlüssel nicht mehr als jedes Konto mit Schreibrecht;
+für `main` gelten dessen Schutzregeln weiter (die Ausnahme gilt nur im
+Tag-Ruleset).
+
+**Schlüssel tauschen oder zurückziehen:** Deploy-Key unter Settings → Deploy
+keys löschen — ab dann kann der Workflow nicht mehr taggen. Für einen Tausch
+die Schritte 1, 2 (nur das Secret) und 4 wiederholen.
 
 ### CI vor dem Release (`ci.yml`)
 
@@ -305,8 +431,10 @@ ein per Merge-Commit gelandeter Versionssprung mit, nicht nur die heute
 üblichen Squash-Commits.
 
 **Kein Auto-Tag, bewusst:** Der Tag löst ein Auto-Update auf allen laufenden
-Turnier-PCs aus. Ob das gerade passt, weiß nur ein Mensch — deshalb bleibt der
-Ablauf, wie er ist: Tilo meldet, wann getaggt wird, der Check ist nur das Netz.
+Turnier-PCs aus. Ob das gerade passt, weiß nur ein Mensch — deshalb setzt
+kein Automat den Tag von sich aus: Den Zeitpunkt bestimmt ein Mensch, über den
+Workflow [„Release auslösen"](#release-per-knopf-auslösen); der Check ist nur
+das Netz.
 
 **Grenze des Checks:** Er macht das Vergessen sichtbar, ersetzt aber keine
 Zustellung. Wer das Repo zwei Tage nicht öffnet, sieht auch das rote Kreuz nicht.
@@ -321,6 +449,7 @@ Zustellung. Wer das Repo zwei Tage nicht öffnet, sieht auch das rote Kreuz nich
 | `SSH_KNOWN_HOSTS` | Host-Fingerprint des badhub.de-Servers |
 | `ANDROID_KEYSTORE_B64` | Base64 des Signatur-Keystores der Tablet-Kiosk-App, Alias `bts-light-tablet` |
 | `ANDROID_KEYSTORE_PASS` | Passwort dieses Keystores |
+| `RELEASE_TAG_KEY` | privater Deploy-Key für den Workflow „Release auslösen" — **nicht** als Repo-Secret, sondern im Environment `release-tag` (nur `main`) |
 
 Der **Android-Keystore** wird wie der Updater-Schlüssel **nie gewechselt** —
 Sideload-Updates auf ein bereits eingerichtetes Tablet verlangen dieselbe

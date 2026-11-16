@@ -20,7 +20,7 @@ geprüfte Zähl-Logik ein.
 > erst beim Drucken aus dem BTP-Snapshot.
 
 ## Aktivieren
-Tablet → **⋯ Mehr** (Kopfzeile) → **„Schiri-Modus: an"** — seit v0.9.423
+Tablet → **⋯ Mehr** (Kopfzeile) → **„Schiri-Modus: an"** — seit v0.9.425
 **ohne PIN** (vorher hinter dem Zahnrad und der Einstellungs-PIN). Der Modus
 verstellt nichts am Gerät und überträgt nichts; die PIN hielt nur
 Schiedsrichter auf, die sie nicht kannten.
@@ -91,7 +91,7 @@ Aus dem aktuellen Spielstand erzeugt, **Aufschlägerstand zuerst**:
 Marke **Satzpunkt** / **Spielpunkt** (bis v0.9.350 „Satzball"/„Matchball";
 Schiri-Feedback vom 08.11.2026 — das Vokabular sagt „Satzpunkt").
 Die Marke steht, **solange** ein Satzpunkt besteht — auch an den
-Ständen, an denen die Ansage das Wort weglässt. Seit v0.9.423 sitzt sie
+Ständen, an denen die Ansage das Wort weglässt. Seit v0.9.425 sitzt sie
 **am Stand** (`#punkt-lage`, `renderPunktLage`) statt als Abzeichen in der
 Ansage-Leiste, nennt die Seite („Satzpunkt links", bei beiden „Satzpunkt
 beide") und erscheint **auch ohne Schiri-Modus** — Zähltafelbediener sehen
@@ -184,6 +184,6 @@ Alle Texte stehen gebündelt in den `ump*`-Funktionen in `tablet.html`
   „Oberschiedsrichter gerufen".
 - Bewusst **nicht** gebaut: Übertragung an badhub, weitere Sprachen — bei
   Bedarf später. Das gilt auch nach dem Sprachumschalter der
-  Bedienoberfläche (v0.9.423): Stellt jemand das Tablet auf English, werden
+  Bedienoberfläche (v0.9.425): Stellt jemand das Tablet auf English, werden
   Knöpfe, Abzeichen („Warning", „Interval") und der Hinweis „Choose
   positions …" englisch — die **Ansagetexte** bleiben deutsch.

@@ -243,13 +243,18 @@ Turnier** ausprobieren — deshalb ist er vollständig abgekapselt:
 - **Eigener Speicher.** Alle feldbezogenen `localStorage`-Schlüssel hängen an
   `SPEICHER_FELD` (`demo` statt der CourtID) — der Stand eines echten Felds
   auf demselben Gerät bleibt unberührt.
+- **Zählweise zur Wahl** (`DEMO_ZAEHLWEISEN`, seit v0.9.422): Sätze bis 21
+  (Obergrenze 30, Pause bei 11) oder bis 15 (Obergrenze 21, Pause bei 8).
+  Der **Ballzähler** ist immer an (`shuttleCounter` im Demo-Brief); die Zahl
+  verlässt das Tablet nicht.
 - **Szenarien als Daten** (`DEMO_SZENARIEN`): Titel, Text, Klasse, Namen,
-  optional `saetze` in Team-Koordinaten wie `hostSets`. Gestartet wird über
+  optional `saetze` in Team-Koordinaten wie `hostSets` — Text und `saetze`
+  als Funktion der Zählweise. Gestartet wird über
   `loadMatch` und — mit Zwischenstand — `einstiegMitSaetzen`, also denselben
   Weg wie beim Tablet-Wechsel mitten im Spiel. Ein neues Szenario ist ein
   Eintrag mehr.
 - „⋯ Mehr → Feld wechseln · Anzeige …" öffnet ohne PIN (Große Schrift frei
-  ausprobierbar; der Schiri-Modus ist seit v0.9.423 ohnehin PIN-frei);
+  ausprobierbar; der Schiri-Modus ist seit v0.9.425 ohnehin PIN-frei);
   „Anzeige (nur Spielstand)" ist ausgeblendet.
 - Mit englischer Bedienoberfläche heißt das Feld „Practice court"
   (siehe „Sprache der Bedienoberfläche").
@@ -417,7 +422,7 @@ Aufstellung:
   Schritt zurück – so lassen sich Fehleingaben korrigieren, ohne das
   Match neu zuweisen zu müssen. (Bei der Per-Satz-Aufschlagwahl entfällt
   das Zurück: das Gewinnerteam steht durch den Satzstand fest.)
-- **Sprache (seit v0.9.423):** Die Seite spricht **eine** Sprache —
+- **Sprache (seit v0.9.425):** Die Seite spricht **eine** Sprache —
   Deutsch oder Englisch, umschaltbar unter **⋯ Mehr** (Abschnitt
   „Sprache der Bedienoberfläche"). Vorher standen Titel und Hinweise des
   Assistenten und das Megafon-Popup in beiden Sprachen zugleich.
@@ -655,7 +660,7 @@ Erweiterung 06.09.2026):
   Ansage laufen ausschließlich auf den Ansage-Rechnern (Turnierleitung +
   ferne-Halle-Slave, `src/io/announcer.ts`), nie in `tablet.html`.
 
-## Aufgeräumte Bedienung (Usability-Durchgang, v0.9.423)
+## Aufgeräumte Bedienung (Usability-Durchgang, v0.9.425)
 
 Nach vielen einzelnen Erweiterungen wurden alle Ansichten im Demofeld bei
 1280×800, 962×601 (Fire HD 8) und 800×1280 (hochkant) durchgesehen. Geändert:
@@ -698,7 +703,7 @@ Nach vielen einzelnen Erweiterungen wurden alle Ansichten im Demofeld bei
 
 ### Mehr-Menü, ein Zurück-Knopf, Warte-Ansicht
 
-Zweiter Teil desselben Durchgangs (ebenfalls v0.9.423). Leitgedanke: Was bei
+Zweiter Teil desselben Durchgangs (ebenfalls v0.9.425). Leitgedanke: Was bei
 jedem Ballwechsel gebraucht wird, steht offen da; alles Seltene liegt hinter
 **einem** Knopf, und nur was das Gerät verstellt, hinter der PIN.
 
@@ -754,7 +759,7 @@ jedem Ballwechsel gebraucht wird, steht offen da; alles Seltene liegt hinter
 
 ### Tipp-Rückmeldung und Satzpunkt am Stand
 
-Dritter Teil (ebenfalls v0.9.423):
+Dritter Teil (ebenfalls v0.9.425):
 
 - **Sperre unsichtbar, Ziffer leuchtet.** Der Doppel-Eingabe-Schutz
   (`SCORE_COOLDOWN_MS`, 700 ms) dimmte die +1-Flächen bisher auf 40 % — nach
@@ -779,7 +784,7 @@ Dritter Teil (ebenfalls v0.9.423):
 
 ### Endstand-Tabelle und Autovervollständigung
 
-Vierter Teil (ebenfalls v0.9.423):
+Vierter Teil (ebenfalls v0.9.425):
 
 - **Endstand als Tabelle** (`renderEndstand`, `table.endstand#set-summary`):
   eine Zeile je Mannschaft, die Sätze als Spalten, der Sieger oben und in
@@ -814,7 +819,7 @@ Vierter Teil (ebenfalls v0.9.423):
 
 ### Setup: Schrittzähler und Feldbild
 
-Fünfter Teil (ebenfalls v0.9.423), siehe auch „Match-Setup" weiter oben.
+Fünfter Teil (ebenfalls v0.9.425), siehe auch „Match-Setup" weiter oben.
 
 - **„Schritt n von m"** (`#setup-schritt`, `setupSchritt()`): Über der Frage
   steht, wo man ist. Am Spielbeginn und beim Einstieg in ein laufendes Spiel
@@ -840,7 +845,7 @@ Fünfter Teil (ebenfalls v0.9.423), siehe auch „Match-Setup" weiter oben.
 
 ### Ein Wort je Sache, Rot nur mit Bedeutung
 
-Sechster Teil (ebenfalls v0.9.423).
+Sechster Teil (ebenfalls v0.9.425).
 
 - **„Spiel", nicht „Match".** Alle Texte am Tablet sagen „Spiel" (vorher
   gemischt: „Spiel beenden", aber „Match wieder öffnen", „wer gewinnt das
@@ -867,7 +872,7 @@ Sechster Teil (ebenfalls v0.9.423).
 
 ### Sprache der Bedienoberfläche
 
-Siebter Teil (ebenfalls v0.9.423). Vorher standen einzelne Texte in beiden
+Siebter Teil (ebenfalls v0.9.425). Vorher standen einzelne Texte in beiden
 Sprachen zugleich („← Zurück · Back", „Spiel beenden? · End the match?"),
 die meisten nur deutsch. Jetzt spricht die Seite **eine** Sprache, und die
 wählt, wer zählt: **⋯ Mehr → Sprache · Language → Deutsch / English**, ohne
@@ -1032,7 +1037,7 @@ Ergebnis soll trotzdem übermittelt werden.
   beschriftet; „+ Satz" ergänzt eine Zeile (bis zur Satzanzahl des
   Formats). Der aktuelle Stand ist vorbelegt, falls doch schon gezählt
   wurde.
-- **Autovervollständigung** (seit v0.9.423): Stehen die Punkte des
+- **Autovervollständigung** (seit v0.9.425): Stehen die Punkte des
   Verlierers, füllt der Dialog das Gegenfeld selbst aus (11 → 21, 20 → 22) —
   Regel und Grenzen unter „Endstand-Tabelle und Autovervollständigung".
 - **Plausibilität clientseitig:** Jeder Satz muss regulär zu Ende gespielt

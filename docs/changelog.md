@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.423
+## v0.9.425
 
 - **Zähl-Tablet aufgeräumt.** Alle Ansichten wurden im Zusammenhang
   durchgesehen; vieles war nach und nach dazugekommen.
@@ -70,6 +70,42 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
     die Diagnose, Namen aus BTP und ein Ablehnungsgrund der Turnierleitung.
   - **Fehlerbehebung:** „Ergebnis eintragen" zeigte „Aktueller Satz (läuft)"
     auch ohne Haken bei „Spiel läuft noch".
+
+## v0.9.424
+
+- **TP-Datei: die Suche läuft jetzt von selbst mit.** bts-light sieht beim
+  Programmstart, beim Start der Übertragung und danach **jede Minute** nach,
+  welche Datei in BTP geöffnet ist. Liegt die Datei deines Turniers
+  inzwischen woanders (verschoben, „Speichern unter"), wird der neue Pfad
+  ohne Zutun übernommen — ein angehaltener automatischer Upload läuft
+  wieder an. Ist in BTP ein **anderes Turnier** geöffnet, ändert sich
+  nichts von allein: Oben im Fenster erscheint ein orangefarbener Balken
+  mit der Frage, ob Datei und Turnier-Kennung übernommen werden sollen.
+  **Ja** übernimmt beides und startet eine laufende Übertragung kurz neu;
+  **Nein** lässt alles, wie es ist, und schaltet die Suche aus. Der Pfad
+  der TP-Datei reist nicht mehr im Identitäts-Bündel mit — er gilt je PC.
+
+## v0.9.423
+
+- **TP-Datei: bts-light findet sie selbst.** Im Setup-Abschnitt „TP-Datei
+  (Turnierdatenbank)" sucht bts-light beim Öffnen die Datei, die in BTP
+  gerade geöffnet ist, und trägt sie ein — ohne Dateidialog. Ist noch keine
+  Turnier-Kennung eingetragen, kommt sie gleich mit. Gehört die Datei zu
+  einem anderen Turnier als die eingetragene Kennung, fragt bts-light nach;
+  bei „Nein" schaltet sich die Suche ab. Neu sind der Schalter **TP-Datei
+  automatisch finden** (Standard an) und der Knopf **In BTP geöffnete Datei
+  suchen**. Wer die Datei von Hand wählt, schaltet die Suche aus.
+  Voraussetzung: BTP läuft auf demselben PC und nicht als Administrator —
+  sonst sagt das Setup, warum, und die Handwahl bleibt.
+
+## v0.9.422
+
+- **Demofeld: Zählweise wählbar, Ballzähler an.** Über den Übungsspielen
+  steht jetzt die Wahl **Sätze bis 21** oder **Sätze bis 15** (Obergrenze
+  21, Pause bei 8). Die Zwischenstände passen sich an — Verlängerung ab
+  13:13, Spielpunkt bei 14:12. Der Ballzähler ist auf dem Demofeld immer
+  eingeschaltet, damit er sich mitüben lässt; wie alles dort bleibt die
+  Zahl auf dem Tablet.
 
 ## v0.9.421
 

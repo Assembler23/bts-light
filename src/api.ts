@@ -40,6 +40,9 @@ import type {
   TlWebInfo,
   TournamentStats,
   TpFileInfo,
+  TpFindenAntwort,
+  TpFindenStatus,
+  TpSuche,
   TpUploadStatus,
   WalkoverProposal,
   WalkoverResult,
@@ -766,6 +769,24 @@ export const officialsSetCourtSwitches = (
 /** Urteil über einen im Dialog gewählten Pfad (Rust: badhub::tp_upload::tp_file_check). */
 export const tpFileCheck = (path: string): Promise<TpFileInfo> =>
   invoke("tp_file_check", { path });
+
+/** Sucht die in BTP geöffnete Turnierdatei (Rust: tp_finden::suche). `host` und
+ *  `slave` sind die Eingaben des Setup-Formulars, nicht der gespeicherte Stand. */
+export const tpDateiFinden = (host: string, slave: boolean): Promise<TpSuche> =>
+  invoke("tp_datei_finden", { host, slave });
+
+/** Offene Rückfrage der TP-Datei-Automatik und Schreibzähler der Config. */
+export const tpFindenStatus = (): Promise<TpFindenStatus> => invoke("tp_finden_status");
+
+/** Ein Durchgang der Automatik sofort (beim App-Start, nach dem Laden der Config). */
+export const tpFindenPruefen = (): Promise<TpFindenStatus> => invoke("tp_finden_pruefen");
+
+/** Antwort auf die Rückfrage. `neustart` = Übertragung stoppen und starten. */
+export const tpFindenAntwort = (ja: boolean): Promise<TpFindenAntwort> =>
+  invoke("tp_finden_antwort", { ja });
+
+/** Hinweis „TP-Datei gewechselt" ausblenden. */
+export const tpFindenHinweisWeg = (): Promise<void> => invoke("tp_finden_hinweis_weg");
 
 /** Knopf „TP-Datei an badhub senden": prüft die Vorbedingungen synchron (Fehler
  *  = Text), startet sonst den Upload im Rust-Kern und liefert sofort „läuft". */

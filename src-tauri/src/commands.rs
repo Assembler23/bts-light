@@ -136,6 +136,10 @@ pub struct AppState {
     /// Arbeitsspeicher-Cache der Ansage-Seiten (Spec `ansage-elevenlabs` E9):
     /// Audio mit Namen nie auf der Platte, nur kurz im RAM.
     pub seiten_cache: Mutex<crate::tts_verbrauch::SeitenCache>,
+    /// Offene Rückfrage der TP-Datei-Automatik (Spec `tp-datei-finden`,
+    /// ADR 0097). Hier und nicht in der `SyncEngine`, weil die bei jedem
+    /// Speichern neu gebaut wird; nach einem App-Neustart wird neu gefragt.
+    pub tp_finden: Arc<Mutex<crate::tp_finden::Merker>>,
 }
 
 fn now_ms() -> u64 {
@@ -580,6 +584,20 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // zurück — ohne Schutz kippte jedes Speichern die Gerätewahl zurück.
     incoming.announce.output_device = current.announce.output_device.clone();
     incoming.announce.output_device_name = current.announce.output_device_name.clone();
+    // TP-Datei-Automatik (ADR 0098): Sie schreibt Pfad, Bindung, Schalter und
+    // — nach bestätigter Rückfrage — die Turnier-Kennung außerhalb des Setups
+    // und zählt dabei `stand` hoch. Schickt das Formular einen anderen Zähler
+    // zurück, hat es diese Änderung nie gesehen: Sein Stand würde die Datei
+    // des einen Turniers unter die Kennung des anderen legen. Bei gleichem
+    // Zähler gilt die Eingabe des Formulars wie immer.
+    if incoming.tp_upload.stand != current.tp_upload.stand {
+        incoming.tp_upload.path = current.tp_upload.path.clone();
+        incoming.tp_upload.tournament_uuid = current.tp_upload.tournament_uuid.clone();
+        incoming.tp_upload.finden_automatisch = current.tp_upload.finden_automatisch;
+        incoming.tp_upload.stand = current.tp_upload.stand;
+        incoming.tournament_uuid = current.tournament_uuid.clone();
+        incoming.checkin.tournament_uuid = current.checkin.tournament_uuid.clone();
+    }
     // Turnier-GUID spiegeln (ADR 0054): Liveticker-Push (tset/sched/tupdate)
     // liest das kanonische Wurzelfeld, Check-In-Meldeliste/Anfangszeiten lesen
     // weiterhin `checkin.tournament_uuid`. `load_from` stellt den Gleichlauf
@@ -597,15 +615,20 @@ pub fn save_config(
     state: State<'_, AppState>,
     config: AppConfig,
 ) -> Result<(), String> {
-    let current = state
-        .config
-        .lock()
-        .expect("Config-Mutex nicht vergiftet")
-        .clone();
-    let config = keep_host_managed_fields(config, &current);
-    config
-        .save_to(&config_path(&app))
-        .map_err(|e| e.to_string())?;
+    // Lesen, Zusammenführen, Schreiben und Ablegen unter EINER Sperre — wie
+    // `mutate_config_at`. Sonst könnte ein Schreibvorgang außerhalb des
+    // Setups (TP-Datei-Automatik, TL-Web) zwischen Lesen und Ablegen fallen
+    // und ginge mit dem alten Stand dieses Formulars verloren (ADR 0098).
+    let (current, config) = {
+        let mut guard = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        let current = guard.clone();
+        let config = keep_host_managed_fields(config, &current);
+        config
+            .save_to(&config_path(&app))
+            .map_err(|e| e.to_string())?;
+        *guard = config.clone();
+        (current, config)
+    };
     // Automatik in den Einstellungen aus ⇒ die TL-Pause ist aufgehoben
     // (`keep_host_managed_fields`). Auch im Laufzeit-Zustand, damit Datei
     // und Arbeitsspeicher nicht auseinanderlaufen, falls kein Sync-Neustart
@@ -628,10 +651,7 @@ pub fn save_config(
     // Takt-Upload (Spec `tp-takt-upload`): Wiederanlauf nach Halt, Schalter,
     // vorgezogener Termin bei geändertem Minutenwert — alles aus dem Vergleich
     // alt/neu, bevor `config` in den State wandert.
-    let takt_wechsel = crate::badhub::tp_takt::bewerte_config(&current, &config);
-    tp_status_lock(&state.tp_upload)
-        .takt
-        .config_gewechselt(takt_wechsel, now_ms());
+    takt_config_gewechselt(&state.tp_upload, &current, &config);
     // Schiedsrichter-Schalter sofort wirksam machen: Der Sync-Lauf liest
     // seine Konfiguration nur beim Start, deshalb hält der Roster-Speicher
     // die globalen Schalter — sonst bliebe das Häkchen bis zum nächsten
@@ -648,7 +668,6 @@ pub fn save_config(
         .tablet
         .officials_store()
         .set_rotation_mode(config.officials.rotation_mode);
-    *state.config.lock().expect("Config-Mutex nicht vergiftet") = config;
     // Der Antwortcache der Übersicht trägt Werte aus der Konfiguration
     // (Hallen-Farben, Aufruf-Timer) — nach dem Speichern ist er überholt
     // (Spec monitor-livestand-push, S1).
@@ -697,6 +716,11 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     // dort) — am neuen PC wäre es nie vorhanden und zeigte nur ein Banner.
     cfg.announce.output_device.clear();
     cfg.announce.output_device_name.clear();
+    // Der Pfad der TP-Datei gilt je PC und enthält den Windows-Benutzernamen
+    // (Spec `tp-datei-finden`, AK19). Mit ihm fällt die Bindung; der Schalter
+    // der Automatik reist mit — am neuen PC findet sie die Datei selbst.
+    cfg.tp_upload.path.clear();
+    cfg.tp_upload.tournament_uuid.clear();
     cfg
 }
 
@@ -759,6 +783,13 @@ fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppC
         imported.tl_web.profiles = current.tl_web.profiles.clone();
         imported.tl_web.default_profile_id = current.tl_web.default_profile_id.clone();
     }
+    // TP-Datei (Spec `tp-datei-finden`, AK19): Pfad, Bindung, Schalter und
+    // Schreibzähler dieses PCs bleiben — auch gegen ein altes Bündel, das
+    // noch einen Pfad vom anderen PC mitbringt.
+    imported.tp_upload.path = current.tp_upload.path.clone();
+    imported.tp_upload.tournament_uuid = current.tp_upload.tournament_uuid.clone();
+    imported.tp_upload.finden_automatisch = current.tp_upload.finden_automatisch;
+    imported.tp_upload.stand = current.tp_upload.stand;
     // Turnier-GUID auf Wurzel- und Check-In-Feld angleichen (ADR 0054): Ein
     // Bündel aus einer Version vor der Spiegelung, oder eines, das nur über
     // `checkin.tournament_uuid` gesetzt wurde, würde sonst ohne
@@ -2339,6 +2370,406 @@ pub async fn tp_file_check(path: String) -> crate::badhub::tp_upload::TpFileInfo
         .unwrap_or(crate::badhub::tp_upload::TpFileInfo::NichtGefunden)
 }
 
+/// Meldet dem Takt-Upload einen Config-Wechsel (Wiederanlauf nach Halt,
+/// Schalter, vorgezogener Termin) — aus dem Vergleich alt/neu. Gemeinsam für
+/// `save_config` und die TP-Datei-Automatik, die außerhalb des Setups schreibt.
+fn takt_config_gewechselt(status: &Mutex<TpUploadStatus>, alt: &AppConfig, neu: &AppConfig) {
+    let wechsel = crate::badhub::tp_takt::bewerte_config(alt, neu);
+    tp_status_lock(status)
+        .takt
+        .config_gewechselt(wechsel, now_ms());
+}
+
+/// Takt der TP-Datei-Automatik (Spec `tp-datei-finden`).
+pub(crate) const TP_FINDEN_TAKT: Duration = Duration::from_secs(60);
+
+fn tp_finden_lock(
+    merker: &Mutex<crate::tp_finden::Merker>,
+) -> std::sync::MutexGuard<'_, crate::tp_finden::Merker> {
+    merker
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Schreibt einen still übernommenen Pfad (gleiche Kennung) in die Config —
+/// der Schreibpfad der Automatik außerhalb des Setups (ADR 0098). Zählt
+/// `stand` hoch, damit ein offenes Setup-Formular den Wechsel nicht mit
+/// seinem alten Stand überschreibt, und meldet ihn dem Takt-Upload: Ein Halt
+/// „Datei nicht gefunden" löst sich so von selbst. Kein Neustart der
+/// Übertragung — der Upload liest die Config live.
+///
+/// Die Entscheidung fiel auf einem Schnappschuss, danach wurde gesucht und
+/// gelesen (Sekunden). **In der Sperre** wird deshalb noch einmal geprüft,
+/// dass sie noch gilt: Automatik an, eingetragene Kennung = `bindung`,
+/// Schreibzähler unverändert (`stand_erwartet`). Sonst `Err` — wer inzwischen
+/// im Setup gespeichert hat, behält seine Wahl; der nächste Takt entscheidet neu.
+pub(crate) fn tp_pfad_uebernehmen(
+    config_path: &std::path::Path,
+    config: &Arc<Mutex<AppConfig>>,
+    status: &Mutex<TpUploadStatus>,
+    pfad: &str,
+    bindung: &str,
+    stand_erwartet: u64,
+) -> Result<AppConfig, String> {
+    let mut alt = None;
+    let neu = mutate_config_at(config_path, config, |c| {
+        let gilt = c.tp_upload.finden_automatisch
+            && c.tp_upload.stand == stand_erwartet
+            && c.tournament_uuid_kanonisch().as_deref() == Some(bindung);
+        if !gilt {
+            return Err("Einstellungen haben sich inzwischen geändert".to_string());
+        }
+        alt = Some(c.clone());
+        c.tp_upload.path = pfad.to_string();
+        c.tp_upload.tournament_uuid = bindung.to_string();
+        c.tp_upload.stand = c.tp_upload.stand.wrapping_add(1);
+        Ok(())
+    })?;
+    if let Some(alt) = alt {
+        takt_config_gewechselt(status, &alt, &neu);
+    }
+    Ok(neu)
+}
+
+/// Ein Durchgang der TP-Datei-Automatik: suchen, entscheiden, gegebenenfalls
+/// still übernehmen oder die Rückfrage stellen (Spec `tp-datei-finden`,
+/// ADR 0097). Läuft im 60-s-Takt der Übertragung und einmal beim App-Start.
+///
+/// `host` und Slave-Modus kommen aus der **gespeicherten** Config, nie vom
+/// Frontend. Die Datei wird nur ganz gelesen, wenn BTP eine andere offen hat
+/// als die gebundene und dazu noch keine Frage offen ist — nicht jede Minute.
+pub(crate) async fn tp_finden_lauf(
+    config: &Arc<Mutex<AppConfig>>,
+    config_path: &std::path::Path,
+    merker: &Arc<Mutex<crate::tp_finden::Merker>>,
+    status: &Arc<Mutex<TpUploadStatus>>,
+) {
+    use crate::tp_finden::TpSuche;
+    let cfg = config
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    if !cfg.tp_upload.finden_automatisch || cfg.slave_mode {
+        tp_finden_lock(merker).frage = None;
+        return;
+    }
+    // Während eines Uploads setzt der Takt aus; der nächste holt es nach.
+    if tp_status_lock(status).laeuft {
+        return;
+    }
+    let (host, slave) = (cfg.btp.host.clone(), cfg.slave_mode);
+    let mut suche =
+        tokio::task::spawn_blocking(move || crate::tp_finden::suche_ohne_kennung(&host, slave))
+            .await
+            .unwrap_or(TpSuche::Haenger);
+    if let TpSuche::Gefunden { pfad, name, .. } = &suche {
+        let gebunden = cfg
+            .tp_datei_fuer_turnier()
+            .is_some_and(|p| crate::tp_finden::gleicher_pfad(&p.to_string_lossy(), pfad));
+        if gebunden {
+            // BTP zeigt die gebundene Datei: Eine offene Frage hat sich erledigt.
+            tp_finden_lock(merker).frage = None;
+            return;
+        }
+        let eingetragen = cfg.tournament_uuid_kanonisch().unwrap_or_default();
+        if tp_finden_lock(merker).fragt_schon(pfad, &eingetragen) {
+            return;
+        }
+        if tp_finden_lock(merker).kuerzlich_abgelehnt(pfad) {
+            return;
+        }
+        if !eingetragen.is_empty() {
+            // Andere Datei als gebunden: jetzt — und nur jetzt — die Kennung lesen.
+            let (p, n) = (std::path::PathBuf::from(pfad), name.clone());
+            let info =
+                tokio::task::spawn_blocking(move || crate::badhub::tp_upload::tp_file_check(&p))
+                    .await
+                    .unwrap_or(crate::badhub::tp_upload::TpFileInfo::NichtGefunden);
+            suche = if matches!(info, crate::badhub::tp_upload::TpFileInfo::Erkannt { .. }) {
+                TpSuche::Gefunden {
+                    pfad: pfad.clone(),
+                    name: n,
+                    info,
+                }
+            } else {
+                // Gesperrt, defekt oder zu groß: merken, nicht jede Minute neu lesen.
+                tp_finden_lock(merker).abgelehnt = Some((pfad.clone(), 0));
+                TpSuche::Vorpruefung { name: n, info }
+            };
+        }
+    }
+    // Entschieden wird gegen die Config von JETZT, nicht gegen den
+    // Schnappschuss vom Anfang: Inzwischen kann eine Rückfrage beantwortet
+    // oder im Setup gespeichert worden sein — sonst käme eine gerade
+    // beantwortete Frage noch einmal zurück.
+    let frisch = config
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let (uebernahme, frage_neu) = {
+        let mut m = tp_finden_lock(merker);
+        let vorher = m.frage.clone();
+        let u = crate::tp_finden::schritt(&frisch, &suche, &mut m);
+        (u, m.frage.is_some() && m.frage != vorher)
+    };
+    if frage_neu {
+        tracing::info!(
+            "TP-Datei-Automatik: Rückfrage gestellt ({})",
+            suche.log_text()
+        );
+    }
+    {
+        // Eine Warnzeile beim ersten Hänger, nicht jede Minute.
+        let mut m = tp_finden_lock(merker);
+        let haengt = matches!(suche, TpSuche::Haenger);
+        if haengt && !m.haenger_gemeldet {
+            tracing::warn!("TP-Datei-Automatik: {}", suche.log_text());
+        }
+        m.haenger_gemeldet = haengt;
+    }
+    if let Some((pfad, bindung)) = uebernahme {
+        let stand = frisch.tp_upload.stand;
+        let vorher =
+            crate::badhub::tp_upload::basisname(std::path::Path::new(frisch.tp_upload.path.trim()));
+        match tp_pfad_uebernehmen(config_path, config, status, &pfad, &bindung, stand) {
+            Ok(_) => {
+                let name = match &suche {
+                    TpSuche::Gefunden { name, .. } => name.clone(),
+                    _ => String::new(),
+                };
+                // Nur Dateinamen, nie Pfade (Windows-Benutzername im Log).
+                tracing::info!("TP-Datei-Automatik: übernommen, „{vorher}“ → „{name}“");
+                // Sichtbar machen — aber nur einen echten Wechsel, nicht die
+                // erste Bindung einer bisher leeren Auswahl.
+                if !frisch.tp_upload.path.trim().is_empty() {
+                    tp_finden_lock(merker).gewechselt = Some(name);
+                }
+            }
+            // Ohne den Fehlertext: Er kann den Config-Pfad enthalten.
+            Err(_) => tracing::info!(
+                "TP-Datei-Automatik: nicht übernommen (Einstellungen inzwischen geändert oder Speichern gescheitert)"
+            ),
+        }
+    }
+}
+
+/// Takt-Task der TP-Datei-Automatik (läuft im Sync-Task unter
+/// `TaktWaechter`, nur am Master): erster Durchgang sofort — das ist der
+/// „Start der Übertragung" —, danach alle [`TP_FINDEN_TAKT`].
+pub(crate) async fn tp_finden_schleife(
+    config: Arc<Mutex<AppConfig>>,
+    config_path: std::path::PathBuf,
+    merker: Arc<Mutex<crate::tp_finden::Merker>>,
+    status: Arc<Mutex<TpUploadStatus>>,
+) {
+    let mut takt = tokio::time::interval(TP_FINDEN_TAKT);
+    takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        takt.tick().await;
+        tp_finden_lauf(&config, &config_path, &merker, &status).await;
+    }
+}
+
+/// Die offene Rückfrage, wie das Banner sie zeigt.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TpFrageSicht {
+    pub name: String,
+    /// Kennung aus der Datei; `None` = die Datei nennt keine.
+    pub datei_guid: Option<String>,
+    pub eingetragen: String,
+    /// Läuft die Übertragung? Dann startet ein Ja sie neu.
+    pub laeuft: bool,
+}
+
+/// Stand der TP-Datei-Automatik fürs Frontend. `stand` ist der Schreibzähler
+/// der Config: Weicht er von dem ab, den die Oberfläche kennt, lädt sie die
+/// Config neu (die Automatik hat außerhalb des Setups geschrieben).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TpFindenStatus {
+    pub frage: Option<TpFrageSicht>,
+    /// Dateiname einer still übernommenen Datei, bis der Hinweis weggeklickt ist.
+    pub gewechselt: Option<String>,
+    pub stand: u64,
+}
+
+fn tp_finden_sicht(state: &AppState) -> TpFindenStatus {
+    let laeuft = state
+        .status
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .running;
+    let (frage, gewechselt) = {
+        let m = tp_finden_lock(&state.tp_finden);
+        let frage = m.frage.as_ref().map(|f| TpFrageSicht {
+            name: f.name.clone(),
+            datei_guid: f.datei_guid.clone(),
+            eingetragen: f.eingetragen.clone(),
+            laeuft,
+        });
+        (frage, m.gewechselt.clone())
+    };
+    let stand = state
+        .config
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .tp_upload
+        .stand;
+    TpFindenStatus {
+        frage,
+        gewechselt,
+        stand,
+    }
+}
+
+/// Der Hinweis „TP-Datei gewechselt" wurde weggeklickt.
+#[tauri::command]
+pub fn tp_finden_hinweis_weg(state: State<'_, AppState>) {
+    tp_finden_lock(&state.tp_finden).gewechselt = None;
+}
+
+/// Banner-Poll: offene Rückfrage und Schreibzähler.
+#[tauri::command]
+pub fn tp_finden_status(state: State<'_, AppState>) -> TpFindenStatus {
+    tp_finden_sicht(&state)
+}
+
+/// Ein Durchgang der Automatik sofort — die Oberfläche ruft das einmal beim
+/// App-Start, nachdem die Config geladen ist (der Takt läuft erst mit der
+/// Übertragung). So fällt ein neues Turnier schon vor „Starten" auf.
+#[tauri::command]
+pub async fn tp_finden_pruefen(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<TpFindenStatus, String> {
+    let (config, merker, status) = (
+        state.config.clone(),
+        state.tp_finden.clone(),
+        state.tp_upload.clone(),
+    );
+    tp_finden_lauf(&config, &config_path(&app), &merker, &status).await;
+    Ok(tp_finden_sicht(&state))
+}
+
+/// Antwort auf [`tp_finden_antwort`]: der neue Stand der Config und ob die
+/// Oberfläche die Übertragung neu starten muss (Kennung gewechselt, während
+/// sie lief — der Sync liest seine Config nur beim Start).
+#[derive(Debug, Clone, Serialize)]
+pub struct TpFindenAntwort {
+    pub config: AppConfig,
+    pub neustart: bool,
+}
+
+/// Wendet die Antwort auf eine Rückfrage an (reine Config-Änderung, testbar).
+/// Ja: Pfad binden; nennt die Datei eine Kennung, wird sie zur Turnier-Kennung
+/// — sonst bleibt die eingetragene. Nein: nur die Automatik ausschalten.
+fn tp_antwort_anwenden(cfg: &mut AppConfig, frage: &crate::tp_finden::Frage, ja: bool) {
+    if ja {
+        cfg.tp_upload.path = frage.pfad.clone();
+        match &frage.datei_guid {
+            Some(guid) => {
+                cfg.tournament_uuid = guid.clone();
+                cfg.spiegele_turnier_guid();
+                cfg.tp_upload.tournament_uuid = guid.clone();
+            }
+            None => {
+                cfg.tp_upload.tournament_uuid = cfg.tournament_uuid_kanonisch().unwrap_or_default();
+            }
+        }
+    } else {
+        cfg.tp_upload.finden_automatisch = false;
+    }
+    cfg.tp_upload.stand = cfg.tp_upload.stand.wrapping_add(1);
+}
+
+/// Antwort des Turnierleiters auf die Rückfrage der Automatik (ADR 0097).
+/// Vor dem Ja wird die Datei noch einmal gelesen: Nennt sie inzwischen eine
+/// andere Kennung als in der Frage stand, wird nichts übernommen.
+#[tauri::command]
+pub async fn tp_finden_antwort(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ja: bool,
+) -> Result<TpFindenAntwort, String> {
+    let frage = tp_finden_lock(&state.tp_finden).frage.take();
+    let Some(frage) = frage else {
+        // Schon beantwortet oder zurückgezogen: nichts zu tun.
+        let config = state
+            .config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        return Ok(TpFindenAntwort {
+            config,
+            neustart: false,
+        });
+    };
+    if ja {
+        let pfad = std::path::PathBuf::from(&frage.pfad);
+        let info =
+            tokio::task::spawn_blocking(move || crate::badhub::tp_upload::tp_file_check(&pfad))
+                .await
+                .unwrap_or(crate::badhub::tp_upload::TpFileInfo::NichtGefunden);
+        let crate::badhub::tp_upload::TpFileInfo::Erkannt { guid, .. } = info else {
+            // Vielleicht nur kurz gesperrt: Die Frage bleibt, ein zweiter
+            // Klick kann es noch einmal versuchen.
+            let text = format!(
+                "„{}“ ist gerade nicht lesbar — nichts übernommen.",
+                frage.name
+            );
+            tp_finden_lock(&state.tp_finden).frage = Some(frage);
+            return Err(text);
+        };
+        if guid != frage.datei_guid {
+            // Die Frage stimmt nicht mehr; der nächste Durchgang stellt die richtige.
+            return Err(format!(
+                "„{}“ hat sich seit der Rückfrage geändert — nichts übernommen.",
+                frage.name
+            ));
+        }
+    }
+    let mut alt = None;
+    let config = mutate_config(&app, &state, |c| {
+        // In der Sperre: Die Frage galt der Kennung, die beim Stellen
+        // eingetragen war. Hat sie jemand inzwischen im Setup geändert, darf
+        // ein Ja sie nicht überschreiben.
+        if ja && c.tournament_uuid_kanonisch().as_deref() != Some(frage.eingetragen.as_str()) {
+            return Err(
+                "Die Turnier-Kennung wurde inzwischen geändert — nichts übernommen.".to_string(),
+            );
+        }
+        alt = Some(c.clone());
+        tp_antwort_anwenden(c, &frage, ja);
+        Ok(())
+    })?;
+    let alt = alt.expect("Closure lief durch");
+    takt_config_gewechselt(&state.tp_upload, &alt, &config);
+    let laeuft = state
+        .status
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .running;
+    let neustart = laeuft && alt.tournament_uuid_kanonisch() != config.tournament_uuid_kanonisch();
+    tracing::info!(
+        "TP-Datei-Automatik: Rückfrage beantwortet ({}), Neustart: {neustart}",
+        if ja { "Ja" } else { "Nein" }
+    );
+    Ok(TpFindenAntwort { config, neustart })
+}
+
+/// Sucht die in BTP geöffnete Turnierdatei über die Datei-Handles von
+/// `btp.exe` (Spec `tp-datei-finden`, ADR 0096). `host` und `slave` kommen
+/// aus dem Setup-Formular — dort gilt die Eingabe, nicht der gespeicherte
+/// Stand. Die Suche blockiert und liest den Fund einmal ganz, deshalb abseits
+/// des UI-Threads. Ins Log geht nur die Art und der Dateiname, nie der Pfad.
+#[tauri::command]
+pub async fn tp_datei_finden(host: String, slave: bool) -> crate::tp_finden::TpSuche {
+    let suche = tokio::task::spawn_blocking(move || crate::tp_finden::suche(&host, slave))
+        .await
+        .unwrap_or(crate::tp_finden::TpSuche::Haenger);
+    tracing::info!("TP-Datei-Suche: {}", suche.log_text());
+    suche
+}
+
 /// Knopf „TP-Datei an badhub senden“: Vorbedingungen synchron (Verletzung →
 /// `Err` mit Text, kein Status), sonst Upload im eigenen Rust-Task und sofort
 /// „läuft“ zurück. Zweiter Klick während `laeuft` ist ein No-op (R1: alle
@@ -2595,6 +3026,18 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
             let cfg = st.config.clone();
             let status = st.tp_upload.clone();
             TaktWaechter(tauri::async_runtime::spawn(tp_takt_schleife(cfg, status)))
+        });
+        // TP-Datei-Automatik (Spec `tp-datei-finden`): sucht beim Start der
+        // Übertragung und danach im 60-s-Takt die in BTP geöffnete Datei.
+        // Nur am Master; ob sie arbeitet, liest sie je Takt aus der Config.
+        let _tp_finden = (!slave_mode).then(|| {
+            let st = app_handle.state::<AppState>();
+            TaktWaechter(tauri::async_runtime::spawn(tp_finden_schleife(
+                st.config.clone(),
+                config_path(&app_handle),
+                st.tp_finden.clone(),
+                st.tp_upload.clone(),
+            )))
         });
         loop {
             {
@@ -7626,6 +8069,171 @@ mod tests {
             let e = ausgabe_wahl_pruefen(&id, &name).unwrap_err();
             assert!(e.starts_with("ungueltig:"), "{e}");
         }
+    }
+
+    // ── TP-Datei-Automatik: Schreibpfad außerhalb des Setups (ADR 0098) ──
+
+    const TP_A: &str = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
+    const TP_B: &str = "9AA7FE89-0000-4000-8000-000000000001";
+
+    fn mit_tp(kennung: &str, pfad: &str, stand: u64) -> AppConfig {
+        let mut cfg = AppConfig {
+            tournament_uuid: kennung.to_string(),
+            ..Default::default()
+        };
+        cfg.checkin.tournament_uuid = kennung.to_string();
+        cfg.tp_upload.path = pfad.to_string();
+        cfg.tp_upload.tournament_uuid = kennung.to_string();
+        cfg.tp_upload.stand = stand;
+        cfg
+    }
+
+    #[test]
+    fn keep_host_managed_fields_schuetzt_tp_bei_veraltetem_stand() {
+        // AK18: Die Automatik hat Pfad und (nach bestätigter Rückfrage) die
+        // Kennung gewechselt, während das Setup offen war. Dessen Formular
+        // trägt noch den alten Zähler — und darf nichts davon zurückdrehen.
+        let mut current = mit_tp(TP_B, r"D:\neu\b.TP", 3);
+        current.tp_upload.finden_automatisch = false;
+        let mut from_ui = mit_tp(TP_A, r"C:\alt\a.TP", 2);
+        from_ui.tp_upload.auto_minutes = 30;
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.tp_upload.path, r"D:\neu\b.TP");
+        assert_eq!(merged.tp_upload.tournament_uuid, TP_B);
+        assert!(!merged.tp_upload.finden_automatisch);
+        assert_eq!(merged.tp_upload.stand, 3);
+        assert_eq!(merged.tournament_uuid, TP_B);
+        assert_eq!(merged.checkin.tournament_uuid, TP_B);
+        // Was die Automatik nicht anfasst, kommt weiter aus dem Formular.
+        assert_eq!(merged.tp_upload.auto_minutes, 30);
+    }
+
+    #[test]
+    fn keep_host_managed_fields_laesst_setup_aenderung_bei_gleichem_stand() {
+        let current = mit_tp(TP_A, r"C:\alt\a.TP", 2);
+        let mut from_ui = mit_tp(TP_B, r"D:\hand\b.TP", 2);
+        from_ui.tp_upload.finden_automatisch = false;
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.tp_upload.path, r"D:\hand\b.TP");
+        assert_eq!(merged.tp_upload.tournament_uuid, TP_B);
+        assert!(!merged.tp_upload.finden_automatisch);
+        assert_eq!(merged.tournament_uuid, TP_B);
+    }
+
+    #[test]
+    fn identity_bundle_leert_tp_pfad() {
+        // AK19: Der Pfad gilt je PC und enthält den Windows-Benutzernamen.
+        let bundle = identity_bundle(mit_tp(TP_A, r"C:\Users\x\a.TP", 4));
+        assert!(bundle.tp_upload.path.is_empty());
+        assert!(bundle.tp_upload.tournament_uuid.is_empty());
+        assert_eq!(bundle.tournament_uuid, TP_A, "die Kennung reist mit");
+        assert!(bundle.tp_upload.finden_automatisch);
+    }
+
+    #[test]
+    fn apply_imported_identity_behaelt_tp_pfad_dieses_pcs() {
+        let mut current = mit_tp(TP_A, r"C:\hier\a.TP", 5);
+        current.tp_upload.finden_automatisch = false;
+        // Auch ein altes Bündel, das noch einen Pfad mitbringt, setzt sich nicht durch.
+        let merged = apply_imported_identity(mit_tp(TP_A, r"E:\dort\a.TP", 1), &current);
+        assert_eq!(merged.tp_upload.path, r"C:\hier\a.TP");
+        assert_eq!(merged.tp_upload.tournament_uuid, TP_A);
+        assert!(!merged.tp_upload.finden_automatisch);
+        assert_eq!(merged.tp_upload.stand, 5);
+    }
+
+    #[test]
+    fn pfadwechsel_loest_takt_wiederanlauf() {
+        // AK13: Der Takt-Upload hielt an („Datei nicht gefunden"); die
+        // Automatik bindet den neuen Pfad — der Halt löst sich, der Zähler
+        // steigt, und Config-Datei und Arbeitsspeicher stimmen überein.
+        let dir = tempfile::tempdir().unwrap();
+        let datei = dir.path().join("config.json");
+        let shared = Arc::new(Mutex::new(mit_tp(TP_A, r"C:\alt\a.TP", 0)));
+        let status = Mutex::new(TpUploadStatus::default());
+        status.lock().unwrap().takt.angehalten = Some("Datei nicht gefunden".into());
+
+        let neu = tp_pfad_uebernehmen(&datei, &shared, &status, r"D:\neu\a.TP", TP_A, 0).unwrap();
+        assert_eq!(neu.tp_upload.path, r"D:\neu\a.TP");
+        assert_eq!(neu.tp_upload.stand, 1);
+        assert_eq!(neu.tournament_uuid, TP_A, "die Kennung bleibt");
+        assert_eq!(shared.lock().unwrap().tp_upload.path, r"D:\neu\a.TP");
+        let gelesen = AppConfig::load_from(&datei).expect("Datei geschrieben");
+        assert_eq!(gelesen.tp_upload.path, r"D:\neu\a.TP");
+        assert!(status.lock().unwrap().takt.angehalten.is_none());
+    }
+
+    #[test]
+    fn stille_uebernahme_prueft_in_der_sperre_ob_sie_noch_gilt() {
+        // Zwischen Entscheidung und Schreiben wurde im Setup gespeichert:
+        // Dann behält der Turnierleiter seine Wahl, nichts wird geschrieben.
+        let dir = tempfile::tempdir().unwrap();
+        let datei = dir.path().join("config.json");
+        let status = Mutex::new(TpUploadStatus::default());
+        let pruefe = |aendern: fn(&mut AppConfig)| {
+            let mut cfg = mit_tp(TP_A, r"C:\alt\a.TP", 4);
+            aendern(&mut cfg);
+            let shared = Arc::new(Mutex::new(cfg.clone()));
+            let r = tp_pfad_uebernehmen(&datei, &shared, &status, r"D:\neu\a.TP", TP_A, 4);
+            assert!(r.is_err());
+            assert_eq!(*shared.lock().unwrap(), cfg, "Config unverändert");
+        };
+        pruefe(|c| c.tp_upload.finden_automatisch = false); // Automatik ausgeschaltet
+        pruefe(|c| c.tournament_uuid = TP_B.to_string()); // andere Kennung gespeichert
+        pruefe(|c| c.tp_upload.stand = 5); // inzwischen anderswo geschrieben
+        assert!(!datei.exists(), "nichts auf die Platte");
+    }
+
+    #[test]
+    fn antwort_ja_uebernimmt_datei_und_kennung() {
+        let mut cfg = mit_tp(TP_A, r"C:\alt\a.TP", 1);
+        let frage = crate::tp_finden::Frage {
+            pfad: r"D:\neu\b.TP".into(),
+            name: "b.TP".into(),
+            datei_guid: Some(TP_B.into()),
+            eingetragen: TP_A.into(),
+        };
+        tp_antwort_anwenden(&mut cfg, &frage, true);
+        assert_eq!(cfg.tp_upload.path, r"D:\neu\b.TP");
+        assert_eq!(cfg.tp_upload.tournament_uuid, TP_B);
+        assert_eq!(cfg.tournament_uuid, TP_B);
+        assert_eq!(cfg.checkin.tournament_uuid, TP_B, "Check-In zieht mit");
+        assert_eq!(cfg.tp_upload.stand, 2);
+        assert!(cfg.tp_datei_fuer_turnier().is_some());
+    }
+
+    #[test]
+    fn antwort_ja_ohne_kennung_bindet_nur_den_pfad() {
+        let mut cfg = mit_tp(TP_A, "", 0);
+        let frage = crate::tp_finden::Frage {
+            pfad: r"D:\neu\ohne.TP".into(),
+            name: "ohne.TP".into(),
+            datei_guid: None,
+            eingetragen: TP_A.into(),
+        };
+        tp_antwort_anwenden(&mut cfg, &frage, true);
+        assert_eq!(cfg.tp_upload.path, r"D:\neu\ohne.TP");
+        assert_eq!(cfg.tournament_uuid, TP_A, "die Kennung bleibt");
+        assert!(cfg.tp_datei_fuer_turnier().is_some());
+    }
+
+    #[test]
+    fn antwort_nein_schaltet_nur_die_automatik_aus() {
+        let mut cfg = mit_tp(TP_A, r"C:\alt\a.TP", 1);
+        let frage = crate::tp_finden::Frage {
+            pfad: r"D:\neu\b.TP".into(),
+            name: "b.TP".into(),
+            datei_guid: Some(TP_B.into()),
+            eingetragen: TP_A.into(),
+        };
+        tp_antwort_anwenden(&mut cfg, &frage, false);
+        assert!(!cfg.tp_upload.finden_automatisch);
+        assert_eq!(cfg.tp_upload.path, r"C:\alt\a.TP");
+        assert_eq!(cfg.tournament_uuid, TP_A);
+        assert_eq!(
+            cfg.tp_upload.stand, 2,
+            "auch das Nein zählt als Schreibvorgang"
+        );
     }
 
     #[test]

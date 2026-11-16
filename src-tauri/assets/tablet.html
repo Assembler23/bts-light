@@ -178,6 +178,11 @@
     .demo-wahl[hidden] { display: none; }
     .demo-titel { font-size: 1.35rem; font-weight: 800; }
     .demo-unter { font-size: .95rem; color: var(--muted); }
+    .demo-zaehlweise { display: flex; gap: .5rem; margin-top: .2rem; }
+    .demo-zaehlweise button { padding: .55rem 1.1rem; border-radius: 999px;
+      border: 2px solid #7c3aed; background: transparent; color: var(--text);
+      font: inherit; font-weight: 700; cursor: pointer; }
+    .demo-zaehlweise button[aria-pressed="true"] { background: #7c3aed; color: #fff; }
     .demo-liste { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
       gap: .7rem; width: 100%; margin-top: .3rem; }
     .demo-szenario { text-align: left; padding: .9rem 1rem; border-radius: .8rem;
@@ -1179,6 +1184,7 @@
       <div class="demo-wahl" id="demo-wahl" hidden>
         <div class="demo-titel" data-t>Übungsspiel wählen</div>
         <div class="demo-unter" data-t>Beispielnamen · nichts geht an Turnierleitung, BTP, Monitore oder Liveticker</div>
+        <div class="demo-zaehlweise" id="demo-zaehlweise" role="group" aria-label="Zählweise" data-t-aria></div>
         <div class="demo-liste" id="demo-liste"></div>
       </div>
     </div>
@@ -2273,9 +2279,12 @@ const EN = {
   'Demofeld · Übungsspiel': 'Practice court · practice match',
   'Demofeld': 'Practice court',
   'Demofeld – Übungsspiel': 'Practice court – practice match',
+  'Spielzettel': 'Score sheet',
   'Übung': 'Practice',
   'Einzel': 'Singles',
-  'Damen-Einzel ab 0:0 — zwei Gewinnsätze bis 21': "Women's singles from 0:0 — best of three games to 21",
+  'Zählweise': 'Scoring system',
+  'Sätze bis {ziel}': 'Games to {ziel}',
+  'Damen-Einzel ab 0:0 — zwei Gewinnsätze bis {ziel}': "Women's singles from 0:0 — best of three games to {ziel}",
   'Damen-Einzel': "Women's singles",
   'Doppel': 'Doubles',
   'Herren-Doppel ab 0:0 — Aufschlagfelder und Positionen üben': "Men's doubles from 0:0 — practise service courts and positions",
@@ -2283,14 +2292,16 @@ const EN = {
   'Mixed': 'Mixed',
   'Mixed ab 0:0 — Aufschlag und Annahme im gemischten Doppel': 'Mixed from 0:0 — serving and receiving in mixed doubles',
   'Einzel · Entscheidungssatz': 'Singles · deciding game',
-  'Sätze 21:17 und 18:21 — dritter Satz mit Seitenwechsel bei 11': 'Games 21:17 and 18:21 — third game with change of ends at 11',
+  'Sätze {ziel}:{m4} und {m3}:{ziel} — dritter Satz mit Seitenwechsel bei {pause}':
+    'Games {ziel}:{m4} and {m3}:{ziel} — third game with change of ends at {pause}',
   'Herren-Einzel': "Men's singles",
   'Doppel · Verlängerung': 'Doubles · extra points',
-  'Erster Satz steht 19:19 — Satzpunkt, 29 beide und Satzende': 'First game at 19:19 — game point, 29 all and end of game',
+  'Erster Satz steht {m2}:{m2} — Satzpunkt, {vorCap} beide und Satzende':
+    'First game at {m2}:{m2} — game point, {vorCap} all and end of game',
   'Damen-Doppel': "Women's doubles",
   'Mixed · Spielpunkt': 'Mixed · match point',
-  'Erster Satz 21:16, zweiter steht 20:18 — Spielende und Ergebnis übermitteln':
-    'First game 21:16, second at 20:18 — end of match and submitting the result',
+  'Erster Satz {ziel}:{m5}, zweiter steht {m1}:{m3} — Spielende und Ergebnis übermitteln':
+    'First game {ziel}:{m5}, second at {m1}:{m3} — end of match and submitting the result',
   // Ergebnis-Dialog
   'Ergebnis eintragen': 'Enter result',
   'Spiel läuft noch': 'Match still in progress',
@@ -2501,7 +2512,9 @@ const EN = {
 };
 /** Übersetzt einen deutschen Text und setzt `{name}`-Platzhalter ein. */
 function t(de, werte) {
-  let s = SPRACHE === 'en' && Object.hasOwn(EN, de) ? EN[de] : de;
+  // `hasOwnProperty.call` statt `Object.hasOwn`: Letzteres fehlt älteren
+  // WebViews (vor Chrome 93) — dort wäre die Zähltafel auf Englisch tot.
+  let s = SPRACHE === 'en' && Object.prototype.hasOwnProperty.call(EN, de) ? EN[de] : de;
   if (werte) s = s.replace(/\{(\w+)\}/g, (m, k) => (k in werte ? String(werte[k]) : m));
   return s;
 }
@@ -2705,6 +2718,7 @@ const els = {
   settingsDemoNeu: document.getElementById('settings-demo-neu'),
   demoWahl: document.getElementById('demo-wahl'),
   demoListe: document.getElementById('demo-liste'),
+  demoZaehlweise: document.getElementById('demo-zaehlweise'),
   demoNeuFertig: document.getElementById('demo-neu-fertig'),
   settingsAnordnung: document.getElementById('settings-anordnung'),
   plusLeftLabel: document.getElementById('plus-left-label'),
@@ -7418,8 +7432,9 @@ function spracheAnwenden() {
   statischUebersetzen();
   els.spracheDe.classList.toggle('sprache-aktiv', SPRACHE === 'de');
   els.spracheEn.classList.toggle('sprache-aktiv', SPRACHE === 'en');
+  // Der Titel steht im Kiosk nirgends, wohl aber im Browser-Tab und im Verlauf.
+  document.title = DEMO ? t('Demofeld – Übungsspiel') : t('Spielzettel');
   if (DEMO) {
-    document.title = t('Demofeld – Übungsspiel');
     // Ein echter Feldname kommt aus BTP und bleibt, wie er ist; das Demofeld
     // heißt nur bei uns so.
     document.querySelectorAll('[data-feldname]').forEach((el) => { el.textContent = t('Demofeld'); });
@@ -8778,29 +8793,51 @@ document.getElementById('diag-clear').addEventListener('click', () => {
 // Spec tablet-demofeld. Szenarien als Daten: Ein neues Szenario ist ein
 // Eintrag mehr. `saetze` (Team-Koordinaten, wie `hostSets` vom Turnier-PC)
 // setzt einen Zwischenstand; der letzte, noch offene Satz läuft weiter.
+// Text und Zwischenstand hängen an der gewählten Zählweise (`z.ziel`):
+// der Text als Vorlage mit Platzhaltern (`demoTextWerte`), der Zwischenstand
+// als Funktion.
 // Der Einstieg nutzt denselben Weg wie ein Tablet-Wechsel mitten im Spiel
 // (`einstiegMitSaetzen`): Seitenwahl und Aufstellung werden abgefragt.
 // Namen frei erfunden — keine echten Daten des Turniers.
+
+/** Zählweisen zur Wahl: Ziel, Obergrenze, Pause — wie BTP sie schickt. */
+const DEMO_ZAEHLWEISEN = [
+  { ziel: 21, cap: 30, pause: 11 },
+  { ziel: 15, cap: 21, pause: 8 },
+];
+let demoZaehlweise = DEMO_ZAEHLWEISEN[0];
+
+/** Zahlen für die Szenario-Texte. Die Texte sind Vorlagen mit Platzhaltern
+ *  statt fertiger Sätze — so hat jeder genau einen Wörterbuch-Eintrag,
+ *  gleich welche Zählweise gewählt ist. `m4` = Ziel minus 4 usw. */
+function demoTextWerte(z) {
+  return { ziel: z.ziel, pause: z.pause, vorCap: z.cap - 1,
+    m1: z.ziel - 1, m2: z.ziel - 2, m3: z.ziel - 3, m4: z.ziel - 4, m5: z.ziel - 5 };
+}
+
 const DEMO_SZENARIEN = [
-  { titel: 'Einzel', text: 'Damen-Einzel ab 0:0 — zwei Gewinnsätze bis 21',
+  { titel: 'Einzel', text: 'Damen-Einzel ab 0:0 — zwei Gewinnsätze bis {ziel}',
     klasse: 'Damen-Einzel', a: ['Anna Beispiel'], b: ['Berta Muster'] },
   { titel: 'Doppel', text: 'Herren-Doppel ab 0:0 — Aufschlagfelder und Positionen üben',
     klasse: 'Herren-Doppel', a: ['Carl Probe', 'David Test'], b: ['Emil Muster', 'Felix Beispiel'] },
   { titel: 'Mixed', text: 'Mixed ab 0:0 — Aufschlag und Annahme im gemischten Doppel',
     klasse: 'Mixed', a: ['Greta Probe', 'Hans Beispiel'], b: ['Ida Muster', 'Jonas Test'] },
-  { titel: 'Einzel · Entscheidungssatz', text: 'Sätze 21:17 und 18:21 — dritter Satz mit Seitenwechsel bei 11',
+  { titel: 'Einzel · Entscheidungssatz',
+    text: 'Sätze {ziel}:{m4} und {m3}:{ziel} — dritter Satz mit Seitenwechsel bei {pause}',
     klasse: 'Herren-Einzel', a: ['Karl Beispiel'], b: ['Lukas Muster'],
-    saetze: [{ a: 21, b: 17 }, { a: 18, b: 21 }] },
-  { titel: 'Doppel · Verlängerung', text: 'Erster Satz steht 19:19 — Satzpunkt, 29 beide und Satzende',
+    saetze: (z) => [{ a: z.ziel, b: z.ziel - 4 }, { a: z.ziel - 3, b: z.ziel }] },
+  { titel: 'Doppel · Verlängerung',
+    text: 'Erster Satz steht {m2}:{m2} — Satzpunkt, {vorCap} beide und Satzende',
     klasse: 'Damen-Doppel', a: ['Maria Probe', 'Nina Test'], b: ['Olga Muster', 'Paula Beispiel'],
-    saetze: [{ a: 19, b: 19 }] },
-  { titel: 'Mixed · Spielpunkt', text: 'Erster Satz 21:16, zweiter steht 20:18 — Spielende und Ergebnis übermitteln',
+    saetze: (z) => [{ a: z.ziel - 2, b: z.ziel - 2 }] },
+  { titel: 'Mixed · Spielpunkt',
+    text: 'Erster Satz {ziel}:{m5}, zweiter steht {m1}:{m3} — Spielende und Ergebnis übermitteln',
     klasse: 'Mixed', a: ['Rita Beispiel', 'Sven Probe'], b: ['Tina Muster', 'Uwe Test'],
-    saetze: [{ a: 21, b: 16 }, { a: 20, b: 18 }] },
+    saetze: (z) => [{ a: z.ziel, b: z.ziel - 5 }, { a: z.ziel - 1, b: z.ziel - 3 }] },
 ];
 
 /** MatchBrief wie vom Turnier-PC (Feldnamen siehe relay-proto `MatchBrief`). */
-function demoBrief(sz) {
+function demoBrief(sz, z) {
   let nr = 0;
   const spieler = (namen) => namen.map((name) => ({ id: 990000 + (++nr), name, nationality: null, club: null }));
   return {
@@ -8812,32 +8849,35 @@ function demoBrief(sz) {
     // Deutscher Schlüssel für die Anzeige — siehe `eventLabel` in `render`.
     demoKlasse: sz.klasse,
     bestOfSets: 3,
-    targetScore: 21,
-    capScore: 30,
-    intervalAt: 11,
+    targetScore: z.ziel,
+    capScore: z.cap,
+    intervalAt: z.pause,
     discipline: '',
     scorekeeper: [],
     scorekeeperAssigned: false,
     showClubNames: false,
     showClubLogos: false,
     teamsCorrection: true,
-    shuttleCounter: false,
+    // Ballzähler zum Üben immer an — die Zahl bleibt wie alles andere auf
+    // dem Tablet (Netzsperre).
+    shuttleCounter: true,
     finalized: false,
   };
 }
 
 function demoStarten(sz) {
   if (!DEMO) return;
-  tlog('info', 'demo_start', { szenario: sz.titel });
+  tlog('info', 'demo_start', { szenario: sz.titel, ziel: demoZaehlweise.ziel });
   closeSettings();
   if (STATE.match || STATE.pendingResult) clearMatch();
-  const brief = demoBrief(sz);
+  const z = demoZaehlweise;
+  const brief = demoBrief(sz, z);
   loadMatch(brief);
   STATE.hostKannBerichtigung = true;
-  STATE.hostZaehlt = false;
+  STATE.hostZaehlt = true;
   STATE.finalized = false;
   if (sz.saetze) {
-    einstiegMitSaetzen(hostSaetzeTeilen(sz.saetze, brief.targetScore, brief.capScore, brief.bestOfSets));
+    einstiegMitSaetzen(hostSaetzeTeilen(sz.saetze(z), brief.targetScore, brief.capScore, brief.bestOfSets));
   }
 }
 
@@ -8850,6 +8890,15 @@ function demoNeu() {
 }
 
 function demoAuswahlBauen() {
+  els.demoZaehlweise.textContent = '';
+  DEMO_ZAEHLWEISEN.forEach((z) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t('Sätze bis {ziel}', { ziel: z.ziel });
+    b.setAttribute('aria-pressed', String(z === demoZaehlweise));
+    b.addEventListener('click', () => { demoZaehlweise = z; demoAuswahlBauen(); });
+    els.demoZaehlweise.appendChild(b);
+  });
   els.demoListe.textContent = '';
   DEMO_SZENARIEN.forEach((sz) => {
     const b = document.createElement('button');
@@ -8858,7 +8907,7 @@ function demoAuswahlBauen() {
     const titel = document.createElement('b');
     titel.textContent = t(sz.titel);
     const u = document.createElement('span');
-    u.textContent = t(sz.text);
+    u.textContent = t(sz.text, demoTextWerte(demoZaehlweise));
     b.append(titel, u);
     b.addEventListener('click', () => demoStarten(sz));
     els.demoListe.appendChild(b);

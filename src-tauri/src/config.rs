@@ -533,6 +533,17 @@ pub struct TpUploadConfig {
     /// [`TpUploadConfig::ereignis_abstand`] (klemmt unter
     /// [`TP_EREIGNIS_MIN_MINUTEN`]).
     pub ereignis_minuten: u16,
+    /// Die in BTP geöffnete Datei selbst finden (Spec `tp-datei-finden`,
+    /// ADR 0096). Standard **an** — auch für Bestandsinstallationen, deren
+    /// Config das Feld nicht kennt. Wer die Datei von Hand wählt oder eine
+    /// Rückfrage verneint, schaltet es aus; es ist zugleich der Notschalter.
+    pub finden_automatisch: bool,
+    /// Schreibzähler (ADR 0098): erhöht sich bei jedem Schreibvorgang der
+    /// Automatik **außerhalb** des Setups. Ein Setup-Formular, das einen
+    /// älteren Zähler zurückschickt, ist veraltet — dann gelten Pfad,
+    /// Bindung, Schalter und Turnier-Kennung aus dem gespeicherten Stand
+    /// (`keep_host_managed_fields`).
+    pub stand: u64,
 }
 
 /// Voreinstellung des Ereignis-Mindestabstands (Handbuch-Anker).
@@ -556,6 +567,8 @@ impl Default for TpUploadConfig {
             auto_minutes: TP_TAKT_STANDARD_MINUTEN,
             ereignis_enabled: true,
             ereignis_minuten: TP_EREIGNIS_STANDARD_MINUTEN,
+            finden_automatisch: true,
+            stand: 0,
         }
     }
 }
@@ -2195,6 +2208,33 @@ mod tests {
         assert_eq!(wieder.tp_upload, cfg.tp_upload);
     }
 
+    // ── TP-Datei selbst finden (Spec tp-datei-finden, AK8) ─────────────
+    #[test]
+    fn tp_upload_ohne_feld_ist_automatik_an() {
+        // Bestands-Config mit gewählter Datei, aber ohne das neue Feld: Nach
+        // dem Auto-Update ist die Automatik an, Pfad und Bindung bleiben.
+        let cfg: AppConfig = serde_json::from_str(
+            r#"{"btp":{"host":"127.0.0.1","port":9901,"password":null},
+                "badhub":{"url":"u","password":"p","live_url":""},
+                "tp_upload":{"path":"C:\\Turniere\\a.TP",
+                             "tournament_uuid":"0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"}}"#,
+        )
+        .expect("Bestands-Config lädt");
+        assert!(cfg.tp_upload.finden_automatisch);
+        assert_eq!(cfg.tp_upload.path, r"C:\Turniere\a.TP");
+        // Ganz ohne Block ebenso.
+        assert!(AppConfig::default().tp_upload.finden_automatisch);
+    }
+
+    #[test]
+    fn finden_automatisch_ueberlebt_roundtrip() {
+        let mut cfg = AppConfig::default();
+        cfg.tp_upload.finden_automatisch = false;
+        let json = serde_json::to_string(&cfg).unwrap();
+        let wieder: AppConfig = serde_json::from_str(&json).unwrap();
+        assert!(!wieder.tp_upload.finden_automatisch);
+    }
+
     #[test]
     fn tp_datei_nur_bei_gleicher_guid() {
         let mut cfg = AppConfig::default();
@@ -2900,6 +2940,8 @@ mod tests {
                 auto_minutes: 10,
                 ereignis_enabled: false,
                 ereignis_minuten: 12,
+                finden_automatisch: false,
+                stand: 7,
             },
             tournament_logo: LogoConfig {
                 data: "aGVsbG8=".to_string(),

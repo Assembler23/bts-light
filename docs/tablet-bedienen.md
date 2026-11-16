@@ -46,11 +46,15 @@ geht **mitten im laufenden Turnier**, an jedem Turnier-Tablet:
 <!-- pruef: "Demofeld · Übungsspiel" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Ausprobieren — antippen" in src-tauri/assets/lobby.html -->
 
-Dann wählst du ein **Übungsspiel**: Einzel, Doppel oder Mixed ab 0:0, oder
-einen Zwischenstand zum gezielten Üben — Entscheidungssatz (Seitenwechsel
-bei 11), Verlängerung ab 19:19 oder ein Spielpunkt bei 20:18 bis zum
-Übermitteln des Ergebnisses. Alles läuft wie im echten Spiel: Seitenwahl,
-Aufschlag, Pausen, Karten, Korrektur, Schiri-Modus.
+Zuerst die **Zählweise**: **Sätze bis 21** oder **Sätze bis 15** (seit
+v0.9.422). Dann wählst du ein **Übungsspiel**: Einzel, Doppel oder Mixed ab
+0:0, oder einen Zwischenstand zum gezielten Üben — Entscheidungssatz
+(Seitenwechsel bei 11 bzw. 8), Verlängerung ab 19:19 bzw. 13:13 oder ein
+Spielpunkt bei 20:18 bzw. 14:12 bis zum Übermitteln des Ergebnisses. Alles
+läuft wie im echten Spiel: Seitenwahl, Aufschlag, Pausen, Karten, Korrektur,
+Schiri-Modus. Der **Ballzähler** ist auf dem Demofeld immer an.
+<!-- pruef: "'Sätze bis {ziel}'" in src-tauri/assets/tablet.html -->
+<!-- pruef: "ziel: 15, cap: 21, pause: 8" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Übungsspiel wählen" in src-tauri/assets/tablet.html -->
 <!-- pruef: "Doppel · Verlängerung" in src-tauri/assets/tablet.html -->
 
@@ -152,7 +156,7 @@ Satzpunkt besteht — du musst dafür nichts einschalten.
 <!-- pruef: "seiteWort(lage.seite) : t('beide')" in src-tauri/assets/tablet.html -->
 
 Ein Fehltipp lässt sich zurücknehmen — mit dem orangen Knopf **unten
-links**. Es gibt nur diesen einen (seit v0.9.423; vorher waren es bis zu
+links**. Es gibt nur diesen einen (seit v0.9.425; vorher waren es bis zu
 drei), und er sagt, was er zurücknimmt: **„↩ Punkt für Links zurück"** oder
 „… Rechts …" — zählst du hinter dem Feld, „Vorne" und „Hinten". Der Verlauf
 wird dabei mit korrigiert.
@@ -280,7 +284,7 @@ Ein Neuladen oder ein Gerätetausch behält die laufende Pause bei.
 
 Zwei Meldungen gehen vom Tablet an die Turnierleitung, beide ohne PIN:
 
-- **✚ Verletzung · Behandlung** — steht unter **⋯ Mehr** (seit v0.9.423;
+- **✚ Verletzung · Behandlung** — steht unter **⋯ Mehr** (seit v0.9.425;
   vorher ein eigener Knopf in der Kopfzeile). Unterbricht das Spiel. Eine
   große Uhr zählt
   die **Behandlungspause** hoch, darunter steht die Richtzeit des Turniers
@@ -310,7 +314,7 @@ Meldung.
 ## Das Mehr-Menü
 
 Oben rechts sitzt **⋯ Mehr** (auf schmalen Geräten nur „⋯"). Dahinter steckt
-alles, was man selten braucht (seit v0.9.423 — vorher lag ein Teil davon in
+alles, was man selten braucht (seit v0.9.425 — vorher lag ein Teil davon in
 Kopf- und Fußzeile, der Rest hinter einem Zahnrad mit PIN). Das Menü öffnet
 **ohne PIN** und zeigt nur, was gerade geht:
 
@@ -330,7 +334,7 @@ lässt es sich verschieben. **Schließen** steht als Rahmen-Knopf ganz unten.
 
 ### Sprache: Deutsch oder English
 
-Das Tablet spricht Deutsch oder Englisch (seit v0.9.423). Umgestellt wird
+Das Tablet spricht Deutsch oder Englisch (seit v0.9.425). Umgestellt wird
 unter **⋯ Mehr** im Abschnitt **Sprache · Language**: **Deutsch** oder
 **English** antippen — ohne PIN, auch mitten im Spiel. Der Stand, die Uhr und
 eine laufende Pause bleiben dabei, wie sie sind.
@@ -386,7 +390,7 @@ Wer als Schiedsrichter zählt, hat zusätzlich die Karten zur Hand — gelb, rot
 schwarz — samt der vorzulesenden Ansagen.
 
 > **Der Schiri-Modus muss erst eingeschaltet werden** — unter **⋯ Mehr**,
-> ohne PIN (seit v0.9.423). Ohne ihn erscheinen die Karten gar nicht.
+> ohne PIN (seit v0.9.425). Ohne ihn erscheinen die Karten gar nicht.
 
 Die Ansage zum Vorlesen steht so groß da, wie der Platz es zulässt — kurze
 Ansagen größer als lange. Reicht das nicht, hilft **Große Schrift** unter

@@ -52,7 +52,7 @@ eq("neuer Commit rettet einen alten NICHT", gemischt.ok, false);
 eq("… nennt die Anzahl", gemischt.text.includes("2 auslieferbare"), true);
 eq("… nennt das Alter in Tagen", gemischt.text.includes("2 Tag(e) alt"), true);
 eq("… nennt den aeltesten Commit", gemischt.text.includes("alt2222"), true);
-eq("… nennt den fertigen Befehl", gemischt.text.includes("git push origin v0.9.199"), true);
+eq("… nennt den fertigen Befehl", gemischt.text.includes("gh workflow run release-ausloesen.yml --ref main -f version=0.9.199"), true);
 eq("… nennt die Folge", gemischt.text.includes("Turnier-PC"), true);
 
 // ── Mengen-Grenze: faengt, was die Uhr verschluckt ─────────────────────────

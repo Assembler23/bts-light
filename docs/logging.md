@@ -151,6 +151,20 @@ Drei Dinge dazu:
 Der Zweck ist der Rückweg: In einem echten Turnier steht kein Messgerät,
 aber das Log kommt über den Upload zurück.
 
+### Suche nach der TP-Datei
+
+Jede Suche nach der in BTP geöffneten Turnierdatei (Spec
+[tp-datei-finden](features/tp-datei-finden.md)) schreibt eine Zeile
+`TP-Datei-Suche: …` mit dem Ausgang — etwa `gefunden (Turnier.TP)`,
+`BTP läuft nicht`, `kein Zugriff auf BTP` oder `Abfrage hängt`. Genannt wird
+nur der **Dateiname**, nie der Pfad: Er enthält den Windows-Benutzernamen,
+und die Logs werden hochgeladen.
+
+Die Automatik außerhalb der Einstellungen (seit v0.9.424) schreibt nur, wenn
+sich etwas tut — `TP-Datei-Automatik: gefunden (…), übernommen`,
+`… Rückfrage gestellt (…)`, `… Rückfrage beantwortet (Ja|Nein), Neustart: …`
+und als Warnung `… Abfrage hängt`. Der Minutentakt ohne Befund bleibt still.
+
 ## Automatischer Upload (Standard an, abwählbar)
 
 Im Setup steht **„Diagnose-Logs senden"**. Ist der Schalter an, lädt
