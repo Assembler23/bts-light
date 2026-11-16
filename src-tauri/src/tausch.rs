@@ -44,7 +44,14 @@ pub const ZUSTAND_DATEI: &str = "uebergabe.json";
 pub const WAECHTER_LOG: &str = "uebergabe-waechter.log";
 
 /// So lange darf der Probelauf dauern, bevor kein Wechsel angeboten wird.
-pub const PROBELAUF_FRIST: Duration = Duration::from_secs(10);
+///
+/// Bewusst großzügig: Der Probelauf läuft im Hintergrund, **bevor** etwas
+/// angeboten wird, und kostet keine Lücke. Gemessen am 16.11.2026 auf einem
+/// Windows-11-Rechner mit Unternehmens-Schutzsoftware: Der erste Start einer
+/// frisch abgelegten Programmdatei dauerte 15 s, jeder weitere 0,6 s. Der
+/// Probelauf ist damit zugleich das „Vorwärmen" — die Prüfung der neuen
+/// Datei ist erledigt, bevor jemand auf „Jetzt wechseln" klickt.
+pub const PROBELAUF_FRIST: Duration = Duration::from_secs(120);
 /// So lange wartet der Wächter auf das Ende der alten App, bevor er sie
 /// beendet. Großzügig: Die App sichert beim Beenden Stände und schließt
 /// Verbindungen — ein Abschuss mittendrin wäre schlimmer als ein paar
