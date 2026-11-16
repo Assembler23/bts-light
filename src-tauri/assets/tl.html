@@ -834,52 +834,132 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    kann jetzt bis in deren Region reichen. */
 .kebab-menu {
   position: fixed; z-index: 30;
-  display: flex; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column;
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-  box-shadow: var(--shadow); padding: 12px; min-width: 15rem;
-  max-height: 70vh; overflow-y: auto;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .16), var(--shadow);
+  padding: 4px; min-width: 14rem; max-width: min(21rem, calc(100vw - 16px));
+  max-height: calc(100vh - 16px); overflow-y: auto;
+  /* Eigene, kleinere Schrift (Überarbeitung 16.11.2026): Die Menüs waren
+     mit jedem Feature gewachsen, bis sie auf dem Tablet den halben Schirm
+     füllten. Flache Einträge ohne Rahmen und ohne Zwischenraum statt
+     umrandeter Knöpfe — das spart je Eintrag rund ein Drittel der Höhe. */
+  font-size: .84rem; font-weight: 400; line-height: 1.25; color: var(--ink);
+  text-align: left; white-space: normal;
+  /* Höhe EINES Eintrags. Mit dem Finger bleibt es bei der zugesicherten
+     Trefffläche; mit der Maus darf es dichter sein (unten). */
+  --menu-item: var(--touch-min);
 }
-/* Kachel-Menüs etwas schmaler: bis zu sieben kurze Aktionsknöpfe
-   (inkl. „📈 Punktverlauf"), kein Wähler. */
-.card .kebab-menu { min-width: 13rem; }
-.kebab-menu .kebab-group { display: flex; flex-direction: column; gap: 6px; }
+@media (pointer: fine) {
+  .kebab-menu { --menu-item: 2rem; }
+}
+/* Gruppen: Trennlinie statt Abstand, darüber eine kleine Überschrift. */
+.kebab-menu .kebab-group { display: flex; flex-direction: column; padding: 4px 0; }
+.kebab-menu .kebab-group + .kebab-group { border-top: 1px solid var(--line); }
 .kebab-menu .kebab-label {
-  font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: 3px 10px 2px;
+  font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   color: var(--ink-faint);
 }
-.kebab-menu .kebab-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* Untereinander stehende, voll beschriftete Aktionsknöpfe — im Menü ist
-   Platz, den Zeile und Kachel selbst nicht mehr hergeben. Genutzt von den
-   Nachruf-Knöpfen der Zeile UND allen Kachel-Aktionen. */
-.kebab-menu .kebab-actions { display: flex; flex-direction: column; gap: 6px; }
-.kebab-menu .kebab-actions button {
-  font: inherit; font-weight: 650; padding: 8px 12px; min-height: var(--touch-min);
-  border: 1px solid var(--line); border-radius: 8px;
-  background: var(--card); color: var(--ink-soft); cursor: pointer;
+.kebab-menu .kebab-label small {
+  font-size: inherit; font-weight: 500; text-transform: none; letter-spacing: 0;
+}
+/* Sinnbild vor einem Eintrag: eine Strichzeichnung aus dem Vorrat
+   `#mi-vorrat` (im Seitenkörper), feste Breite — so stehen alle Texte einer
+   Gruppe in einer Flucht, was mit gemischten Emojis nie gelang. */
+.mi {
+  width: 1.05rem; height: 1.05rem; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  color: var(--ink-faint);
+}
+/* Der Eintrag selbst: flach, volle Breite, Sinnbild + Text. Genutzt von
+   allen drei Menü-Arten (Spielzeile, Feldkachel, beendetes Spiel). */
+.kebab-menu .kebab-actions { display: flex; flex-direction: column; }
+.kebab-menu .kebab-actions > button {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  font: inherit; font-weight: 500; padding: 2px 10px; min-height: var(--menu-item);
+  border: 0; border-radius: 6px;
+  background: none; color: var(--ink); cursor: pointer;
   text-align: left;
 }
-.kebab-menu .kebab-actions button:hover { border-color: var(--accent); color: var(--accent); }
-.kebab-menu .kebab-actions button:disabled { opacity: .5; cursor: default; }
-/* Auto-Vergabe-Ausnahme: jetzt beschriftet (im Menü ist Platz), nicht mehr
-   nur ein Icon-Quadrat wie vorher auf der Zeile selbst. */
-.row .auto-excl {
-  font: inherit; font-weight: 650; font-size: .85rem; cursor: pointer;
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; min-height: var(--touch-min);
-  border: 1px solid var(--line); border-radius: 8px;
+.kebab-menu button:hover:not(:disabled) .mi { color: inherit; }
+.kebab-menu .kebab-actions > button:hover { background: var(--bg); color: var(--accent); }
+.kebab-menu .kebab-actions > button:disabled { opacity: .5; cursor: default; }
+/* Ein Eintrag, der einen Zustand trägt (gerufen, von der Automatik
+   ausgenommen): eingefärbt, solange er gilt. */
+.kebab-menu .kebab-actions > button[aria-pressed="true"] { color: var(--warn); }
+.kebab-menu .kebab-actions > button[aria-pressed="true"] .mi { color: inherit; }
+
+/* Zusatzzeile unter einem Eintrag: dieselbe Aktion, aber nur für eine
+   Partei („nur: Müller · Schmidt"). Eingerückt bis zur Textflucht. */
+.kebab-menu .kebab-nur {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 0 10px 4px calc(20px + 1.05rem);
+  font-size: .75rem; color: var(--ink-faint);
+}
+.kebab-menu .kebab-nur button,
+.kebab-menu .kebab-icons button {
+  font: inherit; font-weight: 600; cursor: pointer;
+  min-height: calc(var(--menu-item) - 6px); padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 6px;
   background: var(--card); color: var(--ink-soft);
 }
-.row .auto-excl:hover { border-color: var(--warn); color: var(--warn); }
-.row .auto-excl[aria-pressed="true"] {
-  border-color: var(--warn); background: #fff7ed; color: var(--warn);
+.kebab-menu .kebab-nur button { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kebab-menu .kebab-nur button:hover,
+.kebab-menu .kebab-icons button:hover { border-color: var(--accent); color: var(--accent); }
+/* Beschriftung links, kleine Sinnbild-Knöpfe rechts (Reihenfolge der
+   Gerufenen: drei Richtungen in EINER Zeile statt drei Einträgen). */
+.kebab-menu .kebab-icons,
+.kebab-menu .kebab-feld {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 10px; min-height: var(--menu-item);
 }
+.kebab-menu .kebab-feld { gap: 10px; }
+.kebab-menu .kebab-icons > span,
+.kebab-menu .kebab-feld > span { flex: 1 1 auto; min-width: 0; font-weight: 500; }
+.kebab-menu .kebab-feld > span small {
+  display: block; font-size: .68rem; font-weight: 400; color: var(--ink-faint);
+}
+.kebab-menu .kebab-icons button {
+  display: grid; place-items: center; padding: 0;
+  width: calc(var(--menu-item) - 6px);
+}
+.kebab-menu .kebab-icons button .mi { color: inherit; }
 
-/* Nachruf: drei Knöpfe im Menü, mit vollem Text statt gekürzt auf 8rem —
-   im Kebab ist genug Platz, das war vorher auf der Zeile selbst nicht der
-   Fall. Form und Maße kommen von `.kebab-actions` (oben, geteilt mit der
-   Feldkachel); hier nur die abweichende Warn-Färbung beim Überfahren — ein
-   Nachruf ist eine Eskalation, keine Routine-Aktion. */
+/* Nachruf ist eine Eskalation, keine Routine-Aktion — Warn-Färbung beim
+   Überfahren statt der blauen. */
 .kebab-menu .recall button:hover { border-color: var(--warn); color: var(--warn); }
+.kebab-menu .recall.kebab-actions > button:hover { color: var(--warn); }
+
+/* Meetingpoint: je Person ein Umschalter, Partei 1 links, Partei 2 rechts.
+   Diese Einträge schließen das Menü NICHT (`data-bleibt-offen`) — wer fünf
+   Leute nacheinander eincheckt, will es nicht fünfmal öffnen. */
+.kebab-menu .mp-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 2px 8px 4px; }
+.kebab-menu .mp-pick > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kebab-menu .mp-pick .mp-breit { grid-column: 1 / -1; }
+.kebab-menu .mp-pick button {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  font: inherit; font-weight: 600; cursor: pointer; text-align: left;
+  min-height: var(--menu-item); padding: 2px 8px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); color: var(--ink-soft);
+}
+.kebab-menu .mp-pick button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kebab-menu .mp-pick button::before {
+  content: ""; flex: none; width: .95rem; height: .95rem; border-radius: 50%;
+  border: 2px solid var(--ink-faint);
+}
+.kebab-menu .mp-pick button:hover { border-color: var(--accent); }
+.kebab-menu .mp-pick button[aria-pressed="true"] {
+  border-color: var(--ok); background: #f0fdf4; color: #166534;
+}
+.kebab-menu .mp-pick button[aria-pressed="true"]::before {
+  border-color: var(--ok);
+  background: var(--ok) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / 80% no-repeat;
+}
+.kebab-menu .hl-pick { padding: 2px 10px 4px; }
+.kebab-menu .hl-pick button { width: 1.75rem; height: 1.75rem; }
+.kebab-menu .hl-pick button.hl-0 { width: auto; }
 
 /* Spielort ohne Feld. Unauffällig, solange nichts gesetzt ist — es ist eine
    Ausnahme-Handlung, kein Pflichtfeld. Steht ein Ort von Hand fest, sagt der
@@ -887,8 +967,9 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    auseinanderhält. Jetzt im Kebab-Menü mit vollem Namen statt Kürzel — im
    Menü ist Platz, den die Zeile selbst nicht mehr hergibt. */
 .row .hallwahl {
-  font: inherit; font-size: .85rem; font-weight: 650;
-  min-height: var(--touch-min); width: 100%; padding: 6px 8px;
+  font: inherit; font-weight: 600; flex: none;
+  min-height: calc(var(--menu-item, var(--touch-min)) - 6px);
+  width: auto; max-width: 11rem; padding: 2px 6px;
   border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink-soft); cursor: pointer;
 }
@@ -1583,6 +1664,29 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 </style>
 </head>
 <body>
+
+<!-- Sinnbilder der ⋮-/⋯-Menüs: einmal hier, in den Einträgen nur noch ein
+     `<use>` (Helfer `mi()` im Skript). Die Menüs werden je Zeile und je
+     Neuzeichnen gebaut — ausgeschriebene Pfade vervielfachten das Markup. -->
+<svg id="mi-vorrat" width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mi-ansage" viewBox="0 0 24 24"><path d="M3 10v4a1 1 0 0 0 1 1h3l5 4V5L7 9H4a1 1 0 0 0-1 1z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M19 6a8 8 0 0 1 0 12"/></symbol>
+  <symbol id="mi-nochmal" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></symbol>
+  <symbol id="mi-start" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
+  <symbol id="mi-person" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="mi-tafel" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+  <symbol id="mi-stift" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></symbol>
+  <symbol id="mi-verlauf" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></symbol>
+  <symbol id="mi-druck" viewBox="0 0 24 24"><path d="M7 8V3h10v5"/><rect x="3" y="8" width="18" height="9" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
+  <symbol id="mi-zurueck" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+  <symbol id="mi-schloss" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="mi-schloss-auf" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></symbol>
+  <symbol id="mi-anfang" viewBox="0 0 24 24"><path d="M5 4h14"/><path d="M12 20V9"/><path d="M6 14l6-6 6 6"/></symbol>
+  <symbol id="mi-hoch" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></symbol>
+  <symbol id="mi-runter" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M6 13l6 6 6-6"/></symbol>
+  <symbol id="mi-pause" viewBox="0 0 24 24"><path d="M8 5v14"/><path d="M16 5v14"/></symbol>
+  <symbol id="mi-ort" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+  <symbol id="mi-wunsch" viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></symbol>
+</svg>
 
 <div id="gate" class="gate" hidden>
   <h1>Diese Seite braucht einen Zugang</h1>
@@ -4116,15 +4220,10 @@ function courtCard(c, cellStyle) {
   // hierher — seit dem Feldtest 17.08.2026 auch der Punktverlauf-Knopf.
   // Dasselbe Kebab-Muster wie die Spielzeile, inklusive Offen-Zustand über
   // den Redraw (`openKebabCourtId`).
-  const kachelAktionen = [];
-  if (state.officials_managed && c.match_id) {
-    kachelAktionen.push(`<button type="button" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
-        title="Schiedsrichter einteilen">Schiedsrichter einteilen</button>`);
-    if ((c.sr || []).length || (c.ar || []).length) {
-      kachelAktionen.push(`<button type="button" data-off-say="${c.court_id}"
-          title="Schiedsrichter ansagen">Schiedsrichter ansagen</button>`);
-    }
-  }
+  // Seit der Überarbeitung vom 16.11.2026 in drei Gruppen statt einer
+  // Liste von bis zu zwölf Knöpfen: was in die Halle GESPROCHEN wird, was
+  // das SPIEL betrifft, was das FELD betrifft.
+  const ansagen = [], spielEintraege = [], feldEintraege = [];
   // Billige Bedingung zuerst: `aufrufeUnbegrenzt()` läuft durch die
   // Profil-Auflösung und soll im Normalfall gar nicht erst rechnen.
   if (c.match_id && ((!isPlaying(c) && gesprochen < 3) || aufrufeUnbegrenzt())) {
@@ -4133,15 +4232,18 @@ function courtCard(c, cellStyle) {
     // fehlt nur eine, und der ganze Saal noch einmal auszurufen nervt alle
     // anderen. Die Wire-Form der Partei entspricht exakt dem
     // Vorbereitungs-Nachruf (`PrepCallSide`: "both"/"team1"/"team2"), die
-    // Aufruf-STUFE zählt weiterhin allein der Turnier-PC.
-    kachelAktionen.push(`<button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
-        data-made="${gesprochen}" title="Ansage in der Halle auslösen">${esc(aufrufText)}</button>`);
-    kachelAktionen.push(`<button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
-        data-made="${gesprochen}" data-call-side="team1"
-        title="Nur diese Partei erneut aufrufen">${esc(aufrufText)} — ${esc(shortSide(c.team1))}</button>`);
-    kachelAktionen.push(`<button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
-        data-made="${gesprochen}" data-call-side="team2"
-        title="Nur diese Partei erneut aufrufen">${esc(aufrufText)} — ${esc(shortSide(c.team2))}</button>`);
+    // Aufruf-STUFE zählt weiterhin allein der Turnier-PC. Ein Eintrag für
+    // beide, darunter eine schmale Zeile „nur: A · B" — vorher drei Einträge.
+    ansagen.push(`<button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
+        data-made="${gesprochen}" title="Ansage in der Halle auslösen (beide Parteien)">${mi("ansage")}${esc(aufrufText)}</button>
+      <div class="kebab-nur"><span>nur:</span>
+        <button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
+          data-made="${gesprochen}" data-call-side="team1"
+          title="Nur diese Partei erneut aufrufen">${esc(shortSide(c.team1))}</button>
+        <button type="button" data-call="${c.court_id}" data-match="${c.match_id}"
+          data-made="${gesprochen}" data-call-side="team2"
+          title="Nur diese Partei erneut aufrufen">${esc(shortSide(c.team2))}</button>
+      </div>`);
   }
   // „Spiel komplett ansagen" (Wunsch 09.11.2026): IMMER da, solange ein
   // Spiel auf dem Feld steht — egal ob es läuft, ob schon der letzte Aufruf
@@ -4151,51 +4253,57 @@ function courtCard(c, cellStyle) {
   // stehen. Nur wenn der Turnier-PC die Aktion kennt — ein älterer verwirft
   // sie still (Muster `can_lock_courts`).
   if (c.match_id && state.can_announce_court_full) {
-    kachelAktionen.push(`<button type="button" data-say-full="${c.court_id}" data-match="${c.match_id}"
-        title="Das Spiel noch einmal vollständig ansagen (zählt nicht als Aufruf)">📣 Spiel komplett ansagen</button>`);
+    ansagen.push(`<button type="button" data-say-full="${c.court_id}" data-match="${c.match_id}"
+        title="Das Spiel noch einmal vollständig ansagen (zählt nicht als Aufruf)">${mi("nochmal")}Spiel komplett ansagen</button>`);
+  }
+  // „Bitte mit dem Spielen beginnen" (Spec tl-sicht-feinschliff, Punkt 3):
+  // Die Spieler stehen am Feld, es fällt aber kein Punkt. Nur dann sinnvoll
+  // — sobald gezählt wird, ist die Aufforderung gegenstandslos. Bewusst
+  // KEIN Aufruf: Die Stufe bleibt stehen, der Knopf hat keine `data-made`.
+  if (c.match_id && !isPlaying(c)) {
+    ansagen.push(`<button type="button" data-startplay="${c.court_id}" data-match="${c.match_id}"
+        title="Ansage: Feld soll mit dem Spielen beginnen">${mi("start")}Bitte anfangen</button>`);
+  }
+  if (state.officials_managed && c.match_id && ((c.sr || []).length || (c.ar || []).length)) {
+    ansagen.push(`<button type="button" data-off-say="${c.court_id}"
+        title="Schiedsrichter ansagen">${mi("person")}Schiedsrichter ansagen</button>`);
   }
   // Nachruf an die Zähltafelbedienung (Spec tl-sicht-feinschliff, Punkt 2 —
   // der seit ADR 0007 offene Baustein). `scorekeeper_assigned` deckt alle
   // drei Fälle ab, in denen es niemanden zu rufen gibt: leere
   // Warteschlange, Feld mit abgeschalteter Bediener-Vergabe und global
   // ausgeschaltete Verwaltung — in allen dreien weist der Turnier-PC gar
-  // nicht erst zu. Kein Aufruf: Der Knopf trägt keine Stufe und steht
-  // deshalb getrennt von den Aufruf-Knöpfen.
+  // nicht erst zu. Kein Aufruf: Der Knopf trägt keine Stufe.
   if (state.scorekeeper_managed && c.match_id && c.scorekeeper_assigned) {
-    kachelAktionen.push(`<button type="button" data-sk-say="${c.court_id}"
-        title="Zähltafelbedienung nachrufen">Bedienung nachrufen</button>`);
+    ansagen.push(`<button type="button" data-sk-say="${c.court_id}"
+        title="Zähltafelbedienung nachrufen">${mi("tafel")}Bedienung nachrufen</button>`);
   }
-  // „Bitte mit dem Spielen beginnen" (Spec tl-sicht-feinschliff, Punkt 3):
-  // Die Spieler stehen am Feld, es fällt aber kein Punkt. Nur dann sinnvoll
-  // — sobald gezählt wird, ist die Aufforderung gegenstandslos. Bewusst
-  // KEIN Aufruf: Die Stufe bleibt stehen, deshalb steht der Knopf auch
-  // getrennt von den Aufruf-Knöpfen darüber und hat keine `data-made`.
-  if (c.match_id && !isPlaying(c)) {
-    kachelAktionen.push(`<button type="button" data-startplay="${c.court_id}" data-match="${c.match_id}"
-        title="Ansage: Feld soll mit dem Spielen beginnen">Bitte anfangen</button>`);
+  if (state.officials_managed && c.match_id) {
+    spielEintraege.push(`<button type="button" data-off-court="${c.court_id}" data-off-match="${c.match_id}"
+        title="Schiedsrichter einteilen">${mi("person")}Schiedsrichter einteilen</button>`);
   }
   if (c.match_id) {
-    kachelAktionen.push(`<button type="button" data-court-result="${c.court_id}"
-        title="Endstand eintragen">✎ Ergebnis eintragen</button>`);
+    spielEintraege.push(`<button type="button" data-court-result="${c.court_id}"
+        title="Endstand eintragen">${mi("stift")}Ergebnis eintragen</button>`);
   }
   // Punktverlauf (Spec punktverlauf-graph): nur wenn es wirklich einen
   // Verlauf gibt (has_timeline) — kein Klick ins Leere. Der Graph selbst
   // bleibt lazy: geladen wird erst beim Klick, nie im Zustands-Push.
   if (c.match_id && c.has_timeline) {
-    kachelAktionen.push(`<button type="button" data-graph="${c.match_id}"
-        title="Punktverlauf anzeigen">📈 Punktverlauf</button>`);
+    spielEintraege.push(`<button type="button" data-graph="${c.match_id}"
+        title="Punktverlauf anzeigen">${mi("verlauf")}Punktverlauf</button>`);
     // Zettel unter derselben Schranke: Ohne Aufzeichnung gäbe es nichts
     // zu drucken (Papier-Ergebnis).
-    kachelAktionen.push(`<button type="button" data-zettel="${c.match_id}"
-        title="Schiedsrichterzettel drucken">🖨 Zettel</button>`);
+    spielEintraege.push(`<button type="button" data-zettel="${c.match_id}"
+        title="Schiedsrichterzettel drucken">${mi("druck")}Zettel drucken</button>`);
   }
   // „Vom Feld nehmen" (Wunsch 06.09.2026): bisher nur über das Band nach
   // dem Antippen der Kachel erreichbar — hier als zweiter Weg im Menü, der
   // keinen Auswahl-Zustand braucht. Derselbe `freeCourt` wie im Band,
   // samt Rückfrage bei laufendem Spielstand.
   if (c.match_id) {
-    kachelAktionen.push(`<button type="button" data-free="${c.court_id}"
-        title="Das Spiel zurück in die Warteliste, das Feld wird frei">↩ Vom Feld nehmen</button>`);
+    feldEintraege.push(`<button type="button" data-free="${c.court_id}"
+        title="Das Spiel zurück in die Warteliste, das Feld wird frei">${mi("zurueck")}Vom Feld nehmen</button>`);
   }
   // Feld sperren/freigeben (Spec `tl-web-felder-sperren`).
   //
@@ -4206,26 +4314,29 @@ function courtCard(c, cellStyle) {
   // nichts sagt, ist schlimmer als keiner (E13).
   if (state.can_lock_courts) {
     if (c.locked) {
-      kachelAktionen.push(`<button type="button" data-unlock="${c.court_id}"
-          title="Feld wieder für die Vergabe freigeben">🔓 Feld freigeben</button>`);
+      feldEintraege.push(`<button type="button" data-unlock="${c.court_id}"
+          title="Feld wieder für die Vergabe freigeben">${mi("schloss-auf")}Feld freigeben</button>`);
     } else {
       // Läuft ein Spiel, greift die Sperre erst danach — der Text sagt das,
       // statt etwas zu versprechen, das nicht eintritt.
       const txt = c.match_id ? "Feld nach diesem Spiel sperren" : "Feld sperren";
-      kachelAktionen.push(`<button type="button" data-lock="${c.court_id}"
-          title="Keine automatische Vergabe mehr auf dieses Feld">🔒 ${txt}</button>`);
+      feldEintraege.push(`<button type="button" data-lock="${c.court_id}"
+          title="Keine automatische Vergabe mehr auf dieses Feld">${mi("schloss")}${txt}</button>`);
     }
   }
+  // Der Feldname steht in der ersten Überschrift — das Menü hängt am
+  // Ansichtsfenster, und beim Rollen soll erkennbar bleiben, wessen es ist.
+  const kachelGruppen = [["Ansagen", ansagen], ["Spiel", spielEintraege], ["Feld", feldEintraege]]
+    .filter(([, eintraege]) => eintraege.length)
+    .map(([titel, eintraege], i) => `<div class="kebab-group">
+        <span class="kebab-label">${i === 0 ? `${esc(c.court)} · ` : ""}${titel}</span>
+        <div class="kebab-actions">${eintraege.join("")}</div>
+      </div>`);
   const kebabOffen = openKebabCourtId === c.court_id;
-  const kebab = kachelAktionen.length
+  const kebab = kachelGruppen.length
     ? `<details class="kebab" data-kebab-court="${c.court_id}"${kebabOffen ? " open" : ""}>
          <summary aria-label="Weitere Aktionen" title="Weitere Aktionen">⋯</summary>
-         <div class="kebab-menu">
-           <div class="kebab-group">
-             <span class="kebab-label">${esc(c.court)}</span>
-             <div class="kebab-actions">${kachelAktionen.join("")}</div>
-           </div>
-         </div>
+         <div class="kebab-menu">${kachelGruppen.join("")}</div>
        </details>`
     : "";
 
@@ -4290,6 +4401,25 @@ function pauseBadge(p) {
  *  `innerHTML`-Ersetzen. */
 let openKebabCourtId = null;
 
+/** Sinnbild eines Menü-Eintrags aus dem Vorrat `#mi-vorrat`. */
+function mi(name) {
+  return `<svg class="mi" aria-hidden="true"><use href="#mi-${name}"/></svg>`;
+}
+
+/** Wie weit das offene Menü in sich gerollt ist. Bleibt ein Menü über
+ *  einen Tipp hinweg offen (Meetingpoint), ersetzt das Neuzeichnen seine
+ *  Zeile samt Menü — ohne diesen Merker spränge ein langes Menü dabei an
+ *  den Anfang zurück, weg vom Finger. */
+let kebabRoll = 0;
+
+/** Ein Menü ist eben von Hand aufgegangen: Roll-Stand vergessen, alle
+ *  anderen schließen, platzieren. Eine Stelle für alle drei Menü-Arten. */
+function kebabGeoeffnet(det) {
+  kebabRoll = 0;
+  schliesseAndereKebabs(det);
+  platziereKebabMenue(det);
+}
+
 /**
  * Setzt ein ⋯-Menü (Feldkachel ODER Spielzeile) ans Ansichtsfenster (siehe
  * die CSS-Begründung bei `.kebab-menu`): unter den Auslöser, wenn darunter
@@ -4317,6 +4447,7 @@ function platziereKebabMenue(det) {
   );
   menu.style.top = `${top}px`;
   menu.style.left = `${left}px`;
+  if (menu.scrollTop !== kebabRoll) menu.scrollTop = kebabRoll;
 }
 
 /** Offene ⋯-Menüs folgen ihrem Auslöser: Sie hängen am Ansichtsfenster
@@ -4333,7 +4464,7 @@ function platziereKebabMenue(det) {
  *  Funktion für beide Verdrahtungen (Review 17.08.2026). */
 function schliesseAndereKebabs(det) {
   document.querySelectorAll(".kebab[open]").forEach((other) => {
-    if (other !== det) other.open = false;
+    if (other !== det) schliesseKebab(other);
   });
 }
 
@@ -4377,8 +4508,19 @@ function schliesseKebab(det) {
  *  (Review-Fund 17.08.2026 an der Feldkachel). Die Knopf-Handler lesen
  *  ihre Daten aus `dataset`/`state`, nicht aus dem offenen Menü. */
 document.addEventListener("click", (ev) => {
-  const btn = ev.target instanceof Element ? ev.target.closest(".kebab-menu button") : null;
+  const ziel = ev.target instanceof Element ? ev.target : null;
+  // Ein Klick NEBEN das Menü schließt es (Wunsch 16.11.2026) — irgendwo auf
+  // der Seite, nicht nur auf ⋮. Der Klick selbst wirkt normal weiter: Wer
+  // bei offenem Menü ein anderes Spiel antippt, meint dieses Spiel. Der
+  // Tipp auf ein ANDERES ⋮ zählt genauso (`innen` ist dann jenes Menü).
+  const innen = ziel ? ziel.closest("details.kebab") : null;
+  schliesseAndereKebabs(innen);
+  const btn = ziel ? ziel.closest(".kebab-menu button") : null;
   if (!btn || btn.disabled) return;
+  // Ausnahme Meetingpoint (`data-bleibt-offen`): Dort tippt man mehrere
+  // Personen nacheinander an; das Menü bleibt stehen, bis man daneben
+  // tippt, Escape drückt oder eine andere Aktion wählt.
+  if (btn.closest("[data-bleibt-offen]")) return;
   schliesseKebab(btn.closest("details.kebab"));
 }, true);
 document.addEventListener("change", (ev) => {
@@ -4399,7 +4541,12 @@ function folgeOffenenKebabs() {
     platziereKebabMenue(det);
   });
 }
-document.addEventListener("scroll", () => {
+document.addEventListener("scroll", (ev) => {
+  // Rollt das MENÜ selbst (nicht sein Panel), den Stand merken — siehe
+  // `kebabRoll`.
+  if (ev.target instanceof Element && ev.target.classList.contains("kebab-menu")) {
+    kebabRoll = ev.target.scrollTop;
+  }
   if (kebabFolgePending) return;
   kebabFolgePending = true;
   requestAnimationFrame(() => {
@@ -4502,8 +4649,7 @@ function wireCourts(box) {
     det.addEventListener("toggle", () => {
       if (det.open) {
         openKebabCourtId = courtId;
-        schliesseAndereKebabs(det);
-        platziereKebabMenue(det);
+        kebabGeoeffnet(det);
       } else if (openKebabCourtId === courtId) {
         openKebabCourtId = null;
       }
@@ -5360,7 +5506,7 @@ function queueRow(m, topMatchId) {
     const prepTitel = m.prep_call ? "Aufruf zurücknehmen" : "In Vorbereitung rufen";
     zeilenAktionen.push(`<button type="button" data-prep="${m.match_id}"
       aria-pressed="${m.prep_call ? "true" : "false"}"
-      title="${prepTitel}">📣 ${prepTitel}</button>`);
+      title="${prepTitel}">${mi("ansage")}${prepTitel}</button>`);
   }
   // „An den Anfang der Spielliste" (ADR 0026): der tastatur- und
   // touchfreundliche Weg für den häufigsten Zug, ohne über eine womöglich
@@ -5384,17 +5530,21 @@ function queueRow(m, topMatchId) {
   // Feld kommt). Nur die Einträge, die etwas bewirken.
   if (rufSortierbar) {
     const liste = visibleQueue();
-    const eintrag = (art, text) => rufZielKnopf(liste, m.match_id, art) === undefined ? ""
-      : `<button type="button" data-called-move="${art}" data-match-id="${m.match_id}" title="${text}">${text}</button>`;
-    zeilenAktionen.push(
-      eintrag("top", "⤒ An den Anfang der Gerufenen"),
-      eintrag("up", "↑ Eine Position nach oben"),
-      eintrag("down", "↓ Eine Position nach unten"));
+    // Drei Richtungen in EINER Zeile (Sinnbild-Knöpfe) statt drei Einträgen.
+    const eintrag = (art, bild, text) => rufZielKnopf(liste, m.match_id, art) === undefined ? ""
+      : `<button type="button" data-called-move="${art}" data-match-id="${m.match_id}"
+           title="${text}" aria-label="${text}">${mi(bild)}</button>`;
+    const richtungen = eintrag("top", "anfang", "An den Anfang der Gerufenen")
+      + eintrag("up", "hoch", "Eine Position nach oben")
+      + eintrag("down", "runter", "Eine Position nach unten");
+    if (richtungen) {
+      zeilenAktionen.push(`<div class="kebab-icons"><span>Reihenfolge der Gerufenen</span>${richtungen}</div>`);
+    }
   }
   const kannHoch = sortierbar && topMatchId != null && topMatchId !== m.match_id;
   if (kannHoch) {
     zeilenAktionen.push(`<button type="button" data-queue-top="${m.match_id}"
-      title="An den Anfang der Spielliste schieben">↑ An den Anfang der Spielliste</button>`);
+      title="An den Anfang der Spielliste schieben">${mi("anfang")}An den Anfang der Spielliste</button>`);
   }
   // Schiedsrichter schon in der Warteliste einteilen (Spec
   // `tl-warteliste-schiedsrichter`, AK 1) — auch an offenen Paarungen: Wer
@@ -5402,9 +5552,10 @@ function queueRow(m, topMatchId) {
   // Nur wenn der Turnier-PC die Einteilung wartender Spiele kennt; ein
   // älterer Host lehnte `courtId: 0` nicht ab, sondern hielte sie für eine
   // Kachel-Einteilung ohne Feld (dieselbe Versions-Schere wie beim Sperren).
+  const spielEintraege = [];
   if (state.officials_managed && state.can_assign_waiting_officials) {
-    zeilenAktionen.push(`<button type="button" data-queue-off="${m.match_id}"
-      title="Schiedsrichter und Aufschlagrichter für dieses Spiel festlegen">Schiedsrichter einteilen</button>`);
+    spielEintraege.push(`<button type="button" data-queue-off="${m.match_id}"
+      title="Schiedsrichter und Aufschlagrichter für dieses Spiel festlegen">${mi("person")}Schiedsrichter einteilen</button>`);
   }
   // „Ergebnis eintragen" für ein Spiel, das nie auf einem Feld stand
   // (Zettel, mündliche Ansage). Öffnet exakt denselben Dialog wie das
@@ -5413,36 +5564,75 @@ function queueRow(m, topMatchId) {
   // Beides setzt eine Paarung voraus: Ein Ergebnis ohne Teilnehmer gibt es
   // nicht, und ein Vorabzettel trüge zwei leere Namensfelder.
   if (!offen) {
-    zeilenAktionen.push(`<button type="button" data-queue-result="${m.match_id}"
-      title="Endstand ohne Feld nachtragen">✎ Ergebnis eintragen</button>`);
+    spielEintraege.push(`<button type="button" data-queue-result="${m.match_id}"
+      title="Endstand ohne Feld nachtragen">${mi("stift")}Ergebnis eintragen</button>`);
   }
   // Vorabzettel (Spec schiedsrichterzettel-autodruck): der Bogen zum
   // Mitgeben, bevor das Spiel läuft. Anders als beim Archivzettel der
   // Beendet-Liste gibt es hier KEINE `has_timeline`-Schranke — dass noch
   // nichts aufgezeichnet ist, ist ja gerade der Grund für das leere Blatt.
   if (!offen) {
-    zeilenAktionen.push(`<button type="button" data-queue-zettel="${m.match_id}"
-      title="Leeren Schiedsrichterzettel drucken">🖨 Zettel (leer)</button>`);
+    spielEintraege.push(`<button type="button" data-queue-zettel="${m.match_id}"
+      title="Leeren Schiedsrichterzettel drucken">${mi("druck")}Zettel (leer) drucken</button>`);
   }
+  // Reihenfolge der Gruppen (Überarbeitung 16.11.2026) nach Handgriff-
+  // Häufigkeit: Aufruf + Reihenfolge ganz oben (ohne Überschrift — die
+  // beiden häufigsten Tipps), dann an einem gerufenen Spiel Meetingpoint und
+  // Nachruf, dann das Spiel selbst, die Feldvergabe und zuletzt die Farbe.
   if (zeilenAktionen.length) {
     kebabGroups.push(`<div class="kebab-group">
-        <span class="kebab-label">Spiel</span>
         <div class="kebab-actions">${zeilenAktionen.join("")}</div>
       </div>`);
   }
-  // Auto-Vergabe-Ausnahme: seltener gebraucht als der Vorbereitungs-Ruf,
-  // deshalb unter ihm in einer eigenen Gruppe.
+  // Meetingpoint: Plätze von Hand ein-/auschecken (Korrektur, B6) und
+  // „ohne Schiedsrichter" bei SR-Mangel.
+  if (m.prep_call && m.meetingpoint) kebabGroups.push(mpKebabHtml(m));
+  // Nachruf, wenn jemand nicht erscheint — seltener gebraucht als der
+  // Erst-Ruf, deshalb hier statt auf der Zeile. Getrennt nach Partei, weil
+  // in der Regel nur eine fehlt.
+  if (m.prep_call) {
+    // `data-made` trägt den Stand in die Vorgangskennung: Ein Doppeltipp vor
+    // dem nächsten Neuzeichnen zählt als Wiederholung, ein bewusster zweiter
+    // Nachruf danach geht durch.
+    const stand = m.prep_call.recalls || 0;
+    // „Erste Ansage wiederholen": dieselbe „In Vorbereitung …"-Ansage noch
+    // einmal, ohne Nachruf-Stufe — nur, wenn der Turnier-PC die Aktion kennt.
+    const wiederholen = state.can_repeat_prep_call
+      ? `<button type="button" data-repeat-call="${m.match_id}" title="Die Ansage „In Vorbereitung …“ noch einmal abspielen (zählt nicht als Nachruf)">${mi("nochmal")}Erste Ansage wiederholen</button>`
+      : "";
+    kebabGroups.push(`<div class="kebab-group">
+        <span class="kebab-label">Nachruf</span>
+        <div class="recall kebab-actions">
+          <button type="button" data-recall="${m.match_id}" data-side="both" data-made="${stand}"
+            title="Beide Parteien nachrufen">${mi("ansage")}Nachruf an beide Parteien</button>
+          <div class="kebab-nur"><span>nur:</span>
+            <button type="button" data-recall="${m.match_id}" data-side="team1" data-made="${stand}"
+              title="Nur diese Partei nachrufen">${esc(shortSide(m.team1))}</button>
+            <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}"
+              title="Nur diese Partei nachrufen">${esc(shortSide(m.team2))}</button>
+          </div>
+          ${wiederholen}
+        </div>
+      </div>`);
+  }
+  if (spielEintraege.length) {
+    kebabGroups.push(`<div class="kebab-group">
+        <span class="kebab-label">Spiel</span>
+        <div class="kebab-actions">${spielEintraege.join("")}</div>
+      </div>`);
+  }
+  // Feldvergabe: Auto-Vergabe-Ausnahme, Spielort und Wunschfeld — drei
+  // Stellschrauben derselben Frage („wo und wann kommt das Spiel aufs
+  // Feld?"), seit dem 16.11.2026 in EINER Gruppe statt in dreien.
   const exclTitel = m.excluded_from_auto_assign
     ? "Wieder in die automatische Feldvergabe aufnehmen"
     : "Von der automatischen Feldvergabe ausnehmen";
-  kebabGroups.push(`<div class="kebab-group">
-      <span class="kebab-label">Automatische Feldvergabe</span>
-      <div class="kebab-row">
+  const vergabe = [`<div class="kebab-actions">
         <button type="button" class="auto-excl" data-auto-excl="${m.match_id}"
           aria-pressed="${m.excluded_from_auto_assign ? "true" : "false"}"
-          title="${exclTitel}">⏸ ${m.excluded_from_auto_assign ? "Wieder aufnehmen" : "Ausnehmen"}</button>
-      </div>
-    </div>`);
+          title="${exclTitel}">${mi("pause")}${m.excluded_from_auto_assign
+            ? "Ausgenommen — wieder aufnehmen" : "Von der Automatik ausnehmen"}</button>
+      </div>`];
   // Spielort setzen, ohne ein Feld zu belegen. BTP liefert `LocationID` nur,
   // wenn das Turnier die Spalte selbst pflegt, und nimmt Rückschreibungen
   // nicht an (SENDUPDATE mit LocationID: Result=1, Wert verworfen, gemessen
@@ -5452,20 +5642,16 @@ function queueRow(m, topMatchId) {
   // nicht ohnehin festlegt (dann wäre die Wahl folgenlos) — ohnehin die
   // Ausnahme, deshalb im Kebab statt auf der Zeile.
   if (state.multi_hall && m.hall_source !== "rule") {
-    // Voller Hallenname statt Kürzel: Im Kebab-Menü ist Platz, den die Zeile
-    // selbst nicht mehr hergibt.
     const optionen = ['<option value="" title="kein fester Spielort">–</option>']
       .concat(state.halls.map((h) =>
         `<option value="${esc(h.name)}"${h.name === m.hall ? " selected" : ""}>${esc(h.name)}</option>`));
     // Grenze ehrlich benannt: Der Wähler wirkt in bts-light, Vergabe und
     // Liveticker, aber BTP verwirft den Spielort still (gemessen 10.08.2026).
-    kebabGroups.push(`<div class="kebab-group">
-        <span class="kebab-label">${hallMarke(m.hall)}Spielort (BTP übernimmt ihn nicht)</span>
-        <div class="kebab-row">
-          <select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
-            data-hall-for="${m.match_id}" aria-label="Spielort">${optionen.join("")}</select>
-        </div>
-      </div>`);
+    vergabe.push(`<label class="kebab-feld" title="Wirkt in bts-light, Vergabe und Liveticker — BTP übernimmt den Spielort nicht">
+        ${mi("ort")}<span>${hallMarke(m.hall)}Spielort<small>BTP übernimmt ihn nicht</small></span>
+        <select class="hallwahl${m.hall_source === "manual" ? " gesetzt" : ""}"
+          data-hall-for="${m.match_id}" aria-label="Spielort">${optionen.join("")}</select>
+      </label>`);
   }
   // Wunschfeld (Spec `tl-wunschfeld`): Die Automatik legt dieses Spiel dann
   // nur auf dieses Feld und hält es dafür frei, sobald das Spiel spielbereit
@@ -5483,14 +5669,16 @@ function queueRow(m, topMatchId) {
       .concat(passend.map((c) =>
         `<option value="${c.court_id}"${c.court_id === m.wish_court ? " selected" : ""}>`
         + `${esc(c.court)}${c.locked ? " (gesperrt)" : ""}</option>`));
-    kebabGroups.push(`<div class="kebab-group">
-        <span class="kebab-label">Wunschfeld (die Automatik hält es frei)</span>
-        <div class="kebab-row">
-          <select class="hallwahl${m.wish_court ? " gesetzt" : ""}"
-            data-wish-for="${m.match_id}" aria-label="Wunschfeld">${optionen.join("")}</select>
-        </div>
-      </div>`);
+    vergabe.push(`<label class="kebab-feld" title="Die Automatik legt das Spiel nur auf dieses Feld und hält es dafür frei">
+        ${mi("wunsch")}<span>Wunschfeld<small>die Automatik hält es frei</small></span>
+        <select class="hallwahl${m.wish_court ? " gesetzt" : ""}"
+          data-wish-for="${m.match_id}" aria-label="Wunschfeld">${optionen.join("")}</select>
+      </label>`);
   }
+  kebabGroups.push(`<div class="kebab-group">
+      <span class="kebab-label">Feldvergabe</span>
+      ${vergabe.join("")}
+    </div>`);
   // Zeilenfarbe (Spec `tl-zeilenfarbe`): BTPs „Hervorheben" — „keine" plus
   // die sechs Menüfarben, in derselben Reihenfolge und denselben Tönen wie
   // im Planer. Ein Tipp schreibt nach BTP; BTP bleibt die Wahrheit.
@@ -5500,38 +5688,12 @@ function queueRow(m, topMatchId) {
   // Spiel gälte als markiert (dieselbe Versions-Schere wie beim Wunschfeld).
   if (state.can_set_highlight) {
     kebabGroups.push(`<div class="kebab-group">
-        <span class="kebab-label">Hervorheben (wie in BTP)</span>
+        <span class="kebab-label">Hervorheben <small>(wie in BTP)</small></span>
         <div class="hl-pick" role="radiogroup" aria-label="Zeilenfarbe">
           ${HL_FARBEN.map((f, i) => `<button type="button" class="hl-${i}"
               data-hl-for="${m.match_id}" data-hl="${i}" role="radio"
               aria-checked="${(m.highlight || 0) === i ? "true" : "false"}"
               title="${f.name}" aria-label="${f.name}">${i === 0 ? "keine" : ""}</button>`).join("")}
-        </div>
-      </div>`);
-  }
-  // Meetingpoint: Plätze von Hand ein-/auschecken (Korrektur, B6) und
-  // „ohne Schiedsrichter" bei SR-Mangel.
-  if (m.prep_call && m.meetingpoint) kebabGroups.push(mpKebabHtml(m));
-  // Nachruf, wenn jemand nicht erscheint — seltener gebraucht als der
-  // Erst-Ruf, deshalb hier statt auf der Zeile. Getrennt nach Partei, weil
-  // in der Regel nur eine fehlt.
-  if (m.prep_call) {
-    // `data-made` trägt den Stand in die Vorgangskennung: Ein Doppeltipp vor
-    // dem nächsten Neuzeichnen zählt als Wiederholung, ein bewusster zweiter
-    // Nachruf danach geht durch.
-    const stand = m.prep_call.recalls || 0;
-    // „Erste Ansage wiederholen": dieselbe „In Vorbereitung …"-Ansage noch
-    // einmal, ohne Nachruf-Stufe — nur, wenn der Turnier-PC die Aktion kennt.
-    const wiederholen = state.can_repeat_prep_call
-      ? `<button type="button" data-repeat-call="${m.match_id}" title="Die Ansage „In Vorbereitung …“ noch einmal abspielen (zählt nicht als Nachruf)">Erste Ansage wiederholen</button>`
-      : "";
-    kebabGroups.push(`<div class="kebab-group">
-        <span class="kebab-label">Nachruf</span>
-        <div class="recall kebab-actions">
-          ${wiederholen}
-          <button type="button" data-recall="${m.match_id}" data-side="both" data-made="${stand}">beide Parteien</button>
-          <button type="button" data-recall="${m.match_id}" data-side="team1" data-made="${stand}">${esc(shortSide(m.team1))}</button>
-          <button type="button" data-recall="${m.match_id}" data-side="team2" data-made="${stand}">${esc(shortSide(m.team2))}</button>
         </div>
       </div>`);
   }
@@ -5595,28 +5757,31 @@ function mpName(team, pos) {
   return (team && team[pos]) || "";
 }
 
+/** Meetingpoint-Gruppe des ⋮-Menüs: je Person ein Umschalter, Partei 1
+ *  links, Partei 2 rechts. `data-bleibt-offen`: Diese Einträge schließen das
+ *  Menü nicht — wer fünf Leute nacheinander eincheckt, will es nicht fünfmal
+ *  öffnen (Wunsch 16.11.2026). */
 function mpKebabHtml(m) {
   const mp = m.meetingpoint;
   const knopf = (platz, name, da) => `<button type="button" data-mp-for="${m.match_id}"
       data-mp-platz='${esc(JSON.stringify(platz))}' data-mp-present="${da ? "0" : "1"}"
       aria-pressed="${da ? "true" : "false"}"
-      title="${da ? "Auschecken" : "Einchecken"}">${da ? "✓ " : "○ "}${esc(name)}</button>`;
-  const btns = [];
-  (mp.team1Present || []).forEach((da, i) =>
-    btns.push(knopf({ art: "spieler", seite: 1, pos: i }, mpName(m.team1, i), da)));
-  (mp.team2Present || []).forEach((da, i) =>
-    btns.push(knopf({ art: "spieler", seite: 2, pos: i }, mpName(m.team2, i), da)));
-  if (mp.srName) {
-    btns.push(knopf({ art: "sr" }, `${mp.srName} (SR${mp.srVorab ? ", vorläufig" : ""})`, mp.srPresent));
-  }
+      title="${esc(name)} — ${da ? "auschecken" : "einchecken"}"><span>${esc(name)}</span></button>`;
+  const seite = (present, team, nr) => `<div>${(present || []).map((da, i) =>
+    knopf({ art: "spieler", seite: nr, pos: i }, mpName(team, i), da)).join("")}</div>`;
+  const sr = mp.srName
+    ? `<div class="mp-breit">${knopf({ art: "sr" }, `${mp.srName} (SR${mp.srVorab ? ", vorläufig" : ""})`, mp.srPresent)}</div>`
+    : "";
   let ohne = "";
   if (mp.srNoetig && !mp.ohneSr) {
-    ohne = `<button type="button" data-mp-ohne-sr="${m.match_id}"
-        title="Diese Partie ohne Schiedsrichter spielen lassen — dann zählt für spielbereit nur die Anwesenheit der Spieler">Ohne Schiedsrichter</button>`;
+    ohne = `<div class="kebab-actions"><button type="button" data-mp-ohne-sr="${m.match_id}"
+        title="Diese Partie ohne Schiedsrichter spielen lassen — dann zählt für spielbereit nur die Anwesenheit der Spieler">${mi("person")}Ohne Schiedsrichter</button></div>`;
   }
-  return `<div class="kebab-group">
-      <span class="kebab-label">Meetingpoint (von Hand ein-/auschecken)</span>
-      <div class="kebab-actions">${btns.join("")}${ohne}</div>
+  const z = mpZaehlung(mp);
+  return `<div class="kebab-group" data-bleibt-offen>
+      <span class="kebab-label">Meetingpoint · ${z.da}/${z.gesamt} da <small>— antippen checkt ein/aus</small></span>
+      <div class="mp-pick">${seite(mp.team1Present, m.team1, 1)}${seite(mp.team2Present, m.team2, 2)}${sr}</div>
+      ${ohne}
     </div>`;
 }
 
@@ -5664,8 +5829,7 @@ function wireQueue(box) {
     det.addEventListener("toggle", () => {
       if (det.open) {
         openKebabMatchId = matchId;
-        schliesseAndereKebabs(det);
-        platziereKebabMenue(det);
+        kebabGeoeffnet(det);
       } else if (openKebabMatchId === matchId) {
         openKebabMatchId = null;
       }
@@ -9188,19 +9352,19 @@ function finRow(f) {
     // Aufzeichnung (Papier-Ergebnis) gibt es beides nicht (has_timeline).
     const eintraege = [
       `<button type="button" data-fin-fix="${f.match_id}"
-         title="Endstand korrigieren">✎ Ergebnis korrigieren</button>`,
+         title="Endstand korrigieren">${mi("stift")}Ergebnis korrigieren</button>`,
     ];
     if (f.has_timeline) {
       eintraege.push(`<button type="button" data-fin-graph="${f.match_id}"
-         title="Punktverlauf anzeigen">📈 Punktverlauf</button>`);
+         title="Punktverlauf anzeigen">${mi("verlauf")}Punktverlauf</button>`);
       eintraege.push(`<button type="button" data-fin-zettel="${f.match_id}"
-         title="Schiedsrichterzettel drucken">🖨 Zettel</button>`);
+         title="Schiedsrichterzettel drucken">${mi("druck")}Zettel drucken</button>`);
     }
     const kebab = `<details class="kebab" data-kebab-fin="${f.match_id}"${
       openKebabFinishedId === f.match_id ? " open" : ""
     }>
         <summary aria-label="Weitere Aktionen" title="Weitere Aktionen">⋮</summary>
-        <div class="kebab-menu"><div class="kebab-actions">${eintraege.join("")}</div></div>
+        <div class="kebab-menu"><div class="kebab-group"><div class="kebab-actions">${eintraege.join("")}</div></div></div>
       </details>`;
     // Ist-Zeiten (Spec spielzeiten-prognose): Brutto = Feldzuweisung→Ende,
     // Netto = 1. Punkt→Ende. Nur gemessene Spiele tragen sie.
@@ -9255,8 +9419,7 @@ function wireFinRow(box) {
     det.addEventListener("toggle", () => {
       if (det.open) {
         openKebabFinishedId = matchId;
-        schliesseAndereKebabs(det);
-        platziereKebabMenue(det);
+        kebabGeoeffnet(det);
       } else if (openKebabFinishedId === matchId) {
         openKebabFinishedId = null;
       }
@@ -10171,7 +10334,7 @@ function start() {
   });
   // Abbrechen per Tastatur — auf dem Desktop der schnellste Weg zurück.
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") { cancelPick(); hideToast(); closeTimeline(); closeZettel(); closeProfilesOverlay(); schliesseSuche(); }
+    if (ev.key === "Escape") { schliesseAndereKebabs(null); cancelPick(); hideToast(); closeTimeline(); closeZettel(); closeProfilesOverlay(); schliesseSuche(); }
   });
   // Anzeige-Einstellungen (Spielnummer/Nationen/Vereine/Disziplin/Runde/
   // Gruppe) sind seit dem Panel-System Teil des aktiven Profils

@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.427
+
+- **Aufgeräumte ⋮-Menüs im TL-Web.** Die Menüs an Feldkachel, Wartelisten-
+  Zeile und beendetem Spiel waren mit jedem Feature gewachsen. Jetzt sind sie
+  in Gruppen gegliedert (Kachel: Ansagen · Spiel · Feld; Warteliste: Aufruf
+  und Reihenfolge · Meetingpoint · Nachruf · Spiel · Feldvergabe ·
+  Hervorheben), die Einträge sind flach, kleiner gesetzt und tragen
+  einheitliche Sinnbilder. Aufruf und Nachruf „nur für eine Partei" sowie die
+  drei Richtungen der Gerufenen-Reihenfolge stehen je in einer Zeile statt in
+  dreien. Mit der Maus sind die Einträge dichter, mit dem Finger bleibt die
+  gewohnte Trefffläche.
+- **Menü schließt beim Tipp daneben.** Ein Tipp irgendwo auf der Seite (oder
+  Escape) schließt ein offenes ⋮-Menü — bisher ging das nur über ⋮ selbst.
+- **Meetingpoint: mehrere Personen in einem Zug einchecken.** Die
+  Personen-Umschalter im ⋮-Menü lassen das Menü offen; es muss nicht mehr für
+  jede Person neu geöffnet werden.
+
 ## v0.9.426
 
 - **„Turnierleitung rufen" kommt im TL-Web an.** Drückt jemand am Zähl-Tablet
