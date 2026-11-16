@@ -46,6 +46,7 @@ import type {
   TpUploadStatus,
   WalkoverProposal,
   WalkoverResult,
+  WiederanlaufMeldung,
   WifiStatus,
   WinnersView,
   MpPlatz,
@@ -190,10 +191,11 @@ export const seitenZurueck = (): Promise<void> => invoke("seiten_zurueck");
 /** Die einmalige Meldung im Update-Banner schließen. */
 export const updateMeldungWeg = (): Promise<void> => invoke("update_meldung_weg");
 
-/** Wiederanlauf-Marker abholen (einmalig beim Start): `true` = die
- *  Übertragung lief vor dem Update und soll jetzt von selbst starten. */
-export const takeUpdateResume = (): Promise<boolean> =>
-  invoke("take_update_resume");
+/** Ergebnis des Wiederanlaufs nach einem Update abholen (einmalig beim
+ *  Start). Den Start selbst hat der Rust-Kern schon erledigt; hier steht
+ *  nur, ob er lief und — falls nicht — warum. */
+export const takeWiederanlauf = (): Promise<WiederanlaufMeldung> =>
+  invoke("take_wiederanlauf");
 
 export const getStatus = (): Promise<SyncStatus> => invoke("get_status");
 

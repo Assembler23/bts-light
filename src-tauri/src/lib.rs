@@ -147,7 +147,7 @@ pub fn run() {
             commands::seiten_uebernehmen,
             commands::seiten_zurueck,
             commands::update_meldung_weg,
-            commands::take_update_resume,
+            commands::take_wiederanlauf,
             commands::get_status,
             commands::wifi_status,
             commands::internet_status,
@@ -266,6 +266,9 @@ pub fn run() {
                 Err(e) => tracing::warn!("Seiten-Pakete aus: kein App-Datenverzeichnis ({e})"),
             }
             setup_tray(app.handle())?;
+            // Zuletzt: Lief die Übertragung vor einem Update, läuft sie
+            // jetzt wieder an — ohne auf das Fenster zu warten.
+            commands::wiederanlauf_im_kern(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {

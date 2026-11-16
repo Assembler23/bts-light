@@ -497,6 +497,19 @@ impl RufWacht {
     }
 }
 
+/// Lage des eingebetteten LAN-Servers.
+#[derive(Debug, Default)]
+struct LanLage {
+    /// Zählt Starts und Stopps. Ein Server-Task meldet seinen Fehler mit der
+    /// Nummer, unter der er gestartet wurde — kommt die Meldung erst nach
+    /// einem Stopp oder Neustart an, gilt sie nicht mehr.
+    lauf: u64,
+    /// Warum der Port nicht offen ist (für die Meldeleiste).
+    fehler: Option<String>,
+    /// Anhaltezeit der Vorversion, solange die Lücke noch nicht gemessen ist.
+    wieder_offen_seit_stop_ms: Option<u64>,
+}
+
 /// Geteilt zwischen Sync-Loop und Tablet-Server (`Arc<TabletState>`).
 #[derive(Default)]
 pub struct TabletState {
@@ -692,6 +705,9 @@ pub struct TabletState {
     /// Weist der Relay diesen PC ab, weil ein anderer dasselbe Turnier
     /// hält? Gesetzt vom Relay-Client.
     cloud_lage: std::sync::Mutex<crate::tablet::ws_verbindung::CloudLage>,
+    /// Lage des LAN-Servers (Spec hotfix-ohne-neustart, PR 5): Ist der
+    /// Tablet-Port offen, oder ließ er sich nicht binden?
+    lan_lage: std::sync::Mutex<LanLage>,
     /// Erfolgte Aufrufe je Feld:
     /// `court_id → (match_id, Stufe, bereits gerufene Parteien)`.
     ///
@@ -4051,6 +4067,64 @@ impl TabletState {
     /// Ändert die Lage der Cloud-Verbindung (nur der Relay-Client).
     pub fn cloud_lage_aendern(&self, f: impl FnOnce(&mut crate::tablet::ws_verbindung::CloudLage)) {
         f(&mut self.cloud_lage.lock().unwrap());
+    }
+
+    /// Vor dem Start des LAN-Servers: alte Lage vergessen. `stop_ms` ist der
+    /// Zeitpunkt, zu dem die Vorversion vor einem Update anhielt — dann wird
+    /// beim Binden die Lücke gemessen. Rückgabe: die Nummer dieses Laufs für
+    /// [`Self::lan_fehler`].
+    pub fn lan_start(&self, stop_ms: Option<u64>) -> u64 {
+        let mut lage = self.lan_lage.lock().unwrap();
+        *lage = LanLage {
+            lauf: lage.lauf + 1,
+            fehler: None,
+            wieder_offen_seit_stop_ms: stop_ms,
+        };
+        lage.lauf
+    }
+
+    /// Der Tablet-Port ist offen. Nach einem Update loggt das die Lücke —
+    /// genau einmal — und gibt sie zurück.
+    pub fn lan_gebunden(&self, jetzt_ms: u64) -> Option<u64> {
+        let mut lage = self.lan_lage.lock().unwrap();
+        lage.fehler = None;
+        let luecke = lage
+            .wieder_offen_seit_stop_ms
+            .take()
+            .map(|stop| crate::update::luecke_ms(stop, jetzt_ms));
+        if let Some(ms) = luecke {
+            tracing::info!(
+                "Wiederanlauf nach Update: Tablet-Port wieder offen, Lücke {ms} ms (Anhalten der Vorversion → Port offen)"
+            );
+        }
+        luecke
+    }
+
+    /// Der Tablet-Port ließ sich nicht binden oder der Server endete. `lauf`
+    /// ist die Nummer aus [`Self::lan_start`]: Die Meldung eines Tasks, der
+    /// inzwischen gestoppt oder abgelöst wurde, wird verworfen — sonst
+    /// stünde nach „Stoppen" ein roter Balken über einer stehenden App.
+    pub fn lan_fehler(&self, lauf: u64, grund: &str) {
+        let mut lage = self.lan_lage.lock().unwrap();
+        if lage.lauf == lauf {
+            lage.fehler = Some(grund.to_string());
+        }
+    }
+
+    /// Die Übertragung wurde gestoppt: Es gibt nichts mehr zu melden.
+    pub fn lan_gestoppt(&self) {
+        let mut lage = self.lan_lage.lock().unwrap();
+        *lage = LanLage {
+            lauf: lage.lauf + 1,
+            ..LanLage::default()
+        };
+    }
+
+    /// Hinweis fürs Dashboard, wenn der Tablet-Server nicht läuft, obwohl
+    /// die Übertragung es soll — sonst sähe man das nur im Log, und die
+    /// Tablets im Hallennetz blieben still ohne Verbindung.
+    pub fn lan_hinweis(&self) -> Option<String> {
+        self.lan_lage.lock().unwrap().fehler.clone()
     }
 
     /// Hinweis fürs Dashboard, wenn ein anderer PC dieses Turnier in der
@@ -9887,5 +9961,50 @@ pub(crate) mod tests {
             s.overview_build_ns > 0,
             "die Bau-Dauer wird vermerkt (Grundlage des p95)"
         );
+    }
+
+    /// Lage des LAN-Servers (Spec hotfix-ohne-neustart, PR 5).
+    #[test]
+    fn lan_lage_misst_die_luecke_genau_einmal_und_meldet_fehler() {
+        let s = TabletState::default();
+        assert_eq!(s.lan_hinweis(), None);
+
+        // Normaler Start ohne Update: keine Messung.
+        s.lan_start(None);
+        assert_eq!(s.lan_gebunden(1_000), None);
+
+        // Wiederanlauf nach Update: Anhalten bei 10 000, Port offen bei 12 400.
+        let lauf = s.lan_start(Some(10_000));
+        assert_eq!(s.lan_gebunden(12_400), Some(2_400));
+        // Ein späteres Binden misst nicht noch einmal.
+        assert_eq!(s.lan_gebunden(99_000), None);
+
+        // Der Port ließ sich nicht öffnen: Das steht in der Meldeleiste …
+        s.lan_fehler(lauf, "Port belegt");
+        assert_eq!(s.lan_hinweis().as_deref(), Some("Port belegt"));
+        // … bis er offen ist oder die Übertragung gestoppt wird.
+        s.lan_gebunden(1);
+        assert_eq!(s.lan_hinweis(), None);
+        s.lan_fehler(lauf, "Port belegt");
+        s.lan_gestoppt();
+        assert_eq!(s.lan_hinweis(), None);
+    }
+
+    /// Ein abgebrochener Server-Task kann seinen Fehler noch melden, nachdem
+    /// schon gestoppt oder neu gestartet wurde. Diese Meldung gilt nicht.
+    #[test]
+    fn lan_fehler_eines_abgeloesten_laufs_wird_verworfen() {
+        let s = TabletState::default();
+        let alt = s.lan_start(None);
+        s.lan_gestoppt();
+        s.lan_fehler(alt, "zu spät");
+        assert_eq!(s.lan_hinweis(), None, "nach dem Stoppen kein roter Balken");
+
+        let neu = s.lan_start(None);
+        assert_ne!(alt, neu);
+        s.lan_fehler(alt, "vom alten Task");
+        assert_eq!(s.lan_hinweis(), None, "der neue Lauf ist davon unberührt");
+        s.lan_fehler(neu, "wirklich belegt");
+        assert_eq!(s.lan_hinweis().as_deref(), Some("wirklich belegt"));
     }
 }
