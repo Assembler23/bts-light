@@ -11,14 +11,16 @@
 // tl.html trägt eine Inline-Kopie (kein Build-Schritt);
 // `scripts/test-badhub-links.mjs` vergleicht ihr Verhalten mit diesem Modul.
 
-/** Basis der Links: Wert des Hosts, sonst der bisherige Weg — im Hallennetz
- *  (`praefix` leer) das Produktivsystem, hinter dem Cloud-Relay der Host, von
- *  dem die Seite kommt (der Relay liegt auf badhub.de bzw. test.badhub.de).
- *  Nur `http(s)://host[:port]` wird übernommen. */
+/** Basis der Links. Hinter dem Cloud-Relay (`praefix` nicht leer) immer der
+ *  Host, von dem die Seite kommt — der Relay liegt auf demselben badhub wie
+ *  der Liveticker (badhub.de bzw. test.badhub.de), und ein Turnier-PC soll
+ *  die Links einer badhub-Seite nicht auf einen fremden Host lenken können
+ *  (Security-Review 17.11.2026). Im Hallennetz der Wert des Hosts, nur als
+ *  `http(s)://host[:port]`; fehlt er (älterer Host), das Produktivsystem. */
 export function badhubBasis(links, praefix, origin) {
+  if (praefix !== "") return origin;
   const b = links && typeof links.base === "string" ? links.base : "";
-  if (/^https?:\/\/[A-Za-z0-9.\-]+(:\d+)?$/.test(b)) return b;
-  return praefix === "" ? "https://badhub.de" : origin;
+  return /^https?:\/\/[A-Za-z0-9.\-]+(:\d+)?$/.test(b) ? b : "https://badhub.de";
 }
 
 /** Weiterleitung `…/checkin/<GUID>/turnier[?…]`, "" ohne gültige GUID.
@@ -52,8 +54,9 @@ export function konkurrenzLink(links, basis, matchId, konk) {
   return turnierSprung(links, basis, { spiel: id, konk });
 }
 
-/** Öffentlicher Liveticker aus dem Host-Zustand, nur als http(s)-Adresse. */
-export function livetickerLink(links) {
+/** Öffentlicher Liveticker aus dem Host-Zustand — nur auf derselben Basis
+ *  wie alle übrigen Links, sonst keiner. */
+export function livetickerLink(links, basis) {
   const u = links && typeof links.liveticker === "string" ? links.liveticker.trim() : "";
-  return /^https?:\/\/[^\s"'<>]+$/.test(u) ? u : "";
+  return /^https?:\/\/[^\s"'<>]+$/.test(u) && u.startsWith(basis + "/") ? u : "";
 }

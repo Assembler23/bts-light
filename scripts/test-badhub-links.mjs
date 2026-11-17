@@ -20,6 +20,7 @@ const TEST = { base: "https://test.badhub.de", guid: G, liveticker: `https://tes
 ok("Basis vom Host (Testsystem)", bl.badhubBasis(TEST, "", "http://192.168.1.2:8088"), "https://test.badhub.de");
 ok("älterer Host im Hallennetz: Produktiv", bl.badhubBasis(undefined, "", "http://192.168.1.2:8088"), "https://badhub.de");
 ok("älterer Host in der Cloud: Host der Seite", bl.badhubBasis({}, "/bts-relay", "https://test.badhub.de"), "https://test.badhub.de");
+ok("Cloud: Basis immer vom eigenen Host, nie vom Turnier-PC", bl.badhubBasis({ base: "https://boese.example" }, "/bts-relay", "https://badhub.de"), "https://badhub.de");
 ok("Basis mit Pfad/Schema-Unsinn verworfen", [
   bl.badhubBasis({ base: "javascript:alert(1)" }, "", "x"),
   bl.badhubBasis({ base: "https://badhub.de/" }, "", "x"),
@@ -40,8 +41,9 @@ ok("Konkurrenz-Name wird kodiert", bl.konkurrenzLink(TEST, B, 7, "HE U19 & mehr"
 ok("Konkurrenz ohne Name", bl.konkurrenzLink(TEST, B, 7, ""), `${B}/checkin/${G}/turnier?spiel=7`);
 ok("Konkurrenz ohne GUID / ohne ID: kein Link",
   [bl.konkurrenzLink({}, B, 7, "HE"), bl.konkurrenzLink(TEST, B, 0, "HE"), bl.konkurrenzLink(TEST, B, "x", "HE")], ["", "", ""]);
-ok("Liveticker", bl.livetickerLink(TEST), TEST.liveticker);
-ok("Liveticker nur http(s)", [bl.livetickerLink({ liveticker: "javascript:alert(1)" }), bl.livetickerLink({}), bl.livetickerLink(null)], ["", "", ""]);
+ok("Liveticker", bl.livetickerLink(TEST, B), TEST.liveticker);
+ok("Liveticker nur http(s)", [bl.livetickerLink({ liveticker: "javascript:alert(1)" }, B), bl.livetickerLink({}, B), bl.livetickerLink(null, B)], ["", "", ""]);
+ok("Liveticker nur auf derselben Basis", [bl.livetickerLink(TEST, "https://badhub.de"), bl.livetickerLink({ liveticker: "https://test.badhub.de.boese.example/live" }, B)], ["", ""]);
 
 // ── Inline-Kopie in tl.html ──
 function funktion(text, name) {
@@ -74,7 +76,7 @@ if (quellen.every(Boolean)) {
         case "turnierSprung": return f(l, B, { spiel: w, konk: w, player: w });
         case "spielerLink": return f(l, B, w);
         case "konkurrenzLink": return f(l, B, w, w);
-        default: return f(l);
+        default: return [f(l, B), f(l, "https://badhub.de")];
       }
     });
     ok(`Kopie ${n} verhält sich wie das Modul`, rufe(k[n]), rufe(bl[n]));

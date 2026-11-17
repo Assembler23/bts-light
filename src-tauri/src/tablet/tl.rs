@@ -4473,11 +4473,6 @@ pub(crate) fn prognose_rechnen(
     (stats, predictions)
 }
 
-/// Baut den Anzeige-Zustand aus dem aktuellen BTP-Stand und dem, was der Host
-/// selbst verwaltet (Aufrufe, Sperren, Live-Spielstände).
-///
-/// `rev` gibt der Aufrufer vor — er entscheidet, ob sich gegenüber dem
-/// zuletzt ausgelieferten Stand überhaupt etwas geändert hat.
 /// Ziele der badhub-Links in der TL-Sicht.
 ///
 /// **Ein Testturnier verlinkt auf das Testsystem.** Die Basis folgt der
@@ -4528,6 +4523,11 @@ pub(crate) fn badhub_links(config: &AppConfig) -> Option<TlBadhubLinks> {
     })
 }
 
+/// Baut den Anzeige-Zustand aus dem aktuellen BTP-Stand und dem, was der Host
+/// selbst verwaltet (Aufrufe, Sperren, Live-Spielstände).
+///
+/// `rev` gibt der Aufrufer vor — er entscheidet, ob sich gegenüber dem
+/// zuletzt ausgelieferten Stand überhaupt etwas geändert hat.
 pub fn build_state(tablet: &TabletState, config: &AppConfig, now_ms: u64, rev: u64) -> TlState {
     build_state_limited(tablet, config, now_ms, rev, QUEUE_LIMIT)
 }
@@ -12994,6 +12994,20 @@ mod tests {
         let value = serde_json::to_value(&s).unwrap();
         let mut names = std::collections::BTreeSet::new();
         field_names(&value, &mut names);
+        // Die allgemeinen Namen der badhub-Ziele sind NUR unter `badhub`
+        // freigegeben — tauchten sie anderswo auf, schlüpfte dort etwas
+        // unter einem harmlosen Namen durch (Review 17.11.2026).
+        assert!(value["badhub"].is_object(), "Fixture-Fehler: badhub fehlt");
+        let mut ohne_badhub = value.clone();
+        ohne_badhub.as_object_mut().unwrap().remove("badhub");
+        let mut uebrige = std::collections::BTreeSet::new();
+        field_names(&ohne_badhub, &mut uebrige);
+        for nur_badhub in ["base", "guid", "liveticker"] {
+            assert!(
+                !uebrige.contains(nur_badhub),
+                "„{nur_badhub}“ ist nur unter `badhub` freigegeben"
+            );
+        }
         let unerlaubt: Vec<&String> = names
             .iter()
             .filter(|n| !ERLAUBT.contains(&n.as_str()))

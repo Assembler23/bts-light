@@ -2051,14 +2051,16 @@ function zuletztText(sinceMs, nowMs) {
 // (`state.badhub`, Basis aus der Push-Adresse — ein Testturnier verlinkt
 // auf test.badhub.de); mit der Turnier-GUID führen sie über badhubs
 // Weiterleitung `/checkin/<GUID>/turnier` genau in DIESES Turnier.
-/** Basis der Links: Wert des Hosts, sonst der bisherige Weg — im Hallennetz
- *  (`praefix` leer) das Produktivsystem, hinter dem Cloud-Relay der Host, von
- *  dem die Seite kommt (der Relay liegt auf badhub.de bzw. test.badhub.de).
- *  Nur `http(s)://host[:port]` wird übernommen. */
+/** Basis der Links. Hinter dem Cloud-Relay (`praefix` nicht leer) immer der
+ *  Host, von dem die Seite kommt — der Relay liegt auf demselben badhub wie
+ *  der Liveticker (badhub.de bzw. test.badhub.de), und ein Turnier-PC soll
+ *  die Links einer badhub-Seite nicht auf einen fremden Host lenken können
+ *  (Security-Review 17.11.2026). Im Hallennetz der Wert des Hosts, nur als
+ *  `http(s)://host[:port]`; fehlt er (älterer Host), das Produktivsystem. */
 function badhubBasis(links, praefix, origin) {
+  if (praefix !== "") return origin;
   const b = links && typeof links.base === "string" ? links.base : "";
-  if (/^https?:\/\/[A-Za-z0-9.\-]+(:\d+)?$/.test(b)) return b;
-  return praefix === "" ? "https://badhub.de" : origin;
+  return /^https?:\/\/[A-Za-z0-9.\-]+(:\d+)?$/.test(b) ? b : "https://badhub.de";
 }
 
 /** Weiterleitung `…/checkin/<GUID>/turnier[?…]`, "" ohne gültige GUID.
@@ -2092,10 +2094,11 @@ function konkurrenzLink(links, basis, matchId, konk) {
   return turnierSprung(links, basis, { spiel: id, konk });
 }
 
-/** Öffentlicher Liveticker aus dem Host-Zustand, nur als http(s)-Adresse. */
-function livetickerLink(links) {
+/** Öffentlicher Liveticker aus dem Host-Zustand — nur auf derselben Basis
+ *  wie alle übrigen Links, sonst keiner. */
+function livetickerLink(links, basis) {
   const u = links && typeof links.liveticker === "string" ? links.liveticker.trim() : "";
-  return /^https?:\/\/[^\s"'<>]+$/.test(u) ? u : "";
+  return /^https?:\/\/[^\s"'<>]+$/.test(u) && u.startsWith(basis + "/") ? u : "";
 }
 
 // ── Inline-Kopie von src/io/zeitplan.mjs ────────────────────────────────
@@ -3946,7 +3949,7 @@ function renderTurnierKopf() {
          title="Turnierseite auf badhub öffnen">${esc(name)}</a>`
     : esc(name);
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
-  const live = livetickerLink(bhLinks());
+  const live = livetickerLink(bhLinks(), bhBasis());
   const a = $("kopf-live");
   a.hidden = !live;
   if (live && a.getAttribute("href") !== live) a.setAttribute("href", live);
