@@ -1,6 +1,6 @@
 # Hotfix ohne Neustart — Spezifikation
 
-> Status: **Freigegeben 2026-11-16** (via /idee: Brief → Grill → How-To → Review). Umsetzung noch nicht begonnen.
+> Status: **Freigegeben 2026-11-16** (via /idee: Brief → Grill → How-To → Review). Umsetzung: Schritte 1–8 gebaut (bis v0.9.441), offen ist der Abschluss mit Feldtest (9).
 > Quelle: Idee vom 16.11.2026 („Wir trauen uns nicht, einen Fix im laufenden
 > Turnier einzuspielen, weil bts-light dafür neu starten muss").
 > Betroffene Crates: `src-tauri`, `src` (Frontend), CI-Workflows. `relay/` und
@@ -325,16 +325,25 @@ Fenster, ohne Tauri), N = neue App.
 | # | Wer | Schritt | Frist |
 |---|---|---|---|
 | 0 | A | Vorladen: Kopf prüfen, exe laden, Größe und SHA-256 prüfen, als `bts-light.neu.exe` ins Installationsverzeichnis. **Probelauf** `bts-light.neu.exe --selbsttest` (endet vor dem Fensteraufbau mit Code 0). | 120 s, sonst kein Wechsel-Angebot (ursprünglich 10 s; gemessen wurden 15 s für den ersten Start unter Schutzsoftware, siehe ADR 0100) |
-| 1 | A | Klick: `uebergabe.json` (von, nach, Zeitstempel, Zustand `gestartet`) und Wiederanlauf-Marker schreiben. | — |
-| 2 | A | Übertragung anhalten wie `stop_sync` (Stände sichern, Ports frei, Relay-Verbindung zu). **Lücke beginnt.** | — |
-| 3 | A | Alte `bts-light.vorher.exe` löschen; `bts-light.exe` → `bts-light.vorher.exe`; `bts-light.neu.exe` → `bts-light.exe`. Scheitert die zweite Umbenennung: erste zurücknehmen, Übertragung wieder starten, Fehler im Banner. | — |
-| 4 | A | W aus `bts-light.vorher.exe` starten (losgelöst, mit stdin-Pipe), dann beenden. | — |
-| 5 | W | Wartet auf das Ende von A (stdin-EOF). | 3 s, dann A beenden |
+| 1 | A | Klick: **zuerst tauschen, solange die Übertragung noch läuft.** Alte `bts-light.vorher.exe` löschen; `bts-light.exe` → `bts-light.vorher.exe`; `bts-light.neu.exe` → `bts-light.exe`. Die laufende App stört das nicht — sie läuft aus der umbenannten Datei weiter. Scheitert ein Schritt: erste Umbenennung zurücknehmen, Fehler im Banner; die Übertragung wurde nie angehalten. | kann unter Schutzsoftware Sekunden dauern (gemessen bis 9,7 s) — **außerhalb der Lücke** |
+| 2 | A | Wiederanlauf-Marker schreiben. | — |
+| 3 | A | Übertragung anhalten wie `stop_sync` (Stände sichern, Ports frei, Relay-Verbindung zu). **Lücke beginnt.** | — |
+| 4 | A | W aus `bts-light.vorher.exe` starten (losgelöst, mit stdin-Pipe, eigene Prozessnummer mitgeben), dann beenden. W schreibt `uebergabe.json` (`gestartet`) selbst, unmittelbar bevor er N startet. | — |
+| 5 | W | Wartet auf das Ende von A (stdin-EOF **und** Ende des Prozesses), danach 0,4 s Nachlauf. | 20 s, dann A beenden |
 | 6 | W | Startet N und hält dessen Prozess-Handle. | — |
 | 7 | N | Start: Config laden, Marker nehmen, Übertragung im Kern starten. Nach dem Binden des Ports wird die Lücke geloggt. **Lücke endet.** | — |
 | 8 | N | Meldet `angekommen`, sobald der Start durch ist **und** die Oberfläche den ersten Command gerufen hat. | — |
 | 9a | W | Meldung da: W endet. `bts-light.vorher.exe` bleibt als Rückweg. | — |
 | 9b | W | N endet vorher oder die Frist läuft ab: N beenden; `bts-light.exe` → `bts-light.defekt.exe`; `bts-light.vorher.exe` → `bts-light.exe`; Zustand `zurueckgefallen` mit Grund; Marker neu schreiben; alte App starten. | Startwert 15 s, nach Messung (PR 7a) festzulegen |
+
+> **Geändert am 16.11.2026 nach der Messung (ADR 0100):** Der Tausch stand
+> ursprünglich **nach** dem Anhalten der Übertragung, also in der Lücke. Auf
+> einem Rechner mit Unternehmens-Schutzsoftware blockierte ein einzelnes
+> Umbenennen bis zu 9,7 s. Der Tausch braucht die angehaltene Übertragung
+> nicht — er steht deshalb jetzt **vor** dem Anhalten und kostet keine Lücke
+> mehr. Nebenbei entfällt der Fall „Übertragung nach gescheitertem Tausch
+> wieder starten". Die Frist des Wächters zählt ab dem gelungenen Start von
+> N, nicht ab dem Startversuch.
 
 Der **Kern-Rückweg** ist derselbe Ablauf mit vertauschten Rollen (`vorher`
 wird wieder aktiv, die zurückgenommene Version wird die neue `vorher` und

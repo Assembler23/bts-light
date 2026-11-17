@@ -12,8 +12,11 @@
 //!
 //! 1. A legt die neue Programmdatei als `bts-light.neu.exe` neben sich und
 //!    lässt sie zur Probe laufen (`--selbsttest`).
-//! 2. A hält die Übertragung an, tauscht per Umbenennen und startet W — die
-//!    **alte** Programmdatei mit `--waechter`, ohne Fenster.
+//! 2. A tauscht per Umbenennen — **noch bei laufender Übertragung**, denn
+//!    das Umbenennen kann unter Schutzsoftware sekundenlang blockieren
+//!    (ADR 0100, vierter Lauf) und soll keine Lücke kosten. Erst danach hält
+//!    A die Übertragung an und startet W — die **alte** Programmdatei mit
+//!    `--waechter`, ohne Fenster.
 //! 3. W wartet auf das Ende von A, startet N und wartet auf dessen
 //!    Ankunftsmeldung. Kommt sie nicht, stellt W die alte Datei wieder her
 //!    und startet sie.
@@ -152,11 +155,14 @@ fn entferne_wenn_da(pfad: &Path) -> std::io::Result<()> {
 }
 
 /// Umbenennen mit Geduld: Unter Windows hält ein Virenscanner eine frisch
-/// geschriebene oder eben gestartete Programmdatei oft für Augenblicke
+/// geschriebene oder eben gestartete Programmdatei oft sekundenlang
 /// fest. Ein einzelner Versuch scheiterte dann an einer Sperre, die gleich
 /// wieder weg ist. „Datei fehlt" wird nicht wiederholt.
 fn umbenennen(von: &Path, nach: &Path) -> std::io::Result<()> {
-    const VERSUCHE: u32 = 10;
+    // Rund 6 s Geduld. Gemessen am 16.11.2026: Eine eben gestartete,
+    // frische Programmdatei ließ sich unter Schutzsoftware erst nach 2,4 s
+    // umbenennen — mit den früheren 2 s wäre das knapp gescheitert.
+    const VERSUCHE: u32 = 30;
     let mut letzter = None;
     for versuch in 0..VERSUCHE {
         match std::fs::rename(von, nach) {
@@ -194,6 +200,49 @@ pub fn tauschen(pfade: &Pfade) -> Result<(), TauschFehler> {
     umbenennen(&pfade.aktiv, &pfade.vorher).map_err(TauschFehler::Beiseitelegen)?;
     if let Err(fehler) = umbenennen(&pfade.neu, &pfade.aktiv) {
         let zurueck = umbenennen(&pfade.vorher, &pfade.aktiv).is_ok();
+        return Err(TauschFehler::Einsetzen { fehler, zurueck });
+    }
+    Ok(())
+}
+
+/// Name der Zwischenablage beim Rückweg (`x.vorher.exe.tausch`).
+pub fn tausch_ablage(pfade: &Pfade) -> PathBuf {
+    let mut name = pfade.vorher.clone().into_os_string();
+    name.push(".tausch");
+    PathBuf::from(name)
+}
+
+/// Der Rückweg auf Wunsch: `vorher` und `aktiv` tauschen die Plätze — die
+/// Vorversion wird wieder aktiv, die laufende wird die neue `vorher` (aus
+/// ihr startet der Wächter). Drei Umbenennungen über eine Zwischenablage;
+/// eine vorgeladene Datei `neu` bleibt unberührt.
+///
+/// Scheitert ein Schritt, wird zurückgenommen, was schon bewegt war. Fehler
+/// wie bei [`tauschen`]: `Beiseitelegen` und `Einsetzen { zurueck: true }`
+/// heißen „alles liegt wie vorher".
+pub fn zurueckwechseln(pfade: &Pfade) -> Result<(), TauschFehler> {
+    if !pfade.vorher.is_file() {
+        return Err(TauschFehler::Einsetzen {
+            fehler: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "die vorige Programmdatei fehlt",
+            ),
+            zurueck: true,
+        });
+    }
+    let ablage = tausch_ablage(pfade);
+    let _ = entferne_wenn_da(&ablage);
+    // 1. Die laufende Datei beiseite.
+    umbenennen(&pfade.aktiv, &ablage).map_err(TauschFehler::Beiseitelegen)?;
+    // 2. Die Vorversion an ihre Stelle.
+    if let Err(fehler) = umbenennen(&pfade.vorher, &pfade.aktiv) {
+        let zurueck = umbenennen(&ablage, &pfade.aktiv).is_ok();
+        return Err(TauschFehler::Einsetzen { fehler, zurueck });
+    }
+    // 3. Die eben noch laufende wird die neue Vorversion.
+    if let Err(fehler) = umbenennen(&ablage, &pfade.vorher) {
+        let zurueck = umbenennen(&pfade.aktiv, &pfade.vorher).is_ok()
+            && umbenennen(&ablage, &pfade.aktiv).is_ok();
         return Err(TauschFehler::Einsetzen { fehler, zurueck });
     }
     Ok(())
@@ -253,9 +302,22 @@ impl std::fmt::Display for Hindernis {
 
 /// Schreibtest im Verzeichnis: Datei anlegen, schreiben, wieder löschen.
 pub fn schreibbar(dir: &Path) -> std::io::Result<()> {
-    let probe = dir.join(format!(".bts-light-schreibtest-{}", std::process::id()));
-    let ergebnis = std::fs::File::create(&probe).and_then(|mut f| f.write_all(b"x"));
-    let _ = std::fs::remove_file(&probe);
+    // Neu anlegen statt öffnen, mit nicht vorhersagbarem Namen: Eine schon
+    // vorhandene Datei (oder ein Verweis) unter dem Namen wird so nie
+    // gekürzt.
+    let probe = dir.join(format!(
+        ".bts-light-schreibtest-{}-{}",
+        std::process::id(),
+        jetzt_ms()
+    ));
+    let ergebnis = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .and_then(|mut f| f.write_all(b"x"));
+    if ergebnis.is_ok() {
+        let _ = std::fs::remove_file(&probe);
+    }
     ergebnis
 }
 
@@ -294,6 +356,10 @@ pub struct Zustand {
     /// Warum zurückgefallen wurde.
     #[serde(default)]
     pub grund: Option<String>,
+    /// Hat die Turnierleitung die Meldung dazu im Banner geschlossen? Sonst
+    /// käme sie nach jedem Programmstart wieder.
+    #[serde(default)]
+    pub gesehen: bool,
 }
 
 /// Schreibt den Zustand über eine Nebendatei, damit nie ein halber liegt.
@@ -309,7 +375,31 @@ pub fn zustand_schreiben(daten: &Path, zustand: &Zustand) -> std::io::Result<()>
 }
 
 pub fn zustand_lesen(daten: &Path) -> Option<Zustand> {
-    serde_json::from_slice(&std::fs::read(daten.join(ZUSTAND_DATEI)).ok()?).ok()
+    zustand_lesen_genau(daten).ok().flatten()
+}
+
+/// Wie [`zustand_lesen`], unterscheidet aber „es gibt keine Datei"
+/// (`Ok(None)`) von „sie ließ sich gerade nicht lesen" (`Err`). Wer daraus
+/// eine endgültige Entscheidung ableitet, braucht den Unterschied: Eine
+/// kurz gesperrte Datei ist kein „keine Übergabe im Gang".
+pub fn zustand_lesen_genau(daten: &Path) -> Result<Option<Zustand>, std::io::Error> {
+    match std::fs::read(daten.join(ZUSTAND_DATEI)) {
+        Ok(roh) => serde_json::from_slice(&roh)
+            .map(Some)
+            .map_err(std::io::Error::other),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Merkt in der Datei, dass die Meldung zur letzten Übergabe gesehen wurde.
+pub fn meldung_gesehen(daten: &Path) {
+    if let Some(mut z) = zustand_lesen(daten) {
+        if !z.gesehen {
+            z.gesehen = true;
+            let _ = zustand_schreiben(daten, &z);
+        }
+    }
 }
 
 /// N meldet sich an: Aus „gestartet" wird „angekommen" — aber nur, wenn die
@@ -488,16 +578,24 @@ pub fn rueckfall(
             zeit_ms: jetzt_ms,
             lage: Lage::Zurueckgefallen,
             grund: Some(grund.to_string()),
+            gesehen: false,
         },
     ) {
         maengel.push(format!("Zustand nicht geschrieben ({e})"));
     }
     // Frischer Marker: Die alte Version soll die Übertragung nach ihrem
-    // Start von selbst wieder aufnehmen.
+    // Start von selbst wieder aufnehmen — aber nur, wenn sie vor dem Wechsel
+    // lief. Das steht im Marker, den die App vor dem Wechsel geschrieben
+    // hat; fehlt er (oder ist er unlesbar), gilt „lief".
+    let marker_pfad = daten.join(crate::update::RESUME_FILE);
+    let lief = std::fs::read(&marker_pfad)
+        .ok()
+        .and_then(|roh| serde_json::from_slice::<ResumeMarker>(&roh).ok())
+        .is_none_or(|m| m.running);
     if let Err(e) = crate::update::write_resume(
-        &daten.join(crate::update::RESUME_FILE),
+        &marker_pfad,
         &ResumeMarker {
-            running: true,
+            running: lief,
             written_ms: jetzt_ms,
             from_version: von.to_string(),
         },
@@ -855,6 +953,7 @@ pub fn waechter_hauptprogramm(args: &WaechterArgs) -> i32 {
             zeit_ms: jetzt_ms(),
             lage: Lage::Gestartet,
             grund: None,
+            gesehen: false,
         },
     ) {
         Ok(()) => true,
@@ -869,7 +968,6 @@ pub fn waechter_hauptprogramm(args: &WaechterArgs) -> i32 {
         }
     };
 
-    let start = Instant::now();
     let grund = match Command::new(&pfade.aktiv)
         .args(&args.kind_args)
         .stdin(Stdio::null())
@@ -879,6 +977,13 @@ pub fn waechter_hauptprogramm(args: &WaechterArgs) -> i32 {
     {
         Err(e) => format!("die neue Version ließ sich nicht starten ({e})"),
         Ok(mut kind) => {
+            // Die Frist läuft ERST AB HIER. Der Start selbst kann lange
+            // dauern — unter einem Virenscanner blockiert schon das
+            // Erzeugen des Prozesses, bis die Datei geprüft ist (gemessen
+            // am 16.11.2026: bis zu 9 s). Zählte diese Zeit mit, wäre die
+            // Frist abgelaufen, bevor die neue Version eine Zeile Code
+            // ausgeführt hat, und ein gutes Update würde zurückgerollt.
+            let start = Instant::now();
             protokoll(daten, "neue Version gestartet");
             let ende = if ueberwacht {
                 warte_auf_ankunft(
@@ -1341,6 +1446,124 @@ mod tests {
         assert_eq!(marker.from_version, "1.2.3");
     }
 
+    #[test]
+    fn rueckweg_tauscht_vorher_und_aktiv() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pfade_in(dir.path());
+        std::fs::write(&p.aktiv, "neu").unwrap();
+        std::fs::write(&p.vorher, "alt").unwrap();
+        // Eine vorgeladene Datei für ein noch neueres Update bleibt liegen.
+        std::fs::write(&p.neu, "uebermorgen").unwrap();
+        // Ein Rest in der Zwischenablage stört nicht.
+        std::fs::write(tausch_ablage(&p), "rest").unwrap();
+
+        zurueckwechseln(&p).unwrap();
+        assert_eq!(inhalt(&p.aktiv), "alt");
+        assert_eq!(inhalt(&p.vorher), "neu", "aus ihr startet der Wächter");
+        assert_eq!(inhalt(&p.neu), "uebermorgen");
+        assert!(!tausch_ablage(&p).exists());
+
+        // Läuft die Vorversion nicht an, bringt der gewöhnliche Rückfall die
+        // zurückgenommene Version wieder nach vorn.
+        zurueckfallen(&p).unwrap();
+        assert_eq!(inhalt(&p.aktiv), "neu");
+        assert_eq!(inhalt(&p.defekt), "alt");
+    }
+
+    #[test]
+    fn rueckweg_ohne_vorversion_aendert_nichts() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pfade_in(dir.path());
+        std::fs::write(&p.aktiv, "neu").unwrap();
+        std::fs::write(&p.neu, "uebermorgen").unwrap();
+        match zurueckwechseln(&p) {
+            Err(TauschFehler::Einsetzen { zurueck: true, .. }) => {}
+            anderes => panic!("erwartet: nichts verändert, war {anderes:?}"),
+        }
+        assert_eq!(inhalt(&p.aktiv), "neu");
+        assert_eq!(inhalt(&p.neu), "uebermorgen");
+    }
+
+    /// Lässt sich die laufende Datei nicht beiseitelegen, ist nichts
+    /// verändert — die Vorversion liegt noch an ihrem Platz.
+    #[test]
+    fn rueckweg_scheitert_am_ersten_schritt_ohne_spuren() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pfade_in(dir.path());
+        // Keine aktive Datei: Das Beiseitelegen scheitert sofort.
+        std::fs::write(&p.vorher, "alt").unwrap();
+        match zurueckwechseln(&p) {
+            Err(TauschFehler::Beiseitelegen(_)) => {}
+            anderes => panic!("erwartet: nichts verändert, war {anderes:?}"),
+        }
+        assert_eq!(inhalt(&p.vorher), "alt");
+        assert!(!tausch_ablage(&p).exists());
+    }
+
+    /// Scheitert der zweite Schritt, liegt die laufende Datei danach wieder
+    /// an ihrem Platz. Erzwungen über einen Ordner unter dem Namen der
+    /// Vorversion: `is_file` muss ihn abweisen, bevor etwas bewegt wird.
+    #[test]
+    fn rueckweg_weist_einen_ordner_als_vorversion_ab() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = pfade_in(dir.path());
+        std::fs::write(&p.aktiv, "neu").unwrap();
+        std::fs::create_dir(&p.vorher).unwrap();
+        assert!(matches!(
+            zurueckwechseln(&p),
+            Err(TauschFehler::Einsetzen { zurueck: true, .. })
+        ));
+        assert_eq!(inhalt(&p.aktiv), "neu");
+    }
+
+    /// Lief die Übertragung vor dem Wechsel NICHT, startet die alte Version
+    /// sie nach einem Rückfall auch nicht von selbst. Das steht im Marker,
+    /// den die App vor dem Wechsel geschrieben hat.
+    #[test]
+    fn rueckfall_uebernimmt_ob_die_uebertragung_lief() {
+        for lief in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let daten = dir.path().join("daten");
+            let p = pfade_in(dir.path());
+            std::fs::write(&p.aktiv, "neu").unwrap();
+            std::fs::write(&p.vorher, "alt").unwrap();
+            let marker = daten.join(crate::update::RESUME_FILE);
+            crate::update::write_resume(
+                &marker,
+                &ResumeMarker {
+                    running: lief,
+                    written_ms: 1_000,
+                    from_version: "1.2.3".into(),
+                },
+            )
+            .unwrap();
+
+            rueckfall(&p, &daten, "x", 9_000, "1.2.3", "1.2.4").unwrap();
+            let gelesen: ResumeMarker =
+                serde_json::from_slice(&std::fs::read(&marker).unwrap()).unwrap();
+            assert_eq!(gelesen.running, lief, "lief = {lief}");
+            assert_eq!(gelesen.written_ms, 9_000, "der Marker ist frisch");
+        }
+    }
+
+    #[test]
+    fn schreibtest_kuerzt_keine_vorhandene_datei() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("wichtig.txt"), "inhalt").unwrap();
+        schreibbar(dir.path()).unwrap();
+        schreibbar(dir.path()).unwrap();
+        let namen: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            namen,
+            vec!["wichtig.txt"],
+            "der Schreibtest hinterlässt nichts"
+        );
+    }
+
     /// Lässt sich im Datenverzeichnis nichts schreiben (hier: Es ist eine
     /// Datei), gilt der Rückfall trotzdem — die Dateien sind zurück, und der
     /// Aufrufer startet die alte Version. Ohne das stünde die Turnierleitung
@@ -1374,6 +1597,7 @@ mod tests {
             zeit_ms: 1,
             lage: Lage::Gestartet,
             grund: None,
+            gesehen: false,
         };
         zustand_schreiben(dir.path(), &z).unwrap();
         // Eine ANDERE Version als das Ziel meldet nichts an.

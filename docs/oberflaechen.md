@@ -32,7 +32,7 @@ zeigen.
 | **Monitore** | Die Geräteverwaltung für Fernseher und Pis: **welches Gerät zeigt was**. Siehe unten. | Court-Monitor aus |
 | **Siegerehrung** | Steuert, welche Disziplin der Sieger-Monitor gerade zeigt. Bewusst ohne Rotation, damit das Publikum das Podium fotografieren kann. | Court-Monitor aus |
 | **Einstellungen** | Derselbe Bildschirm wie der Einrichtungs-Assistent. Siehe [Einstellungen](einstellungen.md). | nie |
-| **Wartung** | Update prüfen, Logs öffnen, Version und Seiten-Stand ablesen, Geräte-Seiten zurücksetzen, Identität umziehen. | nie |
+| **Wartung** | Update prüfen, Logs öffnen, Version und Seiten-Stand ablesen, Geräte-Seiten zurücksetzen, zur vorigen App-Fassung zurückwechseln, Identität umziehen. | nie |
 
 Über allem liegt eine **Kopfzeile** mit dem Start-/Stopp-Knopf und vier
 Statusanzeigen:

@@ -1,5 +1,5 @@
 {
   "rueckwaerts_lesbar_ab": "0.9.436",
-  "abdruck": "44f7a48f1c369505fb44d0c7d0fdf4e8208d1fe7a892af4c6a2a44a0fdb5e268",
-  "begruendung": "v0.9.437: neue Datei uebergabe.json (Zustand des Kernwechsels). Ältere Versionen kennen sie nicht und lesen sie nie — die Grenze bleibt. Ausgangswert v0.9.436: Ob noch ältere Versionen die heutigen Daten lesen, wurde nie geprüft; deshalb gilt keine von ihnen als lesefähig."
+  "abdruck": "4277b74cbe26e0d0f68eae3560fdf01b665ac42478e9b30e21815d9953edde8e",
+  "begruendung": "v0.9.441: neue Datei rueckweg.json (Vorversion und Sperrliste für den Kern-Rückweg). Ältere Versionen lesen sie nicht — die Grenze bleibt. v0.9.439: uebergabe.json bekommt das Feld gesehen (Meldung im Banner geschlossen), mit Standardwert. Ältere Versionen lesen die Datei entweder gar nicht (vor v0.9.437) oder übergehen das Feld — die Grenze bleibt. v0.9.437: neue Datei uebergabe.json. Ausgangswert v0.9.436: Ob noch ältere Versionen die heutigen Daten lesen, wurde nie geprüft; deshalb gilt keine von ihnen als lesefähig."
 }

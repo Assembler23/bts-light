@@ -4,6 +4,50 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.441
+
+- **Zurück zur vorigen Fassung der App.** Macht ein Update Ärger, führt ein
+  Klick zurück: Direkt nach dem schnellen Wechsel steht **Zurück zu v…** im
+  Banner, dauerhaft unter **Wartung**. BTS Light hebt dafür genau eine vorige
+  Fassung neben dem Programm auf — auch vor einem Update über das
+  Installationsprogramm („Jetzt neu starten", „Beim Beenden einbauen"). Der
+  Weg zurück unterbricht wie der schnelle Wechsel nur wenige Sekunden; läuft
+  die vorige Fassung nicht an, läuft danach wieder die jetzige.
+- **Zurückgenommen heißt zurückgenommen.** Eine Fassung, von der du
+  zurückgewechselt bist, wird nicht noch einmal angeboten — die nächste
+  neuere schon. Unter Wartung steht, welche Fassung das war.
+- **Grauer Knopf mit Begründung**, wenn die vorige Fassung die Daten der
+  neuen nicht lesen kann.
+- **Aufräumen beim Start:** Reste eines früheren Wechsels, eine veraltete
+  vorige Fassung und alte Installationsprogramme im Temp-Ordner verschwinden
+  von selbst.
+- Der Rückweg gilt erst ab dieser Fassung: Wer per schnellem Wechsel von
+  v0.9.440 kommt, hat für diesen einen Schritt noch keinen.
+
+## v0.9.440
+
+- **Ballzähler: Federball besser zu erkennen.** Das Symbol neben der Zahl der
+  verbrauchten Bälle ist neu gezeichnet — ein Federkranz mit Korkkappe statt
+  der dünnen Strichzeichnung. Es gilt am Zähl-Tablet und in der
+  Turnierleitungs-Oberfläche; an der Bedienung ändert sich nichts.
+
+## v0.9.439
+
+- **Update im laufenden Turnier: wenige Sekunden statt zwanzig.** Liegt ein
+  Update bereit, legt bts-light die neue Fassung fertig neben sich und
+  startet sie zur Probe. Dann bietet das Banner **Jetzt wechseln** an: Die
+  Übertragung hält nur für wenige Sekunden an und läuft von selbst weiter,
+  die Tablets zählen in der Zwischenzeit weiter.
+- **Startet die neue Fassung nicht, kommt die alte von selbst zurück.** Ein
+  Wächter stellt nach wenigen Sekunden die vorige Fassung wieder her und
+  startet sie samt Übertragung. Oben steht dann in Rot, welche Fassung sich
+  nicht starten ließ.
+- **Wo der schnelle Wechsel nicht geht, bleibt alles wie bisher.** Dann steht
+  weiter **Jetzt neu starten** im Banner (Installationsprogramm, etwa 20
+  Sekunden). Das gilt auch für das erste Update auf diese Fassung — den
+  schnellen Wechsel gibt es erst **von** ihr aus zur nächsten.
+- Die Deinstallation räumt die Hilfsdateien des Wechsels mit weg.
+
 ## v0.9.438
 
 - **Turnierleitungs-Oberfläche: keine leeren Hallen-Knöpfe bei nur einer

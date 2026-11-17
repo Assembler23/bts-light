@@ -31,9 +31,11 @@ Befunde am Code:
   `bts-light.exe` → `bts-light.vorher.exe` und `neu` → `bts-light.exe`.
 - **Probelauf vor dem Angebot:** `bts-light.neu.exe --selbsttest`. Schlägt er
   fehl, wird der Tausch nicht angeboten.
-- **Strikte Reihenfolge:** alte App hält die Übertragung an und schließt die
-  Relay-Verbindung, tauscht, startet den Wächter und endet; erst danach
-  startet die neue App.
+- **Strikte Reihenfolge:** alte App **tauscht zuerst** (bei laufender
+  Übertragung), hält dann die Übertragung an und schließt die
+  Relay-Verbindung, startet den Wächter und endet; erst danach startet die
+  neue App. *(Geändert am 16.11.2026: Der Tausch stand ursprünglich nach dem
+  Anhalten, also in der Lücke — siehe „Vierter Lauf".)*
 - **Wächter** ist die alte Programmdatei mit `--waechter`, ohne Tauri und
   ohne Mutex. Er wartet auf das Ende der alten App, startet die neue und
   stellt die alte wieder her, wenn die neue vor ihrer Ankunftsmeldung endet
@@ -154,7 +156,7 @@ Was daraus folgt:
   läuft im Hintergrund vor dem Angebot und kostet keine Lücke — und er
   erledigt die Prüfung, bevor jemand klickt. Er ist damit nicht nur Test,
   sondern Vorwärmen.
-- **Offen und entscheidend:** Bleibt die Datei „bekannt", nachdem sie von
+- **Entscheidend (inzwischen beantwortet, siehe „Voller Lauf"):** Bleibt die Datei „bekannt", nachdem sie von
   `bts-light.neu.exe` in `bts-light.exe` **umbenannt** wurde? Wenn ja,
   startet die neue Version nach dem Tausch in Sekundenbruchteilen und die
   Wächter-Frist von 15 s hat reichlich Luft. Wenn nein, kostet der Wechsel
@@ -169,6 +171,223 @@ Was daraus folgt:
 Die Sonde misst seither mit einer Obergrenze von 300 s, statt abzubrechen,
 misst zusätzlich den Start der schon vorhandenen Datei und richtet die
 Fristen der folgenden Schritte am Gemessenen aus.
+
+### Voller Lauf der Sonde auf demselben Rechner (16.11.2026)
+
+Windows 11, Unternehmens-Schutzsoftware, bts-light per-user installiert,
+Debug-Build der Sonde:
+
+| Messwert | Ergebnis |
+|---|---|
+| Start der vorhandenen (eben gebauten) Datei | 14,1 s |
+| erster Start der frisch abgelegten Datei | 13,3 s |
+| zweiter Start | 0,19 s |
+| Tausch bei laufender Datei | **gelingt**, aber erst nach 2,35 s |
+| Ende der alten App → neue Version angekommen | **1,4 s** |
+| Installationsverzeichnis (`%LOCALAPPDATA%\BTS Light`) | **beschreibbar** |
+
+**Die drei Annahmen halten auch hier:** Die laufende Programmdatei lässt
+sich umbenennen, der Wächter überlebt das Ende der App, das
+Installationsverzeichnis ist beschreibbar.
+
+**Die entscheidende Frage ist beantwortet:** Eine Datei, die ihren Probelauf
+hinter sich hat, bleibt nach dem **Umbenennen** bekannt. Die neue Version kam
+1,4 s nach dem Ende der alten an — davon 0,4 s Nachlauf des Wächters und
+0,3 s gespielte Startzeit. Der Wechsel kostet auf diesem Rechner also nicht
+die 13 s der Erstprüfung, sondern Sekundenbruchteile über dem, was die CI
+misst (0,76 s). Der Probelauf vor dem Angebot ist damit nicht nur Test,
+sondern die Voraussetzung dafür.
+
+**Zwei Dinge hat der Lauf aufgedeckt:**
+
+- **Fehler im Wächter, behoben:** Die Frist lief ab dem *Versuch*, die neue
+  Version zu starten. Unter der Schutzsoftware blockiert schon das Erzeugen
+  des Prozesses, bis die Datei geprüft ist — im Lauf bis zu 9 s. Im
+  Hänger-Fall war die Frist (1,5 s) deshalb abgelaufen, bevor die neue
+  Version eine Zeile ausgeführt hatte; der Rückfall kam 9 ms nach ihrem
+  Start. Mit einer ungeprüften Datei hätte das ein gutes Update
+  zurückgerollt. Die Frist zählt jetzt ab dem gelungenen Start; die Sonde
+  prüft das.
+- **Umbenennen braucht mehr Geduld:** Die eben gestartete, frische Datei
+  ließ sich erst nach 2,35 s umbenennen — die Geduld von 2 s hätte knapp
+  nicht gereicht. Sie steht jetzt bei rund 6 s. Im Betrieb läuft die alte
+  Datei seit Stunden und die neue ist geprüft; dort ist die Sperre nicht zu
+  erwarten, aber der Spielraum kostet nichts.
+
+**Nicht aussagekräftig in diesem Lauf** waren die Zeiten für Fehlstart
+(21,9 s) und Hänger (16,1 s): Die Sonde legte dafür frische, ungeprüfte
+Dateien ab und maß vor allem deren Erstprüfung. Sie wärmt die Dateien
+seither vor, wie es im Betrieb der Probelauf tut.
+
+**Offen bleibt:** die ausgelieferte Programmdatei (33,8 MB statt des
+Debug-Builds), ein Rechner, wie er in der Halle steht, und die volle App mit
+Fenster und Einzelinstanz-Sperre.
+
+### Zweiter voller Lauf, nach den Korrekturen (16.11.2026)
+
+Derselbe Rechner, Stand `a19285e` (Frist ab dem Start, vorgewärmte Dateien
+für Fehlstart und Hänger):
+
+| Messwert | Ergebnis |
+|---|---|
+| erster Start der frisch abgelegten Datei | 14,4 s |
+| zweiter Start | 0,20 s |
+| Ende der alten App → neue Version angekommen | 1,34 s |
+| Wächter gestartet → neue Version läuft | 1,46 s (davon 0,8 s gespielter Nachlauf der alten App, 0,4 s Nachlauf des Wächters) |
+| Fehlstart → alte Version wieder aktiv | **2,0 s** |
+| Hänger: Start der neuen Version → Rückfall | **1533 ms** bei 1500 ms Frist |
+| Hänger insgesamt | 3,1 s |
+| Installationsverzeichnis | beschreibbar |
+
+- **Die Korrektur der Frist ist belegt:** Der Wächter wartete 1533 ms auf
+  die neue Version (vorher 9 ms).
+- **Mit geprüften Dateien ist auch der Rückfall schnell:** 2,0 s nach einem
+  Fehlstart läuft die alte Version wieder (im ersten Lauf, mit ungeprüften
+  Dateien, 21,9 s).
+- **Das Erzeugen des Prozesses** einer geprüften Datei dauert rund 0,2 s.
+
+**Eine Zahl war noch ein Artefakt der Sonde:** Der Tausch bei laufender
+Datei dauerte 11,2 s. Die Sonde startete dafür eine frische, nie gelaufene
+Kopie und benannte sie um, während der Virenscanner sie noch prüfte — so
+lange hält er die Datei fest. Im Betrieb läuft die alte App seit Stunden.
+Die Sonde lässt die aktive Kopie seither erst einmal laufen und misst dann.
+Für den Anschluss (PR 7b) folgt daraus trotzdem eine Regel: **Getauscht wird
+nur mit einer Datei, deren Probelauf abgeschlossen ist**, nie während er
+läuft.
+
+### Dritter Lauf: Der Tausch bleibt bei rund 2 s (16.11.2026)
+
+Stand `d2e395c`, die aktive Kopie lief vor dem Tausch schon einmal:
+
+| Messwert | Ergebnis |
+|---|---|
+| erster Start der frisch abgelegten Datei | 19,6 s |
+| Tausch bei laufender Datei | **2,13 s** |
+| Ende der alten App → neue Version angekommen | 1,34 s |
+| Fehlstart → alte Version wieder aktiv | 1,09 s |
+| Hänger: Start der neuen Version → Rückfall | 1545 ms bei 1500 ms Frist |
+
+Der erste Start schwankt zwischen 13 und 20 s; die Probelauf-Frist von
+120 s hat Luft.
+
+**Die Deutung „Erstprüfung" trug nur zum Teil.** Mit einer schon gelaufenen
+Datei sank der Tausch von 11,2 s auf 2,13 s — aber nicht auf Millisekunden.
+In allen drei Läufen benannte die Sonde die Datei **300 ms nach ihrem
+Start** um (2,35 s, 11,2 s mit ungeprüfter Datei, 2,13 s). Naheliegend ist,
+dass die Schutzsoftware eine eben gestartete Datei kurz festhält; im Betrieb
+läuft die alte App seit Stunden. Belegt ist das nicht.
+
+Weil der Tausch mitten in der Lücke liegt — 2 s würden sie mehr als
+verdoppeln —, misst die Sonde seither getrennt:
+
+- beide Umbenennungen **einzeln**, mit Dauer und Zahl der Versuche
+  (laufende Datei beiseite / neue Datei einsetzen),
+- nach **6 s Laufzeit** der gespielten alten App (wie im Betrieb),
+- und als **Gegenprobe** 300 ms nach dem Start (wie bisher).
+
+Bleibt auch nach 6 s Laufzeit eine Sperre von Sekunden, muss vor dem
+Anschluss geklärt werden, welcher der beiden Schritte hängt.
+
+### Vierter Lauf: Das Umbenennen blockiert unvorhersehbar — der Tausch wandert vor die Lücke (16.11.2026)
+
+Stand `2723aa5`, beide Umbenennungen einzeln gemessen:
+
+| Messung | laufende Datei beiseite | neue Datei einsetzen |
+|---|---|---|
+| nach 6 s Laufzeit der alten App | **3,79 s** (1 Versuch) | 3 ms (1 Versuch) |
+| Gegenprobe, 300 ms nach dem Start | 7 ms (1 Versuch) | **9,70 s** (1 Versuch) |
+
+Übrige Werte wie zuvor: neue Version 1,26 s nach dem Ende der alten
+angekommen, Fehlstart → alte Version nach 0,97 s wieder aktiv, Hänger →
+Rückfall 1531 ms nach dem Start bei 1500 ms Frist. Erster Start einer
+frischen Datei diesmal 5,2 s.
+
+**Befund:** Auf diesem Rechner blockiert in jedem Tausch **eine** der beiden
+Umbenennungen für Sekunden — mal die eine, mal die andere, jeweils als ein
+einziger, lange hängender Aufruf, der dann gelingt. Die Vermutung „hängt am
+frischen Start" ist damit widerlegt: Nach 6 s Laufzeit blockierte es
+ebenfalls. Was die Schutzsoftware in dieser Zeit tut, ist von außen nicht zu
+sehen; zu vermuten ist eine Nachprüfung von Programmdateien, die kurz zuvor
+zum ersten Mal liefen. Ob das auch für eine seit Stunden laufende Datei
+gilt, hat die Sonde nicht gemessen.
+
+**Entscheidung: Der Tausch findet vor dem Anhalten der Übertragung statt.**
+Die laufende App stört es nicht, wenn ihre Programmdatei umbenannt wird; sie
+läuft aus der umbenannten Datei weiter. Der Tausch braucht die angehaltene
+Übertragung nicht. Damit gilt:
+
+- Wie lange das Umbenennen dauert, ist für die Lücke **gleichgültig** — auch
+  10 s kosten keinen Ausfall, nur Wartezeit nach dem Klick.
+- Die Lücke besteht nur noch aus: Übertragung anhalten → App endet → 0,4 s
+  Nachlauf → neue Version starten (0,2 s) → Port binden. Gemessen mit
+  gespielter App: 1,3 bis 1,4 s vom Ende der alten bis zur Ankunft der neuen.
+- Scheitert der Tausch, ist nichts angehalten worden. Der Fall „Übertragung
+  nach gescheitertem Tausch wieder starten" entfällt.
+- Neue Grenze: Stürzt die App zwischen Tausch und Übergabe ab, startet beim
+  nächsten Mal die neue Version ohne Wächter — wie nach einem Installer-Lauf.
+
+Offen bleibt der **Rückfall**: Dort benennt der Wächter um, während niemand
+überträgt. Gemessen mit geprüften Dateien 1 bis 2 s; blockiert die
+Schutzsoftware dort ebenso, verlängert das nur den Fehlerfall.
+
+### Anschluss ans Banner (PR 7b, v0.9.439): was bewusst so ist
+
+Nach Security- und Code-Review angenommen und hier festgehalten:
+
+- **Der Probelauf läuft ohne Klick.** Er führt eine Datei aus, die gegen
+  einen gültig signierten Kopf geprüft ist — dieselbe Vertrauensbasis wie der
+  Installer, nur ohne Zutun. Ohne ihn gäbe es weder die Gewissheit, dass das
+  System die Datei ausführt, noch das Vorwärmen (siehe Messung).
+- **Ein Prozess desselben Windows-Benutzers ist keine Grenze.** Zwischen der
+  letzten Prüfung der neuen Datei und dem Umbenennen könnte er sie
+  austauschen — er könnte aber ebenso `bts-light.exe` selbst ersetzen.
+- **Kein Widerruf signierter Versionen.** Der Kopf muss neuer sein als die
+  laufende Version und genau die Version nennen, die der Updater meldet;
+  eine zurückgezogene, echt signierte Version bleibt ladbar, solange sie auf
+  dem Server liegt. Zurückgezogene Kern-Dateien gehören dort gelöscht. Das
+  ist enger als der Installer-Weg, bei dem `latest.json` die Version frei
+  behaupten kann (`require_signed_version` ist aus).
+- **Ankunft heißt: Das Fenster hat einen Befehl gerufen.** Stürzt die neue
+  Version danach ab, rollt niemand zurück.
+- **Während des Wechsels ist der Installer-Weg gesperrt**, und das Fenster
+  lässt sich nicht schließen: Zwei Wege zugleich hinterließen die
+  Programmdatei in unbestimmtem Zustand.
+- **Nach einem Rückfall** startet die alte Version die Übertragung nur, wenn
+  sie vor dem Wechsel lief.
+- **Der Wechsel selbst war bis zum ersten Release-Paar ungeprüft**: Er
+  braucht eine installierte Version mit Wächter und eine neuere mit
+  Kern-Artefakt. Der erste Lauf steht im nächsten Abschnitt.
+
+### Erster echter Wechsel mit der vollen App (v0.9.439 → v0.9.440, 16.11.2026)
+
+Ein Windows-PC mit installierter v0.9.439 bot nach dem Vorladen **Jetzt
+wechseln** an; der Wechsel auf v0.9.440 gelang. Damit sind erstmals in
+einem Stück gelaufen: Release-Job `kern`, Vorladen, Probelauf, Tausch,
+Wächter, Ankunftsmeldung. `uebergabe-waechter.log`:
+
+| Schritt | Abstand |
+|---|---|
+| Wächter gestartet → neue Version gestartet | 1825 ms |
+| neue Version gestartet → angekommen | 908 ms |
+| **Wächter gestartet → angekommen** | **2734 ms** |
+
+Die 1825 ms sind das Warten auf das Ende der alten App plus der Start der
+neuen Datei; die 908 ms decken sich mit den Läufen unter Linux (755 und
+940 ms).
+
+Am Bildschirm dauerte der ganze Wechsel nach Beobachtung der Turnierleitung
+„nur wenige Sekunden" — die in der Sonde gemessene Blockade beim Umbenennen
+(bis 10 s) fiel in diesem Lauf nicht auf. Gemessen ist das nicht.
+
+**Was dieser Lauf nicht belegt:**
+
+- Die Lücke der Übertragung (Erfolgskriterium: Median höchstens 3 s) steht
+  im normalen Log (`Wiederanlauf nach Update: … Lücke N ms`) und liegt
+  nicht vor. Sie beginnt kurz **vor** dem Start des Wächters (Anhalten der
+  Übertragung) und endet, wenn der Tablet-Port wieder offen ist.
+- Ob die Übertragung beim Wechsel lief und welcher Rechner es war, ist
+  nicht festgehalten.
+- Es ist ein einzelner Lauf, kein Median, und kein Hallen-PC.
 
 ### Was der Review vor dem Anschluss geändert hat (16.11.2026)
 

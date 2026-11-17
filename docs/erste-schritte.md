@@ -171,25 +171,86 @@ War es minimiert, greif auch hier lieber zur Taskleiste.
 
 ## Updates
 
-BTS Light prüft **beim Start** auf neue Versionen; über **Wartung → Nach Update
-prüfen** geht es auch von Hand. Ohne Internet passiert schlicht nichts — das
-ist kein Fehler.
+BTS Light prüft **beim Start** und danach etwa alle zwanzig Minuten auf neue
+Versionen; über **Wartung → Nach Update prüfen** geht es auch von Hand. Ohne
+Internet passiert schlicht nichts — das ist kein Fehler.
 
 Gibt es eine neue Fassung, erscheint oben ein Banner. Sie wird **im Hintergrund
 geladen**, während du weiterarbeitest, und du hast zwei Möglichkeiten:
 
 | Wahl | Wann sinnvoll |
 |---|---|
-| **Jetzt neu starten** | Zwischen zwei Runden. Der Neustart unterbricht etwa **20 Sekunden**; die Tablets zählen weiter, und die Übertragung setzt von selbst wieder ein. |
-| **Beim Beenden einbauen** | Mitten im Betrieb. Die neue Fassung wird still eingebaut, wenn du das Programm ohnehin schließt. |
+| **Jetzt wechseln** | Auch im laufenden Turnier — am besten in einem ruhigen Moment. Der Wechsel unterbricht nur **wenige Sekunden**; die Tablets zählen weiter, und die Übertragung läuft von selbst weiter. Nach dem Klick kann es einen Augenblick dauern, bis es losgeht. |
+| **Beim Beenden einbauen** | Wenn du gar keine Unterbrechung willst. Die neue Fassung wird still eingebaut, wenn du das Programm ohnehin schließt. |
+
+<!-- pruef: "Jetzt wechseln" in src/io/updateBanner.mjs -->
+<!-- pruef: "Beim Beenden einbauen" in src/io/updateBanner.mjs -->
+
+**Jetzt wechseln** gibt es, wenn BTS Light die neue Fassung schon fertig
+neben sich gelegt und zur Probe gestartet hat — das dauert nach dem Laden
+einen Moment. Steht stattdessen **Jetzt neu starten** da, läuft das Update
+über das Installationsprogramm: Das unterbricht etwa **20 Sekunden** und ist
+eher etwas für die Pause zwischen zwei Runden. Das ist auch der Weg beim
+ersten Update auf eine Fassung, die den schnellen Wechsel kann.
+
+<!-- pruef: "Jetzt neu starten" in src/io/updateBanner.mjs -->
+<!-- pruef: "der Neustart unterbricht etwa 20 s" in src/io/updateBanner.mjs -->
 
 Damit du die Entscheidung nicht blind triffst, sagt das Banner, was gerade auf
 dem Spiel steht: **wie viele Felder belegt sind**, wenn die Übertragung läuft —
 und sonst, dass gerade kein Spiel läuft beziehungsweise dass die Übertragung
 ohnehin aus ist.
 
+**Wenn die neue Fassung nicht startet:** BTS Light merkt das selbst. Nach
+spätestens rund zwanzig Sekunden läuft wieder die vorige Fassung, die
+Übertragung setzt wieder ein, und oben steht in Rot, welche Fassung sich nicht
+starten ließ. Mit
+**Verstanden** verschwindet der Hinweis; diese Fassung wird dir danach nicht
+noch einmal zum schnellen Wechsel angeboten.
+
+Der schnelle Wechsel ist neu (seit v0.9.439). Kommt dir dabei etwas seltsam
+vor, nimm beim nächsten Mal **Beim Beenden einbauen** und sag uns Bescheid.
+
+<!-- pruef: "ließ sich nicht starten. bts-light läuft wieder mit" in src/io/updateBanner.mjs -->
+<!-- pruef: "Verstanden" in src/io/updateBanner.mjs -->
+
+### Zurück zur vorigen Fassung
+
+Macht eine neue Fassung Ärger, kommst du mit einem Klick zur vorigen zurück:
+BTS Light hebt genau **eine** vorige Fassung neben dem Programm auf — nach dem
+schnellen Wechsel genauso wie nach einem Update über das Installationsprogramm.
+
+- Direkt nach dem schnellen Wechsel steht der Knopf **Zurück zu v…** im Banner
+  neben „Schließen".
+- Dauerhaft steht er unter **Wartung**, im Abschnitt mit der Versionsangabe.
+
+Der Weg zurück läuft wie der schnelle Wechsel: wenige Sekunden Unterbrechung,
+die Tablets zählen weiter, die Übertragung setzt von selbst wieder ein. Drei
+Dinge solltest du vorher wissen:
+
+- **Die zurückgenommene Fassung wird dir nicht noch einmal angeboten** — weder
+  zum schnellen Wechsel noch über das Installationsprogramm. Die nächste
+  neuere Fassung bekommst du wieder wie gewohnt.
+- **Einstellungen, die es erst seit der neuen Fassung gibt, gehen verloren**,
+  sobald die vorige Fassung das nächste Mal speichert.
+- **Manchmal ist der Knopf grau.** Dann speichert die neue Fassung ihre Daten
+  in einer Form, die die vorige nicht lesen kann; daneben steht der Satz
+  „Zurück zu v… ist nicht möglich".
+
+<!-- pruef: "Zurück zu v${vorher}" in src/io/updateBanner.mjs -->
+<!-- pruef: "wurde zurückgenommen und wird nicht erneut angeboten" in src/io/updateBanner.mjs -->
+<!-- pruef: "ist nicht möglich: v${info.app_version} speichert Daten in einer Form" in src/io/updateBanner.mjs -->
+
+Gibt es keinen Knopf, liegt keine passende vorige Fassung bereit — etwa nach
+einer Neuinstallation von Hand oder wenn BTS Light im Installationsordner
+nicht schreiben darf. Die Sperre greift erst, wenn auch die vorige Fassung sie
+kennt (ab v0.9.441); kehrst du zu einer älteren zurück, bietet sie dir das
+Update wieder an.
+
 Hast du „Beim Beenden einbauen" gewählt und es dir anders überlegt, nimmt
 **„Doch nicht beim Beenden"** die Vormerkung zurück.
+
+<!-- pruef: "Doch nicht beim Beenden" in src/io/updateBanner.mjs -->
 
 ## Wo deine Daten liegen
 

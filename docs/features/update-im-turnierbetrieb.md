@@ -126,6 +126,13 @@ App-Start ─► update_check ─► Manifest ─► neuer? ─► download (Hin
 > `app_version`. Geprüft wird seither nicht nur beim Start, sondern etwa alle
 > zwanzig Minuten.
 
+> **Nachtrag v0.9.439:** Wo der Wechsel ohne Installer vorbereitet ist,
+> heißt der Knopf **Jetzt wechseln** statt „Jetzt neu starten" (Spec
+> [hotfix-ohne-neustart](hotfix-ohne-neustart.md), ADR 0100). Die
+> Banner-Texte dieser Tabelle gelten weiter für den Installer-Weg; alle Texte
+> stehen in `src/io/updateBanner.mjs` (`kernZeile`) und sind in
+> `scripts/test-update-banner.mjs` geprüft.
+
 ## Tests
 
 - `update.rs`: Marker-Frische (inkl. rückwärts gehender Uhr), Lesen-und-

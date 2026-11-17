@@ -7,7 +7,15 @@
  * klickt. Eine Lage ohne Zeile oder mit falschem Knopf fiele erst dort auf.
  */
 import assert from "node:assert/strict";
-import { KNOPF, seitenZeile, wartungSeiten } from "../src/io/updateBanner.mjs";
+import {
+  KNOPF,
+  kernZeile,
+  seitenZeile,
+  unterbrechungsHinweis,
+  wartungKern,
+  wartungSeiten,
+  wechselHinweis,
+} from "../src/io/updateBanner.mjs";
 
 const seiten = (teil = {}) => ({
   aktive_folge: 0,
@@ -105,4 +113,180 @@ assert.deepEqual(w.hinweise, ["Seiten-Stand 4 liegt bereit – Übernahme über 
 assert.equal(wartungSeiten(null), null);
 assert.equal(wartungSeiten({ app_version: "1" }), null);
 
-console.log("OK — Update-Banner (Seiten): alle Lagen geprüft.");
+// ── Kern-Zeile: Update der App selbst ──────────────────────────────────────
+
+const kern = (teil = {}) => ({
+  tausch: "aus",
+  version: null,
+  rueckweg: false,
+  grund: null,
+  meldung: "keine",
+  meldung_version: null,
+  meldung_grund: null,
+  zurueck_version: null,
+  zurueck_erlaubt: false,
+  zurueckgenommen: [],
+  ...teil,
+});
+const app = (teil = {}, kernTeil = {}) => ({
+  phase: "ready",
+  version: "0.9.440",
+  notes: null,
+  message: null,
+  occupied_courts: 3,
+  sync_running: true,
+  install_on_exit: false,
+  app_version: "0.9.439",
+  seiten: seiten(),
+  kern: kern(kernTeil),
+  ...teil,
+});
+
+// Nichts zu tun: kein Banner.
+for (const phase of ["idle", "checking", "current", "error"]) {
+  assert.equal(kernZeile(app({ phase })), null, phase);
+}
+assert.equal(kernZeile(null), null);
+
+// Kern bereit, Tausch möglich: „Jetzt wechseln", wenige Sekunden.
+let k = kernZeile(app({}, { tausch: "bereit", version: "0.9.440", rueckweg: true }));
+assert.equal(k.text, "Update (v0.9.440) liegt bereit.");
+assert.deepEqual(k.zusatz, [
+  "Auf 3 Feldern laufen Spiele – der Wechsel unterbricht wenige Sekunden, die Übertragung läuft von selbst weiter.",
+]);
+assert.deepEqual(k.knoepfe, ["beim_beenden", "wechseln"]);
+assert.equal(KNOPF.wechseln, "Jetzt wechseln");
+assert.equal(KNOPF.beim_beenden, "Beim Beenden einbauen");
+assert.match(
+  wechselHinweis(app({ occupied_courts: 1 })),
+  /^Auf 1 Feld läuft ein Spiel – der Wechsel unterbricht wenige Sekunden/,
+);
+assert.match(wechselHinweis(app({ occupied_courts: 0 })), /^Kein Spiel läuft – der Wechsel/);
+assert.equal(wechselHinweis(app({ sync_running: false })), "Der Wechsel dauert wenige Sekunden.");
+
+// Dito, die neue Version erlaubt keinen Rückweg: Das steht VOR dem Klick da.
+k = kernZeile(app({}, { tausch: "bereit", version: "0.9.440", rueckweg: false }));
+assert.equal(k.zusatz.length, 2);
+assert.equal(k.zusatz[1], "Ein Zurück zu v0.9.439 ist nach diesem Update nicht möglich.");
+assert.deepEqual(k.knoepfe, ["beim_beenden", "wechseln"]);
+
+// Kern bereit, Tausch nicht möglich: der bisherige Installer-Weg, 20 s.
+for (const tausch of ["aus", "laedt", "nicht_moeglich"]) {
+  k = kernZeile(app({}, { tausch, grund: "nur unter Windows" }));
+  assert.deepEqual(k.knoepfe, ["beim_beenden", "neu_starten"], tausch);
+  assert.match(k.zusatz[0], /der Neustart unterbricht etwa 20 s/, tausch);
+  assert.doesNotMatch(JSON.stringify(k), /nur unter Windows/, "der Grund ist Diagnose, kein Bannertext");
+}
+assert.equal(KNOPF.neu_starten, "Jetzt neu starten");
+assert.equal(unterbrechungsHinweis(app({ sync_running: false })), "Die App startet dafür kurz neu.");
+// Die vorgeladene Datei gehört zu einer ANDEREN Version als das Update: kein Wechsel.
+k = kernZeile(app({}, { tausch: "bereit", version: "0.9.441", rueckweg: true }));
+assert.deepEqual(k.knoepfe, ["beim_beenden", "neu_starten"]);
+
+// Beim Beenden vorgemerkt: kein „Jetzt"-Knopf, nur die Rücknahme.
+k = kernZeile(app({ install_on_exit: true }, { tausch: "bereit", version: "0.9.440" }));
+assert.deepEqual(k.zusatz, ["Es wird beim Beenden von bts-light still eingebaut."]);
+assert.deepEqual(k.knoepfe, ["doch_nicht"]);
+
+// Laden und Einbau/Wechsel: nur Text.
+k = kernZeile(app({ phase: "downloading" }));
+assert.equal(k.text, "Update (v0.9.440) wird im Hintergrund geladen …");
+assert.deepEqual(k.knoepfe, []);
+k = kernZeile(app({ phase: "installing" }));
+assert.match(k.text, /wird eingebaut – die App startet gleich neu/);
+k = kernZeile(app({}, { tausch: "wechselt", version: "0.9.440" }));
+assert.equal(k.text, "Wechsel auf v0.9.440 läuft – bts-light ist gleich wieder da.");
+assert.deepEqual(k.knoepfe, []);
+
+// Nach dem Wechsel: Die neue Version sagt, dass sie läuft.
+k = kernZeile(app({ phase: "current", version: null, app_version: "0.9.440" }, { meldung: "gewechselt", meldung_version: "0.9.439" }));
+assert.equal(k.text, "bts-light läuft jetzt mit v0.9.440.");
+assert.deepEqual(k.knoepfe, ["schliessen"]);
+
+// Start-Wächter hat zurückgesetzt: Vorrang vor allem, auch vor dem Angebot.
+k = kernZeile(
+  app({}, { tausch: "nicht_moeglich", meldung: "zurueckgefallen", meldung_version: "0.9.440", meldung_grund: "Frist" }),
+);
+assert.equal(k.art, "zurueckgefallen");
+assert.equal(
+  k.text,
+  "v0.9.440 ließ sich nicht starten. bts-light läuft wieder mit v0.9.439, die Übertragung läuft.",
+);
+assert.deepEqual(k.knoepfe, ["verstanden"]);
+assert.equal(KNOPF.verstanden, "Verstanden");
+// Läuft die Übertragung nicht, behauptet der Text es auch nicht.
+k = kernZeile(app({ sync_running: false }, { meldung: "zurueckgefallen", meldung_version: "0.9.440" }));
+assert.equal(k.text, "v0.9.440 ließ sich nicht starten. bts-light läuft wieder mit v0.9.439.");
+
+// ── Kern-Rückweg ───────────────────────────────────────────────────────────
+
+const nachWechsel = (kernTeil) =>
+  kernZeile(
+    app(
+      { phase: "current", version: null, app_version: "0.9.441" },
+      { meldung: "gewechselt", meldung_version: "0.9.440", ...kernTeil },
+    ),
+  );
+
+// Nach Wechsel, Rückweg erlaubt: Knopf „Zurück zu vY" neben „Schließen".
+k = nachWechsel({ zurueck_version: "0.9.440", zurueck_erlaubt: true });
+assert.equal(k.text, "bts-light läuft jetzt mit v0.9.441.");
+assert.deepEqual(k.knoepfe, ["kern_zurueck", "schliessen"]);
+assert.equal(k.namen.kern_zurueck, "Zurück zu v0.9.440");
+assert.equal(k.aus, undefined);
+assert.deepEqual(k.zusatz, []);
+
+// Nach Wechsel, Rückweg gesperrt: Knopf sichtbar, aber aus — mit Grund.
+k = nachWechsel({ zurueck_version: "0.9.440", zurueck_erlaubt: false });
+assert.deepEqual(k.knoepfe, ["kern_zurueck", "schliessen"]);
+assert.deepEqual(k.aus, ["kern_zurueck"]);
+assert.deepEqual(k.zusatz, [
+  "Zurück zu v0.9.440 ist nicht möglich: v0.9.441 speichert Daten in einer Form, die v0.9.440 nicht lesen kann.",
+]);
+
+// Ohne Vorversion bleibt es bei „Schließen".
+assert.deepEqual(nachWechsel({}).knoepfe, ["schliessen"]);
+
+// Der Rückweg läuft: Das hat Vorrang vor der Meldung, auf der geklickt wurde.
+k = nachWechsel({ tausch: "wechselt", version: "0.9.440", zurueck_version: "0.9.440", zurueck_erlaubt: true });
+assert.equal(k.art, "wechselt");
+assert.equal(k.text, "Wechsel auf v0.9.440 läuft – bts-light ist gleich wieder da.");
+assert.deepEqual(k.knoepfe, []);
+
+// Nach dem Rückweg: Die alte Version sagt, was zurückgenommen wurde.
+k = kernZeile(
+  app(
+    { phase: "current", version: null, app_version: "0.9.440" },
+    { meldung: "zurueckgenommen", meldung_version: "0.9.441", zurueckgenommen: ["0.9.441"] },
+  ),
+);
+assert.equal(k.art, "zurueckgenommen");
+assert.equal(k.text, "v0.9.441 wurde zurückgenommen und wird nicht erneut angeboten.");
+assert.deepEqual(k.zusatz, ["bts-light läuft wieder mit v0.9.440."]);
+assert.deepEqual(k.knoepfe, ["schliessen"]);
+
+// Wartungsseite: dauerhaft, auch wenn das Banner längst geschlossen ist.
+assert.equal(wartungKern(null), null);
+assert.equal(wartungKern(app({ app_version: "0.9.441" })), null, "nichts zu sagen");
+let wk = wartungKern(app({ app_version: "0.9.441" }, { zurueck_version: "0.9.440", zurueck_erlaubt: true }));
+assert.equal(wk.knopf, "Zurück zu v0.9.440");
+assert.equal(wk.erlaubt, true);
+// Wie im Banner steht dabei, was gerade auf dem Spiel steht.
+assert.equal(
+  wk.hinweise[0],
+  "Vorher lief v0.9.440. Auf 3 Feldern laufen Spiele – der Wechsel unterbricht wenige Sekunden, die Übertragung läuft von selbst weiter.",
+);
+assert.match(wk.hinweise[1], /gehen dabei verloren/);
+assert.match(wk.hinweise[1], /v0\.9\.441 wird danach nicht erneut angeboten/);
+
+wk = wartungKern(app({ app_version: "0.9.441" }, { zurueck_version: "0.9.440", zurueck_erlaubt: false }));
+assert.equal(wk.knopf, "Zurück zu v0.9.440");
+assert.equal(wk.erlaubt, false, "Knopf sichtbar, aber aus");
+assert.match(wk.hinweise[0], /ist nicht möglich/);
+
+// Zurückgenommene Version: erklärt, warum „Nach Updates suchen" nichts findet.
+wk = wartungKern(app({ app_version: "0.9.440" }, { zurueckgenommen: ["0.9.441"] }));
+assert.equal(wk.knopf, null);
+assert.deepEqual(wk.hinweise, ["v0.9.441 wurde zurückgenommen und wird nicht erneut angeboten."]);
+
+console.log("OK — Update-Banner: alle Lagen der Seiten- und der Kern-Zeile geprüft.");

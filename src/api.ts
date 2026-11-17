@@ -188,8 +188,18 @@ export const seitenUebernehmen = (): Promise<void> => invoke("seiten_uebernehmen
  *  angeboten. */
 export const seitenZurueck = (): Promise<void> => invoke("seiten_zurueck");
 
+/** Wechsel auf die vorgeladene Version ohne Installer: Programmdatei
+ *  tauschen, Übertragung anhalten, App beenden — ein Wächter startet die
+ *  neue Version und stellt diese wieder her, falls sie nicht anläuft. */
+export const kernWechseln = (): Promise<void> => invoke("kern_wechseln");
+
+/** Zurück zur Vorversion: derselbe Ablauf mit vertauschten Rollen. Die
+ *  laufende Version wird danach nicht erneut angeboten. */
+export const kernZurueck = (): Promise<void> => invoke("kern_zurueck");
+
 /** Die einmalige Meldung im Update-Banner schließen. */
-export const updateMeldungWeg = (): Promise<void> => invoke("update_meldung_weg");
+export const updateMeldungWeg = (welche: "seiten" | "kern"): Promise<void> =>
+  invoke("update_meldung_weg", { welche });
 
 /** Ergebnis des Wiederanlaufs nach einem Update abholen (einmalig beim
  *  Start). Den Start selbst hat der Rust-Kern schon erledigt; hier steht
