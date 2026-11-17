@@ -65,3 +65,13 @@ Beenden einbauen" ist das genau falsch.
 - Die Feldstempel-Übernahme (`reconcile_on_court`, erster Lauf) ändert das
   Verhalten nur beim Prozessstart; im laufenden Betrieb stempelt ein
   Feldwechsel weiterhin „jetzt".
+
+## Nachtrag 17.11.2026
+
+Der Ablauf hat zwei Geschwister bekommen (Spec
+[hotfix-ohne-neustart](../features/hotfix-ohne-neustart.md)): ein Seiten-Paket,
+das Geräte-Seiten ohne Neustart tauscht (ADR 0099), und den Wechsel der
+Programmdatei ohne Installer samt Rückweg (ADR 0100/0101). Der hier
+beschriebene Installer-Weg bleibt der Rückhalt, wo der Tausch nicht möglich
+ist, und sichert seit v0.9.441 vor dem Lauf die laufende Programmdatei als
+Vorversion.

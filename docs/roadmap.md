@@ -376,7 +376,11 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
     die Lücke der Übertragung ist noch nicht gemessen. **Kern-Rückweg,
     Sperrliste und Aufräumen sind gebaut (PR 8, v0.9.441)** — der Rückweg
     selbst ist noch nie mit der vollen App gelaufen (braucht eine installierte
-    v0.9.441 und ein Update darauf). Es fehlt der Abschluss mit Feldtest (9).
+    v0.9.441 und ein Update darauf). **Schritt 9:** Feldtest-Protokoll
+    (`docs/features/hotfix-ohne-neustart-feldtest.md`) und Auswertung
+    (`scripts/luecken-auswerten.mjs`) stehen; **offen sind die Messungen am
+    Windows-PC** (zehn Tausch- und zehn Installer-Läufe, Rückweg, erzwungener
+    Rückfall, Cloud, Last) und der erste Lauf des Seiten-Paket-Jobs.
   - Nebenbefund für später: `latest.json` ist unsigniert und
     `require_signed_version` nicht gesetzt.
 

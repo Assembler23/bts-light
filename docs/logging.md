@@ -224,6 +224,14 @@ sondern nach `uebergabe-waechter.log` im App-Datenverzeichnis: Start,
 Lücke des Wechsels steht wie beim Installer-Weg in der Zeile
 `Wiederanlauf nach Update: Tablet-Port wieder offen, Lücke N ms`.
 
+Alle Lücken auf einmal, dem Weg zugeordnet und gegen das Erfolgskriterium
+gerechnet: `node scripts/luecken-auswerten.mjs <Log-Ordner>` (siehe
+[Feldtest-Protokoll](features/hotfix-ohne-neustart-feldtest.md)). Das Skript
+erkennt den Weg an den Zeilen `Kernwechsel auf vX: Wächter gestartet`,
+`Rückweg auf vX: Programmdatei getauscht`, `Update auf vX wird eingebaut` und
+`Kernwechsel: Ankunft von vX gemeldet` —
+wer deren Wortlaut ändert, macht `scripts/test-luecken-auswerten.mjs` rot.
+
 ### Wiederanlauf nach einem Update (seit v0.9.434)
 
 Lief die Übertragung, als ein Update eingebaut wurde, startet der Kern sie
