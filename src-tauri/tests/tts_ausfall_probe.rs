@@ -139,6 +139,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use bts_light_lib::config::{self, AppConfig, DienstArt};
+use bts_light_lib::tts_text::netz::TtsFehler;
 use bts_light_lib::tts_text::Format;
 use bts_light_lib::{azure_tts, elevenlabs_tts, gemini_tts, openai_tts};
 
@@ -466,17 +467,18 @@ fn modul_fehler_art(fehler: &str) -> &'static str {
 }
 
 /// Fehlertext eines Dienst-Moduls → Ausgang, ohne Antworttext.
-fn dienst_ausgang(erg: Result<(), String>) -> Ausgang {
+fn dienst_ausgang(erg: Result<(), TtsFehler>) -> Ausgang {
     match erg {
         Ok(()) => Ausgang::Gelungen("vertont".to_string()),
-        Err(e) => match http_status(&e) {
+        Err(e) => match http_status(&e.meldung) {
             Some(code) => Ausgang::Antwort(code),
-            None => Ausgang::Fehler(modul_fehler_art(&e).to_string()),
+            None => Ausgang::Fehler(modul_fehler_art(&e.meldung).to_string()),
         },
     }
 }
 
-/// Der echte Weg der App mit ungültigem Schlüssel — misst genau das Warten,
+/// Der echte Weg der App mit ungültigem Schlüssel (seit E1 mit Verbindungsfrist,
+/// ohne die harte Frist von außen) — misst genau das Warten,
 /// das eine Ansage heute erlebt, ohne Zeichen zu verbrauchen.
 async fn produktiv(anbieter: Anbieter, region: &str) -> Ausgang {
     let schluessel = UNGUELTIGER_SCHLUESSEL;

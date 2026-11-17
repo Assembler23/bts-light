@@ -4,6 +4,23 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.443
+
+- **Ansage ohne Internet hängt nicht mehr.** Fällt das Internet aus, spricht
+  nach höchstens 4 Sekunden die Ersatzstimme statt nach 20–30 Sekunden
+  Stille. Danach merkt sich bts-light den ausgefallenen Sprachdienst und
+  spricht sofort mit der Ersatzstimme — bis eine Prüfung im Hintergrund (alle
+  15 s, ohne Zeichenverbrauch) ihn wieder erreicht. Ansagen, die schon im
+  Cache liegen, spielen weiter in der Cloud-Stimme.
+- **Klarerer Grund im Rückfall-Banner**, zum Beispiel „keine Verbindung zum
+  Sprachdienst" — ohne Adresse und ohne Antworttext des Dienstes.
+- **Kein zweiter Versuch mehr nach Drossel, Schlüssel- oder Netzfehler:**
+  Scheitert ein Teil einer geteilten Ansage daran, spricht gleich die
+  Ersatzstimme; die ganze Ansage wird nur noch nach einem abgelehnten Inhalt
+  ein zweites Mal angefragt.
+- **Gemini:** braucht oft länger als 4 s und kann deshalb auch bei gutem Netz
+  an der Frist scheitern — vor dem Turnier anhören.
+
 ## v0.9.442
 
 - **Keine Änderung an der App.** Diese Fassung gibt es, damit der schnelle

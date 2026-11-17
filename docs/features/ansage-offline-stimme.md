@@ -1,6 +1,7 @@
 # Ansage ohne Internet: Ausfall erkennen, Offline-Stimme, Ansagen vorab laden — Spezifikation
 
-> Status: **Freigegeben 2026-11-16** (via /idee: Brief → Grill → How-To → Review). Umsetzung noch nicht begonnen.
+> Status: **Freigegeben 2026-11-16** (via /idee: Brief → Grill → How-To → Review). E0 abgeschlossen (Messung, ADR 0105);
+> **E1 umgesetzt in v0.9.443**; E2–E5 offen.
 > Quelle: Idee vom 16.11.2026. Betroffene Crates: `src-tauri`, `src`, `relay-proto` (nur Lesart eines
 > Wertes), `relay` unberührt.
 > ADR: [0104](../adr/0104-offline-stimme-engine-und-verpackung.md) (Engine und Verpackung) ·

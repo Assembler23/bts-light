@@ -24,6 +24,7 @@ import {
 import {
   bannerFuer,
   mitFrist,
+  vertonenMitFrist,
   pcmFristMs,
   stimmeFristMs,
   abschnitteTeilen,
@@ -1333,7 +1334,9 @@ export function playPrepared(
     // Hochwertiger Azure-Weg (ganze Ansage am Stück); bei Fehler → Windows-Stimme.
     if (synthesize && p.ssml) {
       try {
-        const b64 = await synthesize(p.ssml);
+        // Spec `ansage-offline-stimme` K10: Der Kern bricht nach der harten
+        // Frist selbst ab; hier nur die Sicherung, falls er nicht antwortet.
+        const b64 = await vertonenMitFrist(synthesize(p.ssml));
         // Während der Azure-Abfrage abgebrochen → keine Nachzügler.
         if (gen !== announceGen) return;
         await spieleAzure(b64, gen);

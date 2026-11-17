@@ -232,6 +232,22 @@ erkennt den Weg an den Zeilen `Kernwechsel auf vX: Wächter gestartet`,
 `Kernwechsel: Ankunft von vX gemeldet` —
 wer deren Wortlaut ändert, macht `scripts/test-luecken-auswerten.mjs` rot.
 
+### Cloud-Stimme: Vertonung und Ausfall (seit v0.9.443)
+
+Je Ansage, die an einen Cloud-Sprachdienst geht, eine Zeile — **nie** mit dem
+Ansagetext, nie mit Adresse oder Antwort des Dienstes:
+
+| Zeile | Bedeutung |
+|---|---|
+| `Cloud-Stimme: Vertonung dienst=… weg=pc\|seite dauer_ms=… zeichen=… zeichen_neu=… ausgang=… klasse=…` | `ausgang`: `gelungen`, `cache` (ganz ohne Netz) oder das Kennwort des Fehlers (`verbindung`, `zeit`, `antwort`, `frist`, `gesperrt`, `http-5xx`, `drossel`, `zugang`, `http-4xx`, `inhalt` …). `klasse`: `netz`, `drossel`, `zugang`, `inhalt` oder `-`. `zeichen` = Länge der Ansage, `zeichen_neu` = davon neu bezahlt. |
+| `Cloud-Stimme: Ansage in Teilen gescheitert dienst=… kennwort=…` | Ein Teil scheiterte; bei Klasse `inhalt` folgt der Versuch mit der ganzen Ansage. |
+| `Cloud-Stimme: Dienst gesperrt, Hintergrundprüfung startet` | Ein Netz-Fehler hat den Merker gesetzt. |
+| `Cloud-Stimme: Dienst wieder erreichbar, Sperre aufgehoben dienst_host=…` | Die Prüfung erreichte den Host; die nächste Ansage geht wieder an die Cloud-Stimme. |
+| `Cloud-Stimme: kein Dienst mehr gesperrt, Prüfung endet` | Merker gelöscht oder nach 10 Minuten abgelaufen. |
+| `Ansage-Seite: Cloud-Vertonung gescheitert, Eintrag ohne Audio: …` | Seiten-Weg; der Text ist derselbe wie im Rückfall-Banner. |
+
+Die Zeile `Cloud-Stimme: Zeichen verbraucht` (Zeichenzähler) bleibt unverändert.
+
 ### Wiederanlauf nach einem Update (seit v0.9.434)
 
 Lief die Übertragung, als ein Update eingebaut wurde, startet der Kern sie

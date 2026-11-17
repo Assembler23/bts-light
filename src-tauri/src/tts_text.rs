@@ -296,9 +296,237 @@ mod tests {
     }
 }
 
-/// Gemeinsame Bausteine der Cloud-Dienste ohne SSML (Cache + HTTP-Fehler).
+/// Gemeinsame Bausteine der Cloud-Dienste: Cache, HTTP-Client und die
+/// Fehlerklassen der Ausfall-Erkennung (Spec `ansage-offline-stimme`, E1).
 pub mod netz {
     use std::path::Path;
+    use std::sync::OnceLock;
+    use std::time::Duration;
+
+    /// Frist für Verbindungsaufbau samt TLS. Gemessen (ADR 0105): Im guten
+    /// Netz steht die Verbindung nach höchstens 0,5 s. Sie deckt **nicht** die
+    /// Gegenstelle, die eine Anfrage annimmt und dann schweigt — dafür gibt es
+    /// die harte Frist um die ganze Vertonung (`tts_netzlage::HARTE_FRIST`).
+    pub const VERBINDUNGSFRIST: Duration = Duration::from_millis(1500);
+
+    /// Gesamtfrist einer einzelnen Anfrage, wo keine harte Frist von außen
+    /// greift („Dienste prüfen").
+    pub const ANFRAGE_FRIST: Duration = Duration::from_secs(10);
+
+    /// Offene Verbindungen nur kurz aufheben: Die Teile **einer** Ansage
+    /// teilen sich den Aufbau, die nächste Ansage baut neu auf. So scheitert
+    /// sie im Ausfall schon an der Verbindungsfrist statt erst an der harten
+    /// Frist auf einer still gestorbenen Leitung.
+    const LEERLAUF: Duration = Duration::from_secs(10);
+
+    /// Fehlerklasse einer Vertonung (ADR 0105). Sie entscheidet, ob der
+    /// Ausfall-Merker gesetzt wird und ob ein zweiter Versuch lohnt.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Klasse {
+        /// Verbindung, Zeitüberschreitung, harte Frist, HTTP 5xx.
+        Netz,
+        /// HTTP 429.
+        Drossel,
+        /// HTTP 401/403.
+        Zugang,
+        /// Übrige HTTP-Fehler und unlesbare Antworten.
+        Inhalt,
+    }
+
+    impl Klasse {
+        /// Festes Wort fürs Log.
+        pub fn wort(self) -> &'static str {
+            match self {
+                Self::Netz => "netz",
+                Self::Drossel => "drossel",
+                Self::Zugang => "zugang",
+                Self::Inhalt => "inhalt",
+            }
+        }
+    }
+
+    /// Fehler einer Vertonung, an der Quelle eingeordnet.
+    ///
+    /// `Display` liefert den Text für Banner **und** Log: ohne Adresse, ohne
+    /// Antworttext des Dienstes. Die HTTP-Bibliothek nennt in ihren Fehlern
+    /// die angefragte Adresse und bei fremdem Zertifikat (Anmeldeseite eines
+    /// Hotspots) dessen Namen; manche Dienste wiederholen in der Antwort Teile
+    /// des Schlüssels. Beides bleibt in `meldung` und geht nie ins Log.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct TtsFehler {
+        pub klasse: Klasse,
+        /// Festes Wort für die Fehlerart.
+        pub kennwort: &'static str,
+        /// Rohtext samt Antwort des Dienstes — nur für „Dienste prüfen", wo
+        /// die Turnierleitung den Grund am eigenen Bildschirm sehen soll.
+        pub meldung: String,
+        anzeige: String,
+    }
+
+    impl std::fmt::Display for TtsFehler {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.anzeige)
+        }
+    }
+
+    impl TtsFehler {
+        /// Die Anfrage selbst taugt nicht (Stimme, leerer Text, leeres Audio):
+        /// ein zweiter Versuch mit der ganzen Ansage kann gelingen.
+        pub fn inhalt(meldung: impl Into<String>) -> Self {
+            let meldung = meldung.into();
+            Self {
+                klasse: Klasse::Inhalt,
+                kennwort: "inhalt",
+                anzeige: meldung.clone(),
+                meldung,
+            }
+        }
+
+        /// Fehler beim Senden: Es kam keine Antwort.
+        pub fn anfrage(dienst: &str, vorsatz: &str, e: &reqwest::Error) -> Self {
+            let (klasse, kennwort, text) = if e.is_builder() {
+                (
+                    Klasse::Inhalt,
+                    "anfrage-ungueltig",
+                    "Anfrage an den Sprachdienst ungültig",
+                )
+            } else if e.is_connect() {
+                (
+                    Klasse::Netz,
+                    "verbindung",
+                    "keine Verbindung zum Sprachdienst",
+                )
+            } else if e.is_timeout() {
+                (Klasse::Netz, "zeit", "Sprachdienst antwortet nicht")
+            } else {
+                (
+                    Klasse::Netz,
+                    "anfrage",
+                    "Anfrage an den Sprachdienst gescheitert",
+                )
+            };
+            Self {
+                klasse,
+                kennwort,
+                meldung: format!("{vorsatz}: {e}"),
+                anzeige: format!("{dienst}: {text}"),
+            }
+        }
+
+        /// Fehler beim Lesen des Antwortkörpers: Die Leitung riss ab oder die
+        /// Frist lief ab. (Unlesbarer **Inhalt** ist [`TtsFehler::inhalt`].)
+        pub fn antwort(dienst: &str, vorsatz: &str, e: &reqwest::Error) -> Self {
+            let (kennwort, text) = if e.is_timeout() {
+                ("zeit", "Sprachdienst antwortet nicht")
+            } else {
+                ("antwort", "Antwort des Sprachdienstes abgerissen")
+            };
+            Self {
+                klasse: Klasse::Netz,
+                kennwort,
+                meldung: format!("{vorsatz}: {e}"),
+                anzeige: format!("{dienst}: {text}"),
+            }
+        }
+
+        /// Die harte Frist um die ganze Vertonung ist abgelaufen.
+        pub fn frist(dienst: &str) -> Self {
+            let anzeige = format!("{dienst}: keine Antwort innerhalb der Frist");
+            Self {
+                klasse: Klasse::Netz,
+                kennwort: "frist",
+                meldung: anzeige.clone(),
+                anzeige,
+            }
+        }
+
+        /// Der Ausfall-Merker ist gesetzt: Es wurde gar nicht erst angefragt.
+        pub fn gesperrt(dienst: &str) -> Self {
+            let anzeige = format!(
+                "{dienst}: zurzeit nicht erreichbar, die Ersatzstimme spricht, bis der Dienst \
+                 wieder antwortet"
+            );
+            Self {
+                klasse: Klasse::Netz,
+                kennwort: "gesperrt",
+                meldung: anzeige.clone(),
+                anzeige,
+            }
+        }
+
+        /// Stellt der Rohmeldung einen Ort voran („Teil 2").
+        pub fn mit_vorsatz(mut self, vorsatz: &str) -> Self {
+            self.meldung = format!("{vorsatz}: {}", self.meldung);
+            self
+        }
+    }
+
+    /// Klasse, Kennwort und Anzeigetext zu einem HTTP-Status ≠ 2xx.
+    pub fn status_einordnen(code: u16) -> (Klasse, &'static str, &'static str) {
+        match code {
+            500..=599 => (Klasse::Netz, "http-5xx", "Störung beim Sprachdienst"),
+            429 => (
+                Klasse::Drossel,
+                "drossel",
+                "zu viele Anfragen oder Kontingent aufgebraucht",
+            ),
+            401 | 403 => (
+                Klasse::Zugang,
+                "zugang",
+                "Schlüssel ungültig oder ohne Berechtigung",
+            ),
+            400..=499 => (Klasse::Inhalt, "http-4xx", "Anfrage abgelehnt"),
+            _ => (Klasse::Inhalt, "http-sonst", "unerwartete Antwort"),
+        }
+    }
+
+    /// Fehler aus einer HTTP-Antwort ≠ 2xx. Der Antworttext (auf 200 Zeichen
+    /// gekürzt) steht nur in der Rohmeldung.
+    pub async fn status_fehler(dienst: &str, resp: reqwest::Response) -> TtsFehler {
+        let code = resp.status();
+        let body: String = resp
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(200)
+            .collect();
+        TtsFehler::aus_status(dienst, code.as_u16(), &body)
+    }
+
+    impl TtsFehler {
+        /// Fehler zu einem HTTP-Status ≠ 2xx; `body` nur in der Rohmeldung.
+        pub fn aus_status(dienst: &str, code: u16, body: &str) -> Self {
+            let (klasse, kennwort, text) = status_einordnen(code);
+            let grund = reqwest::StatusCode::from_u16(code)
+                .ok()
+                .and_then(|s| s.canonical_reason())
+                .unwrap_or("");
+            Self {
+                klasse,
+                kennwort,
+                meldung: format!("{dienst} HTTP {code} {grund}: {body}"),
+                anzeige: format!("{dienst}: {text} (HTTP {code})"),
+            }
+        }
+    }
+
+    /// Der eine HTTP-Client aller Sprachdienste, mit Verbindungsfrist. Die
+    /// Gesamtfrist setzt jede Anfrage selbst.
+    pub fn client() -> Result<&'static reqwest::Client, TtsFehler> {
+        static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+        if let Some(c) = CLIENT.get() {
+            return Ok(c);
+        }
+        let neu = reqwest::Client::builder()
+            .connect_timeout(VERBINDUNGSFRIST)
+            .pool_idle_timeout(LEERLAUF)
+            // Schlüssel stehen in Kopfzeilen: keiner Umleitung folgen.
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| TtsFehler::inhalt(format!("HTTP-Client: {e}")))?;
+        Ok(CLIENT.get_or_init(|| neu))
+    }
 
     /// Liest eine gecachte Vertonung; `None`, wenn keine (oder leer).
     pub fn cache_holen(dir: &Path, schluessel: &str) -> Option<Vec<u8>> {
@@ -312,29 +540,6 @@ pub mod netz {
         let _ = std::fs::write(dir.join(crate::azure_tts::cache_name(schluessel)), bytes);
     }
 
-    /// Fehlermeldung aus einer HTTP-Antwort ≠ 2xx, Body auf 200 Zeichen
-    /// gekürzt (die Dienste schicken lange JSON-Diagnosen, nie den Schlüssel).
-    pub async fn http_fehler(dienst: &str, resp: reqwest::Response) -> String {
-        let code = resp.status();
-        let body: String = resp
-            .text()
-            .await
-            .unwrap_or_default()
-            .chars()
-            .take(200)
-            .collect();
-        format!("{dienst} HTTP {code}: {body}")
-    }
-
-    /// HTTP-Client mit Zeitlimit — offline soll die Ersatzstimme schnell
-    /// übernehmen, nicht erst nach einer halben Minute.
-    pub fn client(sekunden: u64) -> Result<reqwest::Client, String> {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(sekunden))
-            .build()
-            .map_err(|e| format!("HTTP-Client: {e}"))
-    }
-
     /// Stimmen-Namen/IDs landen im URL-Pfad oder JSON: nur ASCII-Buchstaben
     /// und Ziffern, höchstens 64 Zeichen.
     pub fn stimme_gueltig(voice: &str) -> bool {
@@ -343,6 +548,10 @@ pub mod netz {
 
     #[cfg(test)]
     mod tests {
+        use super::*;
+        use crate::badhub::testhilfe::{starten, Antwort};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
         #[test]
         fn stimmen_id_darf_den_pfad_nicht_verlassen() {
             assert!(super::stimme_gueltig("EXAVITQu4vr4xnSDxMaL"));
@@ -350,6 +559,109 @@ pub mod netz {
             assert!(!super::stimme_gueltig("../user"));
             assert!(!super::stimme_gueltig("a?b=c"));
             assert!(!super::stimme_gueltig(""));
+        }
+
+        /// Kriterien 1 und 5: Nur Störungen der Leitung und des Dienstes sind
+        /// „Netz"; Drossel, Zugang und der Rest bleiben eigene Klassen.
+        #[test]
+        fn http_status_wird_nach_der_tabelle_der_spec_eingeordnet() {
+            for code in [500, 502, 503, 504, 599] {
+                assert_eq!(status_einordnen(code).0, Klasse::Netz, "{code}");
+            }
+            assert_eq!(status_einordnen(429).0, Klasse::Drossel);
+            assert_eq!(status_einordnen(401).0, Klasse::Zugang);
+            assert_eq!(status_einordnen(403).0, Klasse::Zugang);
+            for code in [400, 402, 404, 408, 422, 301] {
+                assert_eq!(status_einordnen(code).0, Klasse::Inhalt, "{code}");
+            }
+        }
+
+        /// Der Antworttext eines Dienstes kann Teile des Schlüssels nennen: Er
+        /// bleibt in der Rohmeldung, Banner und Log sehen nur den Status.
+        #[tokio::test]
+        async fn status_fehler_zeigt_den_antworttext_nicht_an() {
+            let mock = starten(vec![Antwort::http(
+                "401 Unauthorized",
+                "Incorrect API key provided: sk-geheim",
+            )])
+            .await;
+            let resp = reqwest::Client::new().get(&mock.url).send().await.unwrap();
+            let f = status_fehler("OpenAI", resp).await;
+            assert_eq!(f.klasse, Klasse::Zugang);
+            assert_eq!(f.kennwort, "zugang");
+            assert!(f.meldung.starts_with("OpenAI HTTP 401"), "{}", f.meldung);
+            assert!(f.meldung.contains("sk-geheim"));
+            let anzeige = f.to_string();
+            assert!(anzeige.contains("HTTP 401"), "{anzeige}");
+            assert!(!anzeige.contains("sk-geheim"), "{anzeige}");
+        }
+
+        /// Ein geschlossener Port ist „Netz" — und die Anzeige nennt die
+        /// Adresse nicht.
+        #[tokio::test]
+        async fn abgelehnte_verbindung_ist_netz_ohne_adresse_in_der_anzeige() {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let adresse = l.local_addr().unwrap();
+            drop(l);
+            let e = reqwest::Client::new()
+                .get(format!("http://{adresse}/x"))
+                .send()
+                .await
+                .unwrap_err();
+            let f = TtsFehler::anfrage("OpenAI", "OpenAI-Anfrage", &e);
+            assert_eq!((f.klasse, f.kennwort), (Klasse::Netz, "verbindung"));
+            assert!(f.meldung.starts_with("OpenAI-Anfrage: "), "{}", f.meldung);
+            assert!(!f.to_string().contains("127.0.0.1"), "{f}");
+        }
+
+        /// Die Gegenstelle nimmt an und schweigt: Zeitüberschreitung = „Netz".
+        #[tokio::test]
+        async fn schweigende_gegenstelle_ist_netz() {
+            let mock = starten(vec![Antwort::Haengt]).await;
+            let e = reqwest::Client::new()
+                .get(&mock.url)
+                .timeout(Duration::from_millis(200))
+                .send()
+                .await
+                .unwrap_err();
+            let f = TtsFehler::anfrage("Gemini", "Gemini-Anfrage", &e);
+            assert_eq!((f.klasse, f.kennwort), (Klasse::Netz, "zeit"));
+        }
+
+        /// Reißt die Leitung mitten in der Antwort ab, ist das „Netz" — nicht
+        /// „unlesbare Antwort".
+        #[tokio::test]
+        async fn abgerissene_antwort_ist_netz() {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let adresse = l.local_addr().unwrap();
+            tokio::spawn(async move {
+                let (mut sock, _) = l.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\nabc")
+                    .await;
+            });
+            let resp = reqwest::Client::new()
+                .get(format!("http://{adresse}/x"))
+                .send()
+                .await
+                .unwrap();
+            let e = resp.bytes().await.unwrap_err();
+            let f = TtsFehler::antwort("Azure", "Azure-TTS-Antwort", &e);
+            assert_eq!((f.klasse, f.kennwort), (Klasse::Netz, "antwort"));
+        }
+
+        #[test]
+        fn frist_und_sperre_sind_netz_mit_eigenem_kennwort() {
+            let f = TtsFehler::frist("Azure");
+            assert_eq!((f.klasse, f.kennwort), (Klasse::Netz, "frist"));
+            let g = TtsFehler::gesperrt("Azure");
+            assert_eq!((g.klasse, g.kennwort), (Klasse::Netz, "gesperrt"));
+            let i = TtsFehler::inhalt("OpenAI: leerer Ansagetext").mit_vorsatz("Teil 2");
+            assert_eq!(i.klasse, Klasse::Inhalt);
+            assert_eq!(i.meldung, "Teil 2: OpenAI: leerer Ansagetext");
+            assert_eq!(i.to_string(), "OpenAI: leerer Ansagetext");
         }
     }
 }

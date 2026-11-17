@@ -8,7 +8,8 @@
 // 17.11.2026 abschaltet). Antwort ist WAV (24 kHz, mono, 16 bit); kommt doch
 // rohes PCM, wird es hier zu WAV.
 
-use crate::tts_text::{netz, ssml_zu_text, Format, Pausen, TtsText};
+use crate::tts_text::netz::{self, TtsFehler};
+use crate::tts_text::{ssml_zu_text, Format, Pausen, TtsText};
 use base64::Engine;
 use std::path::Path;
 
@@ -108,6 +109,20 @@ fn cache_schluessel(voice: &str, modell: &str, t: &TtsText) -> String {
     format!("gemini|{modell}|{voice}|{}|{}", stil(t), t.text)
 }
 
+/// Host des Dienstes — zugleich der Schlüssel des Ausfall-Merkers.
+pub const HOST: &str = "generativelanguage.googleapis.com";
+
+/// Gesamtfrist der einzelnen Anfrage: Gemini braucht für eine Ansage spürbar
+/// länger als Azure. Im Ansage-Weg greift vorher die harte Frist.
+const ANFRAGE_FRIST: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Nur der Blick in den Plattencache, ohne Netz — für die Ansage bei
+/// gesetztem Ausfall-Merker.
+pub fn aus_cache(voice: &str, modell: &str, ssml: &str, cache_dir: &Path) -> Option<Vec<u8>> {
+    let t = ssml_zu_text(ssml, Pausen::Satzzeichen);
+    netz::cache_holen(cache_dir, &cache_schluessel(voice, modell, &t))
+}
+
 /// Vertont zu WAV (+ `true`, wenn aus dem Cache); mit `cache_dir` über den
 /// Plattencache. Gemini liefert in beiden Formaten WAV 24 kHz, `format`
 /// ändert deshalb weder Anfrage noch Cache-Eintrag.
@@ -118,7 +133,7 @@ pub async fn vertonen(
     ssml: &str,
     cache_dir: Option<&Path>,
     _format: Format,
-) -> Result<(Vec<u8>, bool), String> {
+) -> Result<(Vec<u8>, bool), TtsFehler> {
     let t = ssml_zu_text(ssml, Pausen::Satzzeichen);
     let schluessel = cache_schluessel(voice, modell, &t);
     if let Some(bytes) = cache_dir.and_then(|d| netz::cache_holen(d, &schluessel)) {
@@ -129,28 +144,32 @@ pub async fn vertonen(
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
     {
-        return Err("Gemini: ungültige Stimme oder Modell".to_string());
+        return Err(TtsFehler::inhalt("Gemini: ungültige Stimme oder Modell"));
     }
     if t.text.is_empty() {
-        return Err("Gemini: leerer Ansagetext".to_string());
+        return Err(TtsFehler::inhalt("Gemini: leerer Ansagetext"));
     }
-    // Gemini braucht für eine Ansage spürbar länger als Azure; 20 s statt 10.
-    let resp = netz::client(20)?
+    let resp = netz::client()?
         .post(URL)
+        .timeout(ANFRAGE_FRIST)
         .header("x-goog-api-key", key)
         .header("User-Agent", "bts-light")
         .json(&anfrage(modell, voice, &t))
         .send()
         .await
-        .map_err(|e| format!("Gemini-Anfrage: {e}"))?;
+        .map_err(|e| TtsFehler::anfrage("Gemini", "Gemini-Anfrage", &e))?;
     if !resp.status().is_success() {
-        return Err(netz::http_fehler("Gemini", resp).await);
+        return Err(netz::status_fehler("Gemini", resp).await);
     }
-    let json: serde_json::Value = resp
-        .json()
+    // Erst den Körper holen (reißt er ab: „Netz"), dann lesen (unlesbar:
+    // „Inhalt") — `resp.json()` unterscheidet die beiden Fälle nicht.
+    let roh = resp
+        .bytes()
         .await
-        .map_err(|e| format!("Gemini-Antwort: {e}"))?;
-    let wav = wav_aus_antwort(&json)?;
+        .map_err(|e| TtsFehler::antwort("Gemini", "Gemini-Antwort", &e))?;
+    let json: serde_json::Value = serde_json::from_slice(&roh)
+        .map_err(|_| TtsFehler::inhalt("Gemini: Antwort nicht lesbar"))?;
+    let wav = wav_aus_antwort(&json).map_err(TtsFehler::inhalt)?;
     if let Some(d) = cache_dir {
         netz::cache_ablegen(d, &schluessel, &wav);
     }
