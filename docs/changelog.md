@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.442
+
+- **Keine Änderung an der App.** Diese Fassung gibt es, damit der schnelle
+  Wechsel und der Weg zurück („Zurück zu v0.9.441") am Turnier-PC erprobt
+  werden können — beides braucht eine neuere veröffentlichte Fassung. Neu im
+  Repository sind nur das Feldtest-Protokoll und ein Werkzeug, das die
+  Unterbrechungen aus den Logs auswertet.
+
 ## v0.9.441
 
 - **Zurück zur vorigen Fassung der App.** Macht ein Update Ärger, führt ein

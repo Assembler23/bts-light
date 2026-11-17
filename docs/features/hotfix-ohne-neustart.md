@@ -1,6 +1,6 @@
 # Hotfix ohne Neustart — Spezifikation
 
-> Status: **Freigegeben 2026-11-16** (via /idee: Brief → Grill → How-To → Review). Umsetzung: Schritte 1–8 gebaut (bis v0.9.441), offen ist der Abschluss mit Feldtest (9).
+> Status: **Freigegeben 2026-11-16** (via /idee: Brief → Grill → How-To → Review). Umsetzung: Schritte 1–8 gebaut (bis v0.9.441). Schritt 9: Das [Feldtest-Protokoll](hotfix-ohne-neustart-feldtest.md) steht, die Messungen am Windows-PC sind offen — Erfolgskriterium 2 gilt bis dahin als nicht belegt.
 > Quelle: Idee vom 16.11.2026 („Wir trauen uns nicht, einen Fix im laufenden
 > Turnier einzuspielen, weil bts-light dafür neu starten muss").
 > Betroffene Crates: `src-tauri`, `src` (Frontend), CI-Workflows. `relay/` und
@@ -547,7 +547,8 @@ Messung und Feldtest (nur am Windows-PC):
   dem Artefakt, Reste nach der Deinstallation, Kaltstartzeit. Das Ergebnis
   legt die Wächter-Frist fest und steht in ADR 0100, **bevor** der Tausch
   scharf geschaltet wird.
-- Feldtest: zehn Wechsel und zehn Installer-Läufe mit geloggter Lücke; ein
+- Feldtest ([Protokoll](hotfix-ohne-neustart-feldtest.md), Auswertung
+  `scripts/luecken-auswerten.mjs`): zehn Wechsel und zehn Installer-Läufe mit geloggter Lücke; ein
   Wechsel unter Last (viele Tablets verbunden); Cloud-Betrieb (Host-Slot,
   keine Offline-Blende); ein erzwungener Rückfall; ein Seiten-Tausch mit
   Tablet im Spiel.

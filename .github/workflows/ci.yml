@@ -358,6 +358,12 @@ jobs:
       - name: Update-Banner – Seiten-Zeile
         run: node scripts/test-update-banner.mjs
 
+      # Feldtest-Auswertung „Hotfix ohne Neustart": Zuordnung der Lücken zum
+      # Weg, Median, Urteil gegen Erfolgskriterium 2 — und dass die Muster zum
+      # Wortlaut der Logzeilen im Kern passen.
+      - name: Lücken-Auswertung für den Feldtest
+        run: node scripts/test-luecken-auswerten.mjs
+
       # Ansage-Seite im Browser (Spec ansage-im-browser): Bestandsaufnahme,
       # Hallen-Pflicht, nichts Falsches oder Verfallenes sprechen, Praesenz
       # nur mit Stimme und Ton, Abspiel-Kern mit Fristen - und die
