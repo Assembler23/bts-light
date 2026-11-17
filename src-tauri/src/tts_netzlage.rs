@@ -22,6 +22,11 @@ use std::time::Duration;
 /// am 17.11.2026 nach der Windows-Messung, ADR 0105).
 pub const HARTE_FRIST: Duration = Duration::from_secs(4);
 
+/// Harte Frist für Gemini: Gemini braucht für eine Ansage oft länger als 4 s
+/// und fiele sonst auch bei gutem Internet ständig aus (vom Nutzer
+/// entschieden am 17.11.2026). Halb so lang wie seine Anfragefrist von 20 s.
+pub const GEMINI_FRIST: Duration = Duration::from_secs(10);
+
 /// Abstand der Hintergrundprüfungen (Ausgangswert).
 pub const PRUEFTAKT: Duration = Duration::from_secs(15);
 

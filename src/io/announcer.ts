@@ -25,6 +25,7 @@ import {
   bannerFuer,
   mitFrist,
   vertonenMitFrist,
+  vertonungFristMs,
   pcmFristMs,
   stimmeFristMs,
   abschnitteTeilen,
@@ -1324,8 +1325,11 @@ export function preparePreparationAnnouncement(
  */
 export function playPrepared(
   p: PreparedAnnouncement,
-  synthesize?: (ssml: string) => Promise<string>,
+  azure?: Pick<NonNullable<AnnounceOptions["azure"]>, "synthesize" | "dienst">,
 ): Promise<void> {
+  const synthesize = azure?.synthesize;
+  // Gemini hat im Kern eine längere harte Frist — die Sicherung folgt ihr.
+  const fristMs = vertonungFristMs(dienstArt(azure?.dienst));
   return enqueueAnnouncement(async () => {
     // Abgebrochen (Ansagen aus) → nach dem Gong nicht mehr weitersprechen.
     const gen = announceGen;
@@ -1336,7 +1340,7 @@ export function playPrepared(
       try {
         // Spec `ansage-offline-stimme` K10: Der Kern bricht nach der harten
         // Frist selbst ab; hier nur die Sicherung, falls er nicht antwortet.
-        const b64 = await vertonenMitFrist(synthesize(p.ssml));
+        const b64 = await vertonenMitFrist(synthesize(p.ssml), {}, fristMs);
         // Während der Azure-Abfrage abgebrochen → keine Nachzügler.
         if (gen !== announceGen) return;
         await spieleAzure(b64, gen);
@@ -1361,7 +1365,7 @@ export function playAnnouncement(
 ): Promise<void> {
   return playPrepared(
     prepareAnnouncement(input, lang, opts),
-    opts.azure?.synthesize,
+    opts.azure,
   );
 }
 
@@ -1374,7 +1378,7 @@ export function playFreeText(
   opts: AnnounceOptions = {},
 ): Promise<void> {
   const p = prepareFreeText(text, lang, opts);
-  return p ? playPrepared(p, opts.azure?.synthesize) : Promise.resolve();
+  return p ? playPrepared(p, opts.azure) : Promise.resolve();
 }
 
 // Test-Ansage für die Einstellungen — feste Beispieldaten, damit der Klang
@@ -1649,7 +1653,7 @@ export function playPreparationAnnouncement(
 ): Promise<void> {
   return playPrepared(
     preparePreparationAnnouncement(input, lang, opts),
-    opts.azure?.synthesize,
+    opts.azure,
   );
 }
 

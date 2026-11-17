@@ -15,6 +15,8 @@ import {
   mitFrist,
   abschnitteTeilen,
   VERTONUNG_FRIST_MS,
+  VERTONUNG_FRIST_GEMINI_MS,
+  vertonungFristMs,
   VERTONUNG_FRIST_TEXT,
   vertonenMitFrist,
 } from "../src/io/tonWeg.mjs";
@@ -122,6 +124,19 @@ check(
   "Frist = harte Frist des Kerns + 500 ms",
   harteFrist && Number(harteFrist[1]) * 1000 + 500 === VERTONUNG_FRIST_MS,
 );
+
+const geminiFrist = rust.match(/GEMINI_FRIST: Duration = Duration::from_secs\((\d+)\)/);
+check(
+  "Gemini-Frist = Gemini-Frist des Kerns + 500 ms",
+  geminiFrist && Number(geminiFrist[1]) * 1000 + 500 === VERTONUNG_FRIST_GEMINI_MS,
+);
+check("Gemini bekommt die lange Frist", vertonungFristMs("gemini") === VERTONUNG_FRIST_GEMINI_MS);
+for (const art of ["azure", "elevenlabs", "openai", undefined]) {
+  check(`${art} bleibt bei der kurzen Frist`, vertonungFristMs(art) === VERTONUNG_FRIST_MS);
+}
+const c9 = makeClock();
+vertonenMitFrist(new Promise(() => {}), c9, VERTONUNG_FRIST_GEMINI_MS).catch(() => {});
+check("eigene Frist wird gestellt", c9.letzteMs() === VERTONUNG_FRIST_GEMINI_MS);
 
 const c5 = makeClock();
 check("Vertonung vor der Frist", (await vertonenMitFrist(Promise.resolve("b64"), c5)) === "b64");

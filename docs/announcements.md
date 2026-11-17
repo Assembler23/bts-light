@@ -963,9 +963,10 @@ Warten. Spec: [features/ansage-offline-stimme.md](features/ansage-offline-stimme
 (Abschnitt E1), [ADR 0105](adr/0105-ansage-ausfall-erkennung-und-rueckfall-im-kern.md).
 
 - **Harte Frist:** Die ganze Vertonung einer Ansage — alle Teile und ein
-  etwaiger zweiter Versuch zusammen — darf 4 s dauern. Ein Verbindungsaufbau
-  bekommt höchstens 1,5 s.
+  etwaiger zweiter Versuch zusammen — darf 4 s dauern, bei Gemini 10 s (seit
+  v0.9.444). Ein Verbindungsaufbau bekommt höchstens 1,5 s.
   <!-- pruef: "HARTE_FRIST: Duration = Duration::from_secs(4)" in src-tauri/src/tts_netzlage.rs -->
+  <!-- pruef: "GEMINI_FRIST: Duration = Duration::from_secs(10)" in src-tauri/src/tts_netzlage.rs -->
   <!-- pruef: "VERBINDUNGSFRIST: Duration = Duration::from_millis(1500)" in src-tauri/src/tts_text.rs -->
 - **Der Merker:** Scheitert die Vertonung an der Leitung (keine Verbindung,
   keine Antwort, Frist abgelaufen, Störung beim Dienst mit HTTP 5xx), merkt
@@ -993,10 +994,12 @@ Warten. Spec: [features/ansage-offline-stimme.md](features/ansage-offline-stimme
   und gebucht. Ein Teil, den der Dienst erst im Moment des Abbruchs fertig
   hatte, kommt nicht mehr an — er ist beim Anbieter womöglich bezahlt, steht
   aber nicht im Zähler und wird beim nächsten Mal erneut vertont.
-- **Gemini:** Gemini braucht für eine Ansage oft länger als 4 s und kann
-  deshalb auch bei gutem Internet häufig an der Frist scheitern. Dann spricht
-  die Ersatzstimme, bis die Prüfung den Dienst wieder freigibt (15 s). Gemini
-  ist unter dieser Frist nicht gemessen — vor einem Turnier anhören.
+- **Gemini (seit v0.9.444):** Gemini braucht für eine Ansage oft länger als
+  4 s und hat deshalb eine eigene Frist von 10 s. Fällt das Internet aus,
+  dauert die erste Ansage mit Gemini entsprechend bis zu 10 s, bevor die
+  Ersatzstimme spricht; danach greift der Merker wie bei den anderen Diensten.
+  Ob 10 s im Turnier immer reichen, ist ungemessen — vor einem Turnier
+  anhören.
 
 ## Weitere Sprachdienste: ElevenLabs, OpenAI, Gemini (seit v0.9.336)
 
