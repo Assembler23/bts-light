@@ -71,11 +71,12 @@ fn fugen_s_wird_erkannt() {
     let a = HashMap::new();
     let w = lautierer(&l, &a).wort("Spielsatz");
     assert_eq!(w.quelle, Quelle::Zusammengesetzt);
-    assert_eq!(w.laute, "ʃpiːlzats");
+    // Jeder Teil betont, ab dem zweiten nur nebenbetont.
+    assert_eq!(w.laute, "ʃpˈiːlzˌats");
     let mut l2 = lex();
     l2.einfuegen("Satzspiel", "x");
     let w = lautierer(&l2, &a).wort("Feldsspiel");
-    assert_eq!(w.laute, "fɛltsʃpiːl");
+    assert_eq!(w.laute, "fˈɛltsʃpˌiːl");
 }
 
 /// K18: Jedes Wort mit Buchstaben wird gesprochen, auch seltene Namen.
@@ -131,6 +132,11 @@ fn schaetzer_kennt_die_haeufigen_regeln() {
     assert_eq!(schaetzen("schwarz"), "ʃvˈaʁts");
     assert_eq!(schaetzen("hughes"), "hˈʊɡəs");
     assert_eq!(schaetzen("wright"), "vʁˈɪt");
+    // Englische Namen (Hörvergleich 18.11.2026).
+    assert_eq!(schaetzen("whitfield"), "vˈɪtfiːlt");
+    assert_eq!(schaetzen("emily"), "ˈeːmɪliː");
+    assert_eq!(schaetzen("olivia"), "ˈoːlɪvɪa");
+    assert_eq!(schaetzen("vogel"), "fˈoːɡəl");
     // Nur Konsonanten: buchstabiert.
     assert_eq!(schaetzen("ng"), "ɛnɡˈeː");
 }
@@ -155,14 +161,15 @@ fn saetze_mit_satzzeichen_und_zahlen() {
     let a = HashMap::new();
     let s = lautierer(&l, &a).saetze("Feld 3: Herren gegen drei. Aufschlag 21");
     assert_eq!(s.len(), 2);
-    assert_eq!(s[0].laute, "fɛlt dʁaɪ, hˈɛʁən ɡˈeːɡən dʁaɪ.");
+    assert_eq!(s[0].laute, "fˈɛlt dʁˈaɪ, hˈɛʁən ɡˈeːɡən dʁˈaɪ.");
     assert_eq!(s[0].quellen.len(), 5);
-    assert!(s[1].laute.starts_with("ˈaʊfʃlˌaːk aɪn ʊnt tsvˈantsɪç"));
+    // In Zahlen ist „ein" betont, „und" nicht.
+    assert!(s[1].laute.starts_with("ˈaʊfʃlˌaːk ˈaɪn ʊnt tsvˈantsɪç"));
     assert!(s[1].laute.ends_with('.'));
     // Bindestrich trennt, leere Sätze fallen weg.
     let s = lautierer(&l, &a).saetze("... Feld-Spiel!");
     assert_eq!(s.len(), 1);
-    assert_eq!(s[0].laute, "fɛlt ʃpiːl!");
+    assert_eq!(s[0].laute, "fˈɛlt ʃpˈiːl!");
 }
 
 #[test]
@@ -211,4 +218,91 @@ fn unsinnige_eingaben_stuerzen_nicht_ab() {
     assert_eq!(t.saetze("Nguye\u{0302}\u{0303}n")[0].quellen.len(), 1);
     // Überlange Zahl Ziffer für Ziffer.
     assert_eq!(ziffernweise("007"), "null null sieben");
+}
+
+/// Hörvergleich 18.11.2026: Unbetonte Einsilber verschluckte die Stimme
+/// („Mai", „Hà"); jedes Inhaltswort bekommt deshalb eine Hauptbetonung.
+#[test]
+fn einsilber_werden_betont_und_offen_lang() {
+    let mut l = lex();
+    l.einfuegen("Mai", "maɪ");
+    l.einfuegen("ha", "ha");
+    l.einfuegen("Hoffmann", "hˈɔfmˌan");
+    let a = HashMap::new();
+    let t = lautierer(&l, &a);
+    assert_eq!(t.wort("Feld").laute, "fˈɛlt");
+    assert_eq!(t.wort("Mai").laute, "mˈaɪ");
+    assert_eq!(t.wort(&ohne_akzente("Hà")).laute, "hˈaː");
+    // Schon betont: bleibt, wie es ist.
+    assert_eq!(t.wort("Hoffmann").laute, "hˈɔfmˌan");
+    // Geschätzter Einsilber auf Vokal: lang.
+    assert_eq!(t.wort("Lo").laute, "lˈoː");
+    // Zweisilbig: bleibt kurz („Lena", nicht „Lenaː").
+    assert_eq!(t.wort("Lena").laute, "lˈeːna");
+    assert_eq!(t.wort("Mia").laute, "mˈiːa");
+    // Nur Nebenbetonung: wird zur Hauptbetonung.
+    assert_eq!(betonen("tsɛːltˌaːfəl"), "tsˈɛːltˌaːfəl");
+    assert_eq!(betonen("ˌaːfəl"), "ˈaːfəl");
+    // Nebenbetonung nicht direkt vor dem Vokal: nur eine Betonung bleibt.
+    assert_eq!(betonen("ˌtsaːl"), "tsˈaːl");
+    // Zwielaut am Ende wird nicht verlängert.
+    assert_eq!(offen_lang("mˈaɪ"), "mˈaɪ");
+}
+
+#[test]
+fn funktionswoerter_bleiben_unbetont_und_gehen_dem_lexikon_vor() {
+    let mut l = lex();
+    l.einfuegen("Die", "daɪ");
+    let mut a = HashMap::new();
+    let t = lautierer(&l, &a);
+    let w = t.wort("Die");
+    assert_eq!((w.laute.as_str(), w.quelle), ("diː", Quelle::Funktionswort));
+    let w = t.wort("und");
+    assert_eq!((w.laute.as_str(), w.quelle), ("ʊnt", Quelle::Funktionswort));
+    // Groß im Satz ist es ein Name („An" vietnamesisch), am Satzanfang und
+    // nach Doppelpunkt ein Funktionswort.
+    let s = t.saetze("Die Paarung gegen An Le. In Halle: Die Ehrung");
+    assert!(s[0].laute.starts_with("diː "), "{}", s[0].laute);
+    assert!(s[0].laute.contains(" ˈan "), "{}", s[0].laute);
+    assert_eq!(
+        s[0].quellen
+            .iter()
+            .filter(|q| **q == Quelle::Funktionswort)
+            .count(),
+        1
+    );
+    assert!(s[1].laute.starts_with("ɪn "), "{}", s[1].laute);
+    assert!(s[1].laute.contains(", diː "), "{}", s[1].laute);
+    // Die Ausnahmeliste geht auch hier vor.
+    a.insert("die".to_string(), "dˈiː".to_string());
+    let t = lautierer(&l, &a);
+    assert_eq!(t.wort("Die").quelle, Quelle::Ausnahme);
+}
+
+#[test]
+fn gleicher_konsonant_an_der_fuge_einmal() {
+    let mut l = Lexikon::default();
+    l.einfuegen("ben", "bɛn");
+    l.einfuegen("nett", "nɛt");
+    let a = HashMap::new();
+    let w = lautierer(&l, &a).wort("Bennett");
+    assert_eq!(
+        (w.laute.as_str(), w.quelle),
+        ("bˈɛnˌɛt", Quelle::Zusammengesetzt)
+    );
+}
+
+#[test]
+fn espeak_ausgabe_wird_zu_saetzen() {
+    let s = espeak_ausgabe_zu_saetzen(
+        " fˈɛlt  dʁˈaɪ\n\n(en)wˈɪljəm(de) ʊnt hˈaloː,\n_:_ \nt͡sˈvaɪ\u{200d}\n",
+    );
+    assert_eq!(s, vec!["fˈɛlt dʁˈaɪ.", "wˈɪljəm ʊnt hˈaloː,", "tsˈvaɪ."]);
+    assert!(espeak_ausgabe_zu_saetzen("").is_empty());
+    assert!(espeak_ausgabe_zu_saetzen("(en)(de)\n").is_empty());
+    // Ungeschlossene Klammer schluckt nur den Rest ihrer Zeile.
+    assert_eq!(
+        espeak_ausgabe_zu_saetzen("bˈaʊ (en\nhˈaʊs"),
+        vec!["bˈaʊ.", "hˈaʊs."]
+    );
 }

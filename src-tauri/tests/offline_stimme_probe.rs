@@ -11,7 +11,7 @@
 //!    stehen (2.000 Ansagen ohne Absturz, ohne Wachstum).
 //! 4. Die Programmdatei wächst um etwa **20 MB** (über 40 MB: neu entscheiden).
 //! 5. Der Weg V1 (Lexikon + Schätzer, `offline_stimme::laute`) klingt gut
-//!    genug — **Hörvergleich** der 20 Ansagen unten, kein Wort verschluckt.
+//!    genug — **Hörvergleich** der 25 Ansagen unten, kein Wort verschluckt.
 //!
 //! Gebaut wird es nur mit dem Feature `offline-probe`; die CI und die App
 //! berühren die Engine nicht.
@@ -60,21 +60,57 @@
 //!
 //! Alle Zeilen landen zusätzlich in `%TEMP%\bts-light-offline-stimme-messung.txt`
 //! (jeder Lauf hängt an), die Hörproben in
-//! `%TEMP%\bts-light-offline-stimme-proben\` (`probe-01.wav` …, dazu
-//! `proben.txt` mit Text und Lautschrift je Probe). **Die Ergebnisdatei**
-//! gehört in ADR 0104 („Ergebnis der Messung"), nicht die kopierte Konsole —
-//! cargo druckt dort Pfade des Rechners mit.
+//! `%TEMP%\bts-light-offline-stimme-proben\` (dazu `proben.txt` mit Text und
+//! Lautschrift je Probe). Jeder Lauf löscht die alten WAV-Dateien dort.
+//! **Die Ergebnisdatei** gehört in ADR 0104 („Ergebnis der Messung"), nicht
+//! die kopierte Konsole — cargo druckt dort Pfade des Rechners mit.
 //!
-//! ## Hörvergleich
+//! ## Hörvergleich (Runde 2, ab 18.11.2026)
 //!
-//! Die 20 WAV-Dateien anhören. Je Probe notieren: verständlich ja/nein,
-//! welcher Name falsch klingt. Die Zeile `quellen=` zeigt, woher die Laute
-//! eines Namens kamen (`lexikon`, `zusammengesetzt`, `geschaetzt`) —
-//! geschätzte Namen sind die Kandidaten für die Ausnahmeliste.
+//! Je Ansage drei Fassungen derselben Laute (siehe [`VARIANTEN`]):
+//! `probe-01-a.wav` (Tempo normal), `-b` (langsamer), `-c` (langsamer und
+//! ruhiger). Alle mit ungekürzten Pausen und Stille am Ende — Runde 1 hatte
+//! die Pausen der Engine auf ein Fünftel gekürzt und keine Stille am Ende.
+//! Je Probe notieren: welche Fassung am besten, verständlich ja/nein,
+//! welcher Name falsch klingt.
+//!
+//! Die Ansagen 1–20 sind die aus Runde 1; nach ihr sind Laut-Baustein und
+//! die Ausnahmeliste unten abgestimmt. **Die Ansagen 21–25 sind neu** und
+//! ohne Abstimmung — sie zeigen, wie es bei unbekannten Namen klingt.
+//! Die Zeile `quellen=` zeigt, woher die Laute kamen (`ausnahme`,
+//! `funktionswort`, `lexikon`, `zusammengesetzt`, `geschaetzt`).
 //!
 //! Die Namen sind ausgedacht (deutsch, polnisch, vietnamesisch, englisch).
+//!
+//! ## Gegenprobe mit espeak (Fassung `-e`)
+//!
+//! Die Stimme ist mit Lautschrift von espeak-ng trainiert. Klingt sie mit
+//! espeak-Lauten deutlich besser als mit unseren, liegt es am Laut-Baustein;
+//! klingt sie ähnlich, ist die Stimme selbst die Grenze. espeak ist GPL und
+//! kommt **nie** in die App — es läuft nur hier am Mess-PC als eigenes
+//! Programm. Ablauf:
+//!
+//! 1. espeak-ng installieren (`espeak-ng.msi` aus den Releases von
+//!    `github.com/espeak-ng/espeak-ng`).
+//! 2. Einen Lauf `kurz` machen — er legt je Ansage `probe-NN-<kennung>.txt`
+//!    in den Unterordner `espeak\` der Hörproben (die Kennung hängt am
+//!    Text: Ändert sich eine Ansage, passt eine alte Lautschrift nicht mehr).
+//! 3. Lautschrift erzeugen:
+//!
+//! ```text
+//! $e = "C:\Program Files\eSpeak NG\espeak-ng.exe"
+//! Get-ChildItem "$env:TEMP\bts-light-offline-stimme-proben\espeak\probe-*.txt" | ForEach-Object {
+//!   $o = $_.FullName -replace '\.txt$', '.ipa'
+//!   & $e -v de -q -b 1 --ipa -f $_.FullName "--phonout=$o"
+//! }
+//! ```
+//!
+//! 4. Den Lauf `kurz` wiederholen: Wo eine passende `.ipa` liegt, schreibt
+//!    er zusätzlich `probe-NN-e.wav` (Einstellungen wie Fassung `b`). Die
+//!    Zeile `hoerproben=` nennt, wie viele es waren und wie viele Zeichen
+//!    der espeak-Lautschrift die Stimme nicht kennt (`espeak_unbekannt`).
 
-use bts_light_lib::offline_stimme::laute::{Lautierer, Lexikon};
+use bts_light_lib::offline_stimme::laute::{espeak_ausgabe_zu_saetzen, Lautierer, Lexikon};
 use sherpa_onnx::{GenerationConfig, OfflineTts, OfflineTtsConfig};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Write;
@@ -103,9 +139,54 @@ const ARCHIVE: &[(&str, &str)] = &[
 /// Modelldatei im Archiv `thorsten-medium`.
 const MODELL_DATEI: &str = "de_DE-thorsten-medium.onnx";
 
+/// Fassungen der Hörproben: Kennbuchstabe, Tempo (`speed`, kleiner =
+/// langsamer), Pausen-Faktor (`silence_scale`, 1 = ungekürzt), Rauschanteil
+/// (`noise_scale`, kleiner = ruhiger, gleichförmiger), Beschreibung.
+/// Die Zeitmessung und der Dauerlauf rechnen mit Fassung `b`.
+const VARIANTEN: [(&str, f32, f32, f32, &str); 3] = [
+    ("a", 1.0, 1.0, 0.667, "Tempo normal"),
+    ("b", 0.85, 1.0, 0.667, "langsamer"),
+    ("c", 0.85, 1.0, 0.4, "langsamer, ruhiger"),
+];
+const MESS_VARIANTE: usize = 1;
+
+/// Stille vor und nach jeder Hörprobe in Sekunden — manche Abspieler
+/// schneiden sonst den Anfang oder das letzte Wort ab.
+const STILLE_VORN_S: f32 = 0.15;
+const STILLE_HINTEN_S: f32 = 0.6;
+
+/// Ausnahmeliste der Messung (klein geschrieben → Laute), wie sie die
+/// Turnierleitung in E2 für schwierige Namen pflegen würde. Abgestimmt nach
+/// dem Hörvergleich der Runde 1 — nur für Namen der Ansagen 1–20, die nach
+/// deutschen Regeln falsch klangen (englisch, vietnamesisch, polnisch).
+const AUSNAHMEN: &[(&str, &str)] = &[
+    ("anna", "ˈana"),
+    ("bennett", "bˈɛnət"),
+    ("clarke", "klˈaːk"),
+    ("emily", "ˈɛmɪliː"),
+    ("fairbanks", "fˈɛːɐbɛŋks"),
+    ("fitzgerald", "fɪtsdʒˈɛʁəlt"),
+    ("george", "dʒˈɔːdʒ"),
+    ("harrison", "hˈɛʁɪsən"),
+    ("hughes", "hjˈuːs"),
+    ("huy", "hˈuːi"),
+    ("huynh", "hˈuːɪn"),
+    ("james", "dʒˈeːɪms"),
+    ("meetingpoint", "mˈiːtɪŋpˌɔønt"),
+    ("nguyen", "ŋˈuːjɛn"),
+    ("olivia", "olˈiːvia"),
+    ("piotr", "pjˈɔtʁ"),
+    ("ryan", "ʁˈaɪən"),
+    ("sophie", "zofˈiː"),
+    ("thompson", "tˈɔmsən"),
+    ("william", "vˈɪljəm"),
+    ("wisniewski", "vɪʃnjˈɛfskiː"),
+    ("wright", "ʁˈaɪt"),
+];
+
 /// Die 20 Ansagen des Hörvergleichs — so, wie die Windows-Stimme sie heute
 /// bekommt (Sprech-Abschnitte, ohne SSML).
-const ANSAGEN: [&str; 20] = [
+const ANSAGEN: [&str; 25] = [
     "Feld 3. Herrendoppel A, Halbfinale. Jonas Becker und Lukas Hoffmann gegen Piotr Kowalczyk und Tomasz Wiśniewski.",
     "Feld 12. Dameneinzel B, Runde 2. Lena Schröder gegen Nguyễn Thị Lan.",
     "Feld 7. Mixed C, Gruppe 1. Tim Wagner und Sophie Krüger gegen James Whitfield und Emily Clarke.",
@@ -126,6 +207,12 @@ const ANSAGEN: [&str; 20] = [
     "Feld 16. Mixed C, Runde 1. Dawid Szczepański und Zofia Jabłońska gegen Leon Schulze und Clara Baumann.",
     "Feld 1. Herrendoppel A, Spiel um Platz 3. Hoàng Gia Huy und Đặng Quang Vinh gegen Moritz Bauer und Jan Albrecht. Schiedsrichter: Sabine Kühn.",
     "Achtung, eine Durchsage der Turnierleitung: Die Siegerehrung beginnt um 18 Uhr 30 in Halle 2.",
+    // Ab hier neu in Runde 2, nicht abgestimmt.
+    "Feld 5. Herrendoppel B, Viertelfinale. Matthias Engel und Stefan Kaiser gegen Łukasz Nowak und Marcin Zając.",
+    "Feld 17. Dameneinzel A, Runde 1. Johanna Berger gegen Vũ Thanh Hương.",
+    "Feld 3. Mixed A, Viertelfinale. Henry Collins und Grace Morgan gegen Tobias Schmitt und Lea Hofmann.",
+    "Feld 21. Herreneinzel C, Gruppe 2. Dominik Kaczmarek gegen Lý Minh Khôi. Schiedsrichter: Ute Brandt.",
+    "In Vorbereitung: Damendoppel B, Finale. Katharina Wolff und Julia Lorenz gegen Sarah Mitchell und Hoàng Thị Thu.",
 ];
 
 fn umgebung(name: &str) -> Option<String> {
@@ -186,7 +273,10 @@ fn sha256_datei(p: &Path) -> Option<String> {
     Some(d.as_ref().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn wav_schreiben(pfad: &Path, samples: &[f32], rate: i32) {
+fn wav_schreiben(pfad: &Path, ton: &[f32], rate: i32) {
+    let vorn = vec![0.0f32; (rate as f32 * STILLE_VORN_S) as usize];
+    let hinten = vec![0.0f32; (rate as f32 * STILLE_HINTEN_S) as usize];
+    let samples: Vec<f32> = vorn.iter().chain(ton).chain(&hinten).copied().collect();
     let mut daten = Vec::with_capacity(44 + samples.len() * 2);
     let n = (samples.len() * 2) as u32;
     daten.extend_from_slice(b"RIFF");
@@ -201,7 +291,7 @@ fn wav_schreiben(pfad: &Path, samples: &[f32], rate: i32) {
     daten.extend_from_slice(&16u16.to_le_bytes());
     daten.extend_from_slice(b"data");
     daten.extend_from_slice(&n.to_le_bytes());
-    for s in samples {
+    for s in &samples {
         let v = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
         daten.extend_from_slice(&v.to_le_bytes());
     }
@@ -225,8 +315,9 @@ fn modell_zeichen(dir: &Path) -> HashSet<char> {
         .collect()
 }
 
-fn engine_laden(dir: &Path, threads: i32) -> Option<(OfflineTts, Duration)> {
+fn engine_laden(dir: &Path, threads: i32, rauschen: f32) -> Option<(OfflineTts, Duration)> {
     let mut cfg = OfflineTtsConfig::default();
+    cfg.model.vits.noise_scale = rauschen;
     cfg.model.vits.model = Some(dir.join(MODELL_DATEI).to_string_lossy().into_owned());
     cfg.model.vits.tokens = Some(dir.join("tokens.txt").to_string_lossy().into_owned());
     cfg.model.num_threads = threads;
@@ -248,9 +339,12 @@ struct Vertonung {
     erster_ton: Duration,
 }
 
-fn vertonen(tts: &OfflineTts, saetze: &[Vec<i32>]) -> Option<Vertonung> {
+fn vertonen(tts: &OfflineTts, saetze: &[Vec<i32>], variante: usize) -> Option<Vertonung> {
+    let (_, tempo, pausen, _, _) = VARIANTEN[variante];
     let g = GenerationConfig {
         phoneme_codepoints: Some(saetze.to_vec()),
+        speed: tempo,
+        silence_scale: pausen,
         ..Default::default()
     };
     let erster: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
@@ -315,6 +409,117 @@ fn vergleichsgroesse(eigene: &Path) -> Option<u64> {
         })
         .max_by_key(|(t, _)| *t)
         .map(|(_, l)| l)
+}
+
+/// Laute als Zeichenfolgen je Satz für die Engine; Unbekanntes fällt weg.
+fn fuer_engine(saetze: &[String], zeichen: &HashSet<char>) -> Vec<Vec<i32>> {
+    saetze
+        .iter()
+        .map(|s| {
+            s.chars()
+                .filter(|c| zeichen.is_empty() || zeichen.contains(c))
+                .map(|c| c as i32)
+                .collect()
+        })
+        .collect()
+}
+
+/// Dateiname der espeak-Ein- und -Ausgabe einer Ansage, ohne Endung: Nummer
+/// und eine Kennung aus dem Text, damit eine alte Lautschrift nach einer
+/// Textänderung nicht mehr greift.
+fn espeak_stamm(nr: usize, text: &str) -> String {
+    let d = ring::digest::digest(&ring::digest::SHA256, text.as_bytes());
+    let kennung: String = d.as_ref()[..4].iter().map(|b| format!("{b:02x}")).collect();
+    format!("probe-{nr:02}-{kennung}")
+}
+
+/// Hörproben aller Fassungen, `proben.txt` und die espeak-Gegenprobe.
+fn hoerproben_schreiben(
+    p: &mut Protokoll,
+    dir: &Path,
+    proben: &[Probe],
+    zeichen: &HashSet<char>,
+    proben_dir: &Path,
+    espeak_dir: &Path,
+) {
+    let mut liste = String::from("Fassungen:\n");
+    for (k, tempo, pausen, rauschen, text) in VARIANTEN {
+        liste.push_str(&format!(
+            "  -{k}: {text} (speed={tempo}, silence_scale={pausen}, noise_scale={rauschen})\n"
+        ));
+    }
+    liste.push_str("  -e: espeak-Laute, Einstellungen wie -b (nur wenn probe-NN.ipa vorliegt)\n\n");
+    for (i, (_, laute, quellen)) in proben.iter().enumerate() {
+        let q: Vec<String> = quellen.iter().map(|(k, n)| format!("{k}:{n}")).collect();
+        let neu = if i >= 20 {
+            " (neu, nicht abgestimmt)"
+        } else {
+            ""
+        };
+        liste.push_str(&format!(
+            "probe-{:02}{neu}\n  text:  {}\n  laute: {laute}\n  quellen: {}\n",
+            i + 1,
+            ANSAGEN[i],
+            q.join(", ")
+        ));
+        // Eingabe für espeak: der Text, wie er angesagt wird.
+        let stamm = espeak_stamm(i + 1, ANSAGEN[i]);
+        let _ = std::fs::write(espeak_dir.join(format!("{stamm}.txt")), ANSAGEN[i]);
+        if let Ok(ipa) = std::fs::read_to_string(espeak_dir.join(format!("{stamm}.ipa"))) {
+            let saetze = espeak_ausgabe_zu_saetzen(&ipa);
+            liste.push_str(&format!("  espeak: {}\n", saetze.join(" ")));
+        }
+        liste.push('\n');
+    }
+    let _ = std::fs::write(proben_dir.join("proben.txt"), liste);
+
+    let mut geschrieben = 0usize;
+    for (v, (k, _, _, rauschen, _)) in VARIANTEN.iter().enumerate() {
+        let Some((tts, _)) = engine_laden(dir, 1, *rauschen) else {
+            p.zeile(&format!("hoerproben fassung={k} fehler=engine"));
+            continue;
+        };
+        for (i, (cps, _, _)) in proben.iter().enumerate() {
+            if let Some(a) = vertonen(&tts, cps, v) {
+                wav_schreiben(
+                    &proben_dir.join(format!("probe-{:02}-{k}.wav", i + 1)),
+                    &a.samples,
+                    a.rate,
+                );
+                geschrieben += 1;
+            }
+        }
+    }
+
+    // Gegenprobe: dieselbe Stimme mit den Lauten von espeak.
+    let mut espeak = 0usize;
+    let mut unbekannt = 0usize;
+    if let Some((tts, _)) = engine_laden(dir, 1, VARIANTEN[MESS_VARIANTE].3) {
+        for (i, text) in ANSAGEN.iter().enumerate().take(proben.len()) {
+            let stamm = espeak_stamm(i + 1, text);
+            let Ok(ipa) = std::fs::read_to_string(espeak_dir.join(format!("{stamm}.ipa"))) else {
+                continue;
+            };
+            let saetze = espeak_ausgabe_zu_saetzen(&ipa);
+            unbekannt += saetze
+                .iter()
+                .flat_map(|s| s.chars())
+                .filter(|c| !zeichen.is_empty() && !zeichen.contains(c))
+                .count();
+            let cps = fuer_engine(&saetze, zeichen);
+            if let Some(a) = vertonen(&tts, &cps, MESS_VARIANTE) {
+                wav_schreiben(
+                    &proben_dir.join(format!("probe-{:02}-e.wav", i + 1)),
+                    &a.samples,
+                    a.rate,
+                );
+                espeak += 1;
+            }
+        }
+    }
+    p.zeile(&format!(
+        "hoerproben=geschrieben dateien={geschrieben} espeak={espeak} espeak_unbekannt={unbekannt}"
+    ));
 }
 
 #[test]
@@ -405,7 +610,10 @@ fn offline_stimme_messen() {
         ms(start.elapsed()),
         speicher_mb().0 - vor_lex
     ));
-    let ausnahmen: HashMap<String, String> = HashMap::new();
+    let ausnahmen: HashMap<String, String> = AUSNAHMEN
+        .iter()
+        .map(|(w, l)| (w.to_string(), l.to_string()))
+        .collect();
     let lautierer = Lautierer {
         lexikon: &lexikon,
         ausnahmen: &ausnahmen,
@@ -455,14 +663,33 @@ fn offline_stimme_messen() {
         .filter_map(|t| t.trim().parse().ok())
         .collect();
     let proben_dir = tmp.join("bts-light-offline-stimme-proben");
-    let _ = std::fs::create_dir_all(&proben_dir);
-    let mut liste = String::new();
+    let espeak_dir = proben_dir.join("espeak");
+    let _ = std::fs::create_dir_all(&espeak_dir);
+    // Alte espeak-Eingaben weg (werden gleich neu geschrieben). Vorhandene
+    // `.ipa` bleiben — die Kennung im Namen sorgt dafür, dass nur passende
+    // greifen.
+    if let Ok(alt) = std::fs::read_dir(&espeak_dir) {
+        for e in alt.filter_map(Result::ok) {
+            if e.path().extension().is_some_and(|x| x == "txt") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    // Alte Hörproben weg, damit keine Fassung einer früheren Runde liegen bleibt.
+    if let Ok(alt) = std::fs::read_dir(&proben_dir) {
+        for e in alt.filter_map(Result::ok) {
+            if e.path().extension().is_some_and(|x| x == "wav") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
     let mut dauer_engine: Option<OfflineTts> = None;
-    for (lauf_nr, &t) in threads.iter().enumerate() {
+    let mess_rauschen = VARIANTEN[MESS_VARIANTE].3;
+    for &t in &threads {
         // Die vorige Engine erst freigeben, sonst misst der Speicher beide.
         dauer_engine = None;
         let vorher = speicher_mb().0;
-        let Some((tts, laden)) = engine_laden(&dir, t) else {
+        let Some((tts, laden)) = engine_laden(&dir, t, mess_rauschen) else {
             p.zeile(&format!("messung=laden threads={t} fehler=engine"));
             continue;
         };
@@ -474,8 +701,8 @@ fn offline_stimme_messen() {
         ));
         let mut erste: Vec<u128> = Vec::new();
         let mut rtf: Vec<f64> = Vec::new();
-        for (i, (cps, laute, quellen)) in proben.iter().enumerate() {
-            let Some(v) = vertonen(&tts, cps) else {
+        for (i, (cps, _, quellen)) in proben.iter().enumerate() {
+            let Some(v) = vertonen(&tts, cps, MESS_VARIANTE) else {
                 p.zeile(&format!(
                     "messung=rechnen threads={t} probe={:02} fehler=engine",
                     i + 1
@@ -494,19 +721,6 @@ fn offline_stimme_messen() {
                 ms(v.gesamt),
                 q.join(",")
             ));
-            if lauf_nr == 0 {
-                wav_schreiben(
-                    &proben_dir.join(format!("probe-{:02}.wav", i + 1)),
-                    &v.samples,
-                    v.rate,
-                );
-                liste.push_str(&format!(
-                    "probe-{:02}\n  text:  {}\n  laute: {laute}\n  quellen: {}\n\n",
-                    i + 1,
-                    ANSAGEN[i],
-                    q.join(", ")
-                ));
-            }
         }
         erste.sort_unstable();
         rtf.sort_by(f64::total_cmp);
@@ -524,8 +738,7 @@ fn offline_stimme_messen() {
         }
         dauer_engine = Some(tts);
     }
-    let _ = std::fs::write(proben_dir.join("proben.txt"), liste);
-    p.zeile("hoerproben=geschrieben");
+    hoerproben_schreiben(&mut p, &dir, &proben, &zeichen, &proben_dir, &espeak_dir);
 
     // --- Dauerlauf ---------------------------------------------------------------
     let n: usize = umgebung("BTS_PROBE_DAUERLAUF")
@@ -543,7 +756,7 @@ fn offline_stimme_messen() {
         for i in 0..n {
             let (cps, _, _) = &proben[i % proben.len()];
             let t0 = Instant::now();
-            match vertonen(&tts, cps) {
+            match vertonen(&tts, cps, MESS_VARIANTE) {
                 Some(_) => groesste = groesste.max(t0.elapsed()),
                 None => fehler += 1,
             }

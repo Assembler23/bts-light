@@ -4,12 +4,18 @@
 //! trainiert. espeak-ng ist GPL und kommt nicht in die Programmdatei; die
 //! Lautschrift entsteht deshalb hier:
 //!
-//! 1. **Ausnahmeliste** (Name → Laute) — hat Vorrang.
+//! 1. **Ausnahmeliste** (Name → Laute) — hat Vorrang, danach eine feste
+//!    Liste kleiner Funktionswörter („und", „die"), die unbetont bleiben.
 //! 2. **Lexikon** (freies Aussprache-Lexikon aus dem Wiktionary, CC-BY-SA),
 //!    beim Laden in die espeak-Schreibweise gebracht.
 //! 3. **Zusammengesetztes Wort** aus Lexikon-Teilen („Herrendoppel").
 //! 4. **Schätzer** nach deutschen Ausspracheregeln — für Namen, die nirgends
 //!    stehen. Er liefert immer etwas: Ein Wort wird nie verschluckt (K18).
+//!
+//! Jedes andere Wort trägt eine Hauptbetonung: Die Stimme ist mit
+//! espeak-Lautschrift trainiert, die jedes Inhaltswort betont; unbetonte
+//! Einsilber („Mai", „Hà") sprach sie in der Messung verschliffen oder gar
+//! nicht (Hörvergleich 18.11.2026).
 //!
 //! Zahlen werden vorher zu Wörtern. Ob dieser Weg gut genug klingt,
 //! entscheidet der Hörvergleich der Messung E0 (`tests/offline_stimme_probe.rs`).
@@ -20,6 +26,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Quelle {
     Ausnahme,
+    Funktionswort,
     Lexikon,
     Zusammengesetzt,
     Geschaetzt,
@@ -30,6 +37,7 @@ impl Quelle {
     pub fn wort(self) -> &'static str {
         match self {
             Self::Ausnahme => "ausnahme",
+            Self::Funktionswort => "funktionswort",
             Self::Lexikon => "lexikon",
             Self::Zusammengesetzt => "zusammengesetzt",
             Self::Geschaetzt => "geschaetzt",
@@ -153,6 +161,83 @@ fn betonung_vor_vokal(s: &str) -> String {
     aus
 }
 
+/// Kleine Wörter, die im Satz unbetont bleiben — so spricht sie auch
+/// espeak. Gehen dem Lexikon vor: Dort steht „Die" sonst englisch („daɪ").
+const FUNKTIONSWOERTER: &[(&str, &str)] = &[
+    ("und", "ʊnt"),
+    ("oder", "oːdɐ"),
+    ("der", "deːɐ"),
+    ("die", "diː"),
+    ("das", "das"),
+    ("den", "deːn"),
+    ("dem", "deːm"),
+    ("des", "dɛs"),
+    ("ein", "aɪn"),
+    ("eine", "aɪnə"),
+    ("einen", "aɪnən"),
+    ("in", "ɪn"),
+    ("im", "ɪm"),
+    ("am", "am"),
+    ("an", "an"),
+    ("um", "ʊm"),
+    ("zum", "tsʊm"),
+    ("zur", "tsuːɐ"),
+    ("zu", "tsuː"),
+    ("ist", "ɪst"),
+    ("von", "fɔn"),
+    ("vom", "fɔm"),
+    ("mit", "mɪt"),
+    ("bei", "baɪ"),
+    ("auf", "aʊf"),
+    ("aus", "aʊs"),
+    ("für", "fyːɐ"),
+];
+
+fn funktionswort(klein: &str) -> Option<&'static str> {
+    FUNKTIONSWOERTER
+        .iter()
+        .find(|(w, _)| *w == klein)
+        .map(|(_, l)| *l)
+}
+
+/// Setzt eine Hauptbetonung vor den ersten Vokal, wenn das Wort keine hat
+/// (Wiktionary lässt sie bei Einsilbern weg: „fɛlt" → „fˈɛlt").
+pub fn betonen(laute: &str) -> String {
+    if laute.contains('ˈ') {
+        return laute.to_string();
+    }
+    let mut aus = String::with_capacity(laute.len() + 2);
+    let mut gesetzt = false;
+    for c in laute.chars() {
+        if !gesetzt && ist_vokal(c) {
+            // Eine Nebenbetonung vor dem ersten Vokal wird zur Hauptbetonung.
+            aus.retain(|x| x != 'ˌ');
+            aus.push('ˈ');
+            gesetzt = true;
+        }
+        aus.push(c);
+    }
+    aus
+}
+
+/// Einsilber auf kurzen Vollvokal („ha", „lo") wird lang gesprochen — im
+/// Deutschen endet keine betonte Silbe kurz; kurz geschnitten verschluckte
+/// die Stimme das Wort („Hà").
+fn offen_lang(laute: &str) -> String {
+    // Silbe = Vokal, vor dem kein Vokal steht („aɪ" ist eine).
+    let silben = std::iter::once(' ')
+        .chain(laute.chars())
+        .zip(laute.chars())
+        .filter(|(vor, c)| ist_vokal(*c) && !ist_vokal(*vor))
+        .count();
+    let letzter = laute.chars().last();
+    if silben == 1 && letzter.is_some_and(|c| "aeiouyø".contains(c)) {
+        format!("{laute}ː")
+    } else {
+        laute.to_string()
+    }
+}
+
 /// Laute eines Wortes samt Herkunft.
 pub struct Wortlaut {
     pub laute: String,
@@ -172,8 +257,15 @@ pub struct Satz {
 }
 
 impl Lautierer<'_> {
-    /// Ein einzelnes Wort (nur Buchstaben).
+    /// Ein einzelnes Wort (nur Buchstaben), für sich allein gelesen.
     pub fn wort(&self, wort: &str) -> Wortlaut {
+        self.wort_im_satz(wort, true)
+    }
+
+    /// Ein Wort im Satz. Funktionswörter gelten nur klein geschrieben oder
+    /// am Satzanfang (auch nach Doppelpunkt) — groß im Satz ist es ein Name
+    /// („gegen An Nguyen", vietnamesischer Vorname).
+    fn wort_im_satz(&self, wort: &str, satzanfang: bool) -> Wortlaut {
         let klein = wort.to_lowercase();
         if let Some(l) = self.ausnahmen.get(&klein) {
             return Wortlaut {
@@ -181,21 +273,23 @@ impl Lautierer<'_> {
                 quelle: Quelle::Ausnahme,
             };
         }
-        if let Some(l) = self.lexikon.finde(wort) {
+        let klein_geschrieben = wort.chars().next().is_some_and(char::is_lowercase);
+        if let Some(l) = funktionswort(&klein).filter(|_| satzanfang || klein_geschrieben) {
             return Wortlaut {
                 laute: l.to_string(),
-                quelle: Quelle::Lexikon,
+                quelle: Quelle::Funktionswort,
             };
         }
-        if let Some(l) = self.zusammengesetzt(&klein, 0) {
-            return Wortlaut {
-                laute: l,
-                quelle: Quelle::Zusammengesetzt,
-            };
-        }
+        let (laute, quelle) = if let Some(l) = self.lexikon.finde(wort) {
+            (l.to_string(), Quelle::Lexikon)
+        } else if let Some(l) = self.zusammengesetzt(&klein, 0) {
+            (l, Quelle::Zusammengesetzt)
+        } else {
+            (schaetzen(&klein), Quelle::Geschaetzt)
+        };
         Wortlaut {
-            laute: schaetzen(&klein),
-            quelle: Quelle::Geschaetzt,
+            laute: offen_lang(&betonen(&laute)),
+            quelle,
         }
     }
 
@@ -226,7 +320,15 @@ impl Lautierer<'_> {
                 None => None,
             };
             if let Some(l_rest) = l_rest {
-                return Some(format!("{l_vorn}{fuge}{}", l_rest.replace('ˈ', "ˌ")));
+                let vorn = format!("{}{fuge}", betonen(l_vorn));
+                let mut hinten = betonen(&l_rest).replace('ˈ', "ˌ");
+                // Gleicher Konsonant an der Fuge wird einmal gesprochen
+                // („Ben|nett"), sonst stockt die Stimme.
+                let erster = hinten.chars().next();
+                if erster.is_some_and(|c| !ist_vokal(c) && vorn.ends_with(c)) {
+                    hinten.remove(0);
+                }
+                return Some(format!("{vorn}{hinten}"));
             }
         }
         None
@@ -250,10 +352,12 @@ impl Lautierer<'_> {
         let mut quellen = Vec::new();
         let mut wort = String::new();
         let mut zahl = String::new();
+        let mut anfang = true;
         let abschliessen = |wort: &mut String,
                             zahl: &mut String,
                             laute: &mut String,
-                            quellen: &mut Vec<Quelle>| {
+                            quellen: &mut Vec<Quelle>,
+                            anfang: &mut bool| {
             if !zahl.is_empty() {
                 // Zu lang für u64: Ziffer für Ziffer (nie verschlucken, K18).
                 let w = zahl
@@ -264,12 +368,19 @@ impl Lautierer<'_> {
                 for teil in w.split(' ').filter(|t| !t.is_empty()) {
                     let wl = self.wort(teil);
                     trennen(laute);
-                    laute.push_str(&wl.laute);
+                    // In Zahlen ist auch „ein" betont („ˈein und zwanzig").
+                    if teil == "und" {
+                        laute.push_str(&wl.laute);
+                    } else {
+                        laute.push_str(&betonen(&wl.laute));
+                    }
                     quellen.push(wl.quelle);
                 }
+                *anfang = false;
             }
             if !wort.is_empty() {
-                let wl = self.wort(&ohne_akzente(wort));
+                let wl = self.wort_im_satz(&ohne_akzente(wort), *anfang);
+                *anfang = false;
                 wort.clear();
                 trennen(laute);
                 laute.push_str(&wl.laute);
@@ -284,20 +395,25 @@ impl Lautierer<'_> {
             }
             if c.is_alphabetic() {
                 if !zahl.is_empty() {
-                    abschliessen(&mut wort, &mut zahl, &mut laute, &mut quellen);
+                    abschliessen(&mut wort, &mut zahl, &mut laute, &mut quellen, &mut anfang);
                 }
                 wort.push(c);
             } else if c.is_ascii_digit() {
                 if !wort.is_empty() {
-                    abschliessen(&mut wort, &mut zahl, &mut laute, &mut quellen);
+                    abschliessen(&mut wort, &mut zahl, &mut laute, &mut quellen, &mut anfang);
                 }
                 zahl.push(c);
             } else {
-                abschliessen(&mut wort, &mut zahl, &mut laute, &mut quellen);
+                abschliessen(&mut wort, &mut zahl, &mut laute, &mut quellen, &mut anfang);
                 match c {
-                    ',' | ';' | ':' => laute.push(','),
+                    ',' | ';' => laute.push(','),
+                    ':' => {
+                        laute.push(',');
+                        anfang = true;
+                    }
                     '.' | '!' | '?' => {
                         laute.push(c);
+                        anfang = true;
                         if laute.chars().any(ist_vokal) {
                             saetze.push(Satz {
                                 laute: std::mem::take(&mut laute),
@@ -312,7 +428,7 @@ impl Lautierer<'_> {
                 }
             }
         }
-        abschliessen(&mut wort, &mut zahl, &mut laute, &mut quellen);
+        abschliessen(&mut wort, &mut zahl, &mut laute, &mut quellen, &mut anfang);
         if laute.chars().any(ist_vokal) {
             if !laute.ends_with(['.', '!', '?']) {
                 laute.push('.');
@@ -368,6 +484,43 @@ pub fn ohne_akzente(wort: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Ausgabe von `espeak-ng --ipa` (eine Zeile je Satzteil) → Sätze für die
+/// Engine. Sprachwechsel-Marken wie „(en)" und Steuerzeichen der Stimme
+/// fallen weg; jeder Satz endet mit einem Satzzeichen. Nur für die
+/// Gegenprobe der Messung: espeak läuft dafür als eigenes Programm am
+/// Mess-PC und kommt nie in die App (GPL, ADR 0104).
+pub fn espeak_ausgabe_zu_saetzen(text: &str) -> Vec<String> {
+    let mut saetze = Vec::new();
+    for zeile in text.lines() {
+        let mut s = String::new();
+        let mut in_marke = false;
+        for c in zeile.chars() {
+            match c {
+                '(' => in_marke = true,
+                ')' => in_marke = false,
+                _ if in_marke => {}
+                // Füll-, Start- und Endzeichen der Stimme, Bindebogen, ZWJ.
+                '_' | '^' | '$' | '͡' | '\u{200d}' => {}
+                c if c.is_whitespace() => {
+                    if !s.is_empty() && !s.ends_with(' ') {
+                        s.push(' ');
+                    }
+                }
+                c => s.push(c),
+            }
+        }
+        let mut s = s.trim_end().to_string();
+        if !s.chars().any(ist_vokal) {
+            continue;
+        }
+        if !s.ends_with(['.', ',', '!', '?', ';', ':']) {
+            s.push('.');
+        }
+        saetze.push(s);
+    }
+    saetze
 }
 
 // --- Schätzer ---------------------------------------------------------------
@@ -470,7 +623,10 @@ fn zerlegen(z: &[char]) -> Vec<(Seg, usize)> {
         // „rz" nur am Anfang oder nach Konsonant polnisch („Brzezinski"),
         // nach Vokal bleibt es deutsch („Schwarz").
         let rz_polnisch = ab(i, "rz") && (i == 0 || !vokal_buchstabe(z[i - 1]));
-        let (seg, len): (Seg, usize) = if ab(i, "szcz") {
+        let (seg, len): (Seg, usize) = if i == 0 && ab(i, "wh") {
+            // Englisch: „Whitfield" — w, das h ist stumm.
+            (Seg::Kons("v"), 2)
+        } else if ab(i, "szcz") {
             (Seg::Kons("ʃtʃ"), 4)
         } else if ab(i, "tsch") {
             (Seg::Kons("tʃ"), 4)
@@ -562,6 +718,9 @@ fn zerlegen(z: &[char]) -> Vec<(Seg, usize)> {
                     // Am Wortanfang vor Vokal ein j („Yannick"), sonst ü.
                     if i == 0 && i + 1 < n && vokal_buchstabe(z[i + 1]) {
                         (Seg::Kons("j"), 1)
+                    } else if i + 1 == n && i > 0 && !vokal_buchstabe(z[i - 1]) {
+                        // Englisch am Wortende nach Konsonant: „Emily" → iː.
+                        (v("iː", "iː", false, Some(true)), 1)
                     } else {
                         (v("ʏ", "yː", false, None), 1)
                     }
@@ -652,7 +811,11 @@ fn einzel_kons(z: &[char], i: usize, doppelt: bool) -> Seg {
         }
         'ß' => Seg::Kons("s"),
         't' => Seg::Kons("t"),
-        'v' => Seg::Kons("f"),
+        // Zwischen Vokalen wie w („Olivia", „Klavier"), sonst f („Vogel").
+        'v' => {
+            let nach_vokal = i > 0 && "aeiouäöüy".contains(z[i - 1]);
+            Seg::Kons(if nach_vokal && vokal_folgt { "v" } else { "f" })
+        }
         'w' => Seg::Kons("v"),
         'x' => Seg::Kons("ks"),
         'z' => Seg::Kons("ts"),
