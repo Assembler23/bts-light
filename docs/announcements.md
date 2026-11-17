@@ -618,7 +618,8 @@ dem Turnier einmal die Test-Ansage drücken.
 | `page_audio` | „Audio für Ansage-Seiten erzeugen": Der PC vertont Ansagen für die Browser-Seite `/ansage`, unabhängig von `enabled`. Default `false`. Siehe [Ansage-Seite im Browser](#ansage-seite-im-browser-seit-v09311). |
 
 > **Pausen im Azure-SSML (seit v0.9.335, `src/io/ssmlRahmen.mjs`):** Zwischen den Blöcken
-> (Feld · Klasse · Paarung · „gegen" · Halle) steht eine echte Pause von 350 ms, vor und nach
+> (Feld · Klasse · Seite A · „gegen" Seite B · Halle) steht eine echte Pause von 350 ms — „gegen"
+> gehört zur zweiten Seite, davor steht keine Pause —, vor und nach
 > einem fremdsprachigen Namen (`<lang>`) je 120 ms — an diesen Sprachwechseln verschluckte die
 > Stimme sonst gern Wörter. Das Tempo bekommt jedes Stück einzeln, weil Azure kein `<lang>`
 > in `<prosody>` erlaubt.
@@ -913,7 +914,8 @@ Stimme die Namen **nativ** spricht. Ablauf:
   Backend** (aus `AppConfig.azure_tts`). Antwort = MP3 (Base64) → Web Audio spielt es nach dem Gong.
 - **Cache:** MP3 je SSML-Hash unter `app_data_dir/tts-cache/` → Wiederholungen/„nochmal aufrufen"
   kosten kein Netz/Geld.
-- **Fallback:** Azure aus / kein Key / Netzfehler → nahtlos die lokale Web-Speech-Ansage (mit Wörterbuch
+- **Fallback:** Azure aus / kein Key / Netzfehler (seit v0.9.443 nach höchstens 4 s, danach sofort —
+  siehe [Ansage ohne Internet](#ansage-ohne-internet-seit-v09443)) → nahtlos die lokale Web-Speech-Ansage (mit Wörterbuch
   + Regel-Umschrift). Nie stumm, nie blockierend — aber **sichtbar**: jeder Azure→Web-Speech-Rückfall
   setzt über `reportAzureFallback` (`src/state/azureStatus.ts`) den App-weiten
   [`AzureFallbackBanner`](../src/components/AzureFallbackBanner.tsx) (quittierbar) und landet als
@@ -951,6 +953,50 @@ Stimme die Namen **nativ** spricht. Ablauf:
 - `src/components/MatchAnnouncer.tsx` — immer eingehängt (Audio-Freischaltung, Abbruch beim Abschalten); erkennt neue Feldbelegungen nur noch am Ansage-Slave.
 - `src-tauri/src/tablet/erst_ansage.rs` — Erst-Ansage im Kern (Master, seit v0.9.314).
 - `src/pages/SetupWizard.tsx` — Einstellungen.
+
+## Ansage ohne Internet (seit v0.9.443)
+
+Fällt in der Halle das Internet aus, hängt die Ansage nicht mehr: Nach
+höchstens **4 Sekunden** spricht die Ersatzstimme (Windows-Stimme), und bis
+der Sprachdienst wieder antwortet, spricht sie **sofort** — ohne erneutes
+Warten. Spec: [features/ansage-offline-stimme.md](features/ansage-offline-stimme.md)
+(Abschnitt E1), [ADR 0105](adr/0105-ansage-ausfall-erkennung-und-rueckfall-im-kern.md).
+
+- **Harte Frist:** Die ganze Vertonung einer Ansage — alle Teile und ein
+  etwaiger zweiter Versuch zusammen — darf 4 s dauern. Ein Verbindungsaufbau
+  bekommt höchstens 1,5 s.
+  <!-- pruef: "HARTE_FRIST: Duration = Duration::from_secs(4)" in src-tauri/src/tts_netzlage.rs -->
+  <!-- pruef: "VERBINDUNGSFRIST: Duration = Duration::from_millis(1500)" in src-tauri/src/tts_text.rs -->
+- **Der Merker:** Scheitert die Vertonung an der Leitung (keine Verbindung,
+  keine Antwort, Frist abgelaufen, Störung beim Dienst mit HTTP 5xx), merkt
+  sich bts-light den Dienst. Solange gehen nur Ansagen an den Dienst, die
+  **vollständig im Cache** liegen — die spielen wie gewohnt in der
+  Cloud-Stimme. Alles andere spricht gleich die Ersatzstimme, gemischt wird
+  nie.
+- **Wieder da:** Alle 15 s prüft bts-light im Hintergrund, ob der Dienst
+  erreichbar ist — mit einem Verbindungsaufbau ohne Schlüssel und ohne Text,
+  das kostet keine Zeichen. Antwortet er, gilt die Sperre nicht mehr; ohne
+  Antwort endet sie spätestens nach 10 Minuten. Die Prüfung läuft nur,
+  solange ein Dienst gesperrt ist.
+  <!-- pruef: "PRUEFTAKT: Duration = Duration::from_secs(15)" in src-tauri/src/tts_netzlage.rs -->
+  <!-- pruef: "HOECHSTDAUER_MS: u64 = 10 * 60_000" in src-tauri/src/tts_netzlage.rs -->
+- **Je Dienst:** Der Merker gilt für den Dienst, der ausfiel. Wer auf einen
+  anderen Dienst umstellt, bekommt dessen Stimme sofort wieder. Das Speichern
+  der Einstellungen hebt die Sperre nicht auf, ein Neustart der App schon.
+- **Kein Ausfall:** Drossel (HTTP 429, Kontingent), ein ungültiger Schlüssel
+  (401/403) und abgelehnte Anfragen setzen den Merker **nicht** — dort hilft
+  Warten nicht. Die Ersatzstimme spricht trotzdem, und der Grund steht im
+  Rückfall-Banner.
+- **Seiten und PC gleich:** Die Ansage-Seiten im Browser (`/ansage`) folgen
+  demselben Ablauf; ihre Teile liegen weiter nur im Arbeitsspeicher.
+- **Zeichenzähler:** Teile, die vor dem Ende der Frist ankamen, werden gecacht
+  und gebucht. Ein Teil, den der Dienst erst im Moment des Abbruchs fertig
+  hatte, kommt nicht mehr an — er ist beim Anbieter womöglich bezahlt, steht
+  aber nicht im Zähler und wird beim nächsten Mal erneut vertont.
+- **Gemini:** Gemini braucht für eine Ansage oft länger als 4 s und kann
+  deshalb auch bei gutem Internet häufig an der Frist scheitern. Dann spricht
+  die Ersatzstimme, bis die Prüfung den Dienst wieder freigibt (15 s). Gemini
+  ist unter dieser Frist nicht gemessen — vor einem Turnier anhören.
 
 ## Weitere Sprachdienste: ElevenLabs, OpenAI, Gemini (seit v0.9.336)
 
@@ -1053,15 +1099,17 @@ Einrichten nicht ihre Stimme.
   **„Ansage in Teilen vertonen (spart Zeichen)"** im Cloud-Stimmen-Block,
   wirkt sofort wie die Dienstwahl und gilt für jeden Dienst. Die Ansage wird
   an ihren Blockpausen geschnitten („Feld 3." · „Herrendoppel." ·
-  „Viertelfinale." · Namen · „gegen" · Namen), jeder Teil einzeln vertont und
+  „Viertelfinale." · Namen · „gegen" + Namen), jeder Teil einzeln vertont und
   gecacht — Feld, Disziplin und Runde kosten dann nur beim ersten Mal, danach
   nur noch die neuen Namen. Geschätzt **50–60 % weniger Zeichen** je
   Turniertag. Die Teile werden zu einer WAV zusammengesetzt, Randstille
   gekürzt, dazwischen genau 350 ms Pause. Grenzen: Die Stimme kann zwischen
   den Teilen leicht anders klingen (vor allem ElevenLabs v3) — darum vorher
   anhören; beim ersten Mal bis zu acht gleichzeitige Anfragen je Ansage (die
-  Gemini-Gratisstufe reicht dafür nicht). Scheitert ein Teil, wird die
-  Ansage als Ganzes vertont, nie halb gespielt. Ein Ansage-Slave mit geerbter
+  Gemini-Gratisstufe reicht dafür nicht). Scheitert ein Teil am Inhalt, wird
+  die Ansage als Ganzes vertont, nie halb gespielt; scheitert er am Netz, an
+  der Drossel oder am Schlüssel, spricht sofort die Ersatzstimme (seit
+  v0.9.443, siehe [Ansage ohne Internet](#ansage-ohne-internet-seit-v09443)). Ein Ansage-Slave mit geerbter
   Stimme übernimmt den Schalter vom Master. Ansage-Seiten cachen die Teile
   weiterhin nur im Arbeitsspeicher. Der Verbrauchszähler bucht nur die neu
   vertonten Teile; eine Ansage zählt „aus Cache", wenn alle Teile von dort

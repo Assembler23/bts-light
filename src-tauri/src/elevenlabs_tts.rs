@@ -6,7 +6,8 @@
 // vorgegeben: `language_code` würde fremde Namen eindeutschen — genau das,
 // was der Hörvergleich prüfen soll.
 
-use crate::tts_text::{netz, ssml_zu_text, Format, Pausen, TtsText};
+use crate::tts_text::netz::{self, TtsFehler};
+use crate::tts_text::{ssml_zu_text, Format, Pausen, TtsText};
 use std::path::Path;
 
 /// MP3-Ausgabe; das Frontend dekodiert wie bei Azure über `decodeAudioData`.
@@ -41,6 +42,22 @@ fn cache_schluessel(voice: &str, modell: &str, t: &TtsText, format: Format) -> S
     format!("elevenlabs|{modell}|{voice}|{:.2}|{}{f}", t.speed, t.text)
 }
 
+/// Host des Dienstes — zugleich der Schlüssel des Ausfall-Merkers.
+pub const HOST: &str = "api.elevenlabs.io";
+
+/// Nur der Blick in den Plattencache, ohne Netz — für die Ansage bei
+/// gesetztem Ausfall-Merker.
+pub fn aus_cache(
+    voice: &str,
+    modell: &str,
+    ssml: &str,
+    cache_dir: &Path,
+    format: Format,
+) -> Option<Vec<u8>> {
+    let t = text_fuer(ssml, modell);
+    netz::cache_holen(cache_dir, &cache_schluessel(voice, modell, &t, format))
+}
+
 /// Vertont; mit `cache_dir` über den Plattencache, ohne (Ansage-Seiten) nur
 /// im Speicher.
 pub async fn vertonen(
@@ -50,7 +67,7 @@ pub async fn vertonen(
     ssml: &str,
     cache_dir: Option<&Path>,
     format: Format,
-) -> Result<(Vec<u8>, bool), String> {
+) -> Result<(Vec<u8>, bool), TtsFehler> {
     let t = text_fuer(ssml, modell);
     let schluessel = cache_schluessel(voice, modell, &t, format);
     if let Some(bytes) = cache_dir.and_then(|d| netz::cache_holen(d, &schluessel)) {
@@ -72,43 +89,43 @@ async fn anfragen(
     modell: &str,
     t: &TtsText,
     format: Format,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, TtsFehler> {
     if !netz::stimme_gueltig(voice) {
-        return Err("ElevenLabs: ungültige Stimmen-ID".to_string());
+        return Err(TtsFehler::inhalt("ElevenLabs: ungültige Stimmen-ID"));
     }
     if t.text.is_empty() {
-        return Err("ElevenLabs: leerer Ansagetext".to_string());
+        return Err(TtsFehler::inhalt("ElevenLabs: leerer Ansagetext"));
     }
     let (ausgabe, accept) = match format {
         Format::Mp3 => (AUSGABEFORMAT, "audio/mpeg"),
         Format::Wav24 => (AUSGABEFORMAT_PCM, "*/*"),
     };
-    let url =
-        format!("https://api.elevenlabs.io/v1/text-to-speech/{voice}?output_format={ausgabe}");
+    let url = format!("https://{HOST}/v1/text-to-speech/{voice}?output_format={ausgabe}");
     let body = serde_json::json!({
         "text": t.text,
         "model_id": modell,
         "voice_settings": { "speed": t.speed },
     });
-    let resp = netz::client(10)?
+    let resp = netz::client()?
         .post(&url)
+        .timeout(netz::ANFRAGE_FRIST)
         .header("xi-api-key", key)
         .header("Accept", accept)
         .header("User-Agent", "bts-light")
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("ElevenLabs-Anfrage: {e}"))?;
+        .map_err(|e| TtsFehler::anfrage("ElevenLabs", "ElevenLabs-Anfrage", &e))?;
     if !resp.status().is_success() {
-        return Err(netz::http_fehler("ElevenLabs", resp).await);
+        return Err(netz::status_fehler("ElevenLabs", resp).await);
     }
     let bytes = resp
         .bytes()
         .await
-        .map_err(|e| format!("ElevenLabs-Antwort: {e}"))?
+        .map_err(|e| TtsFehler::antwort("ElevenLabs", "ElevenLabs-Antwort", &e))?
         .to_vec();
     if bytes.is_empty() {
-        return Err("ElevenLabs lieferte leeres Audio".to_string());
+        return Err(TtsFehler::inhalt("ElevenLabs lieferte leeres Audio"));
     }
     Ok(bytes)
 }

@@ -5,6 +5,8 @@
 //  B) welcher Fehler welches Banner auslöst (Linux/Abbruch: keins)
 //  C) Fristen für PCM-Stück und Windows-Stimme
 //  D) mitFrist: Ergebnis, Fehler, Frist — genau eine Auflösung
+//  E) vertonenMitFrist: Cloud-Vertonung höchstens harte Frist + 0,5 s (Spec
+//     `ansage-offline-stimme`, K10), Fehlertext des Kerns bleibt erhalten
 import {
   fehlerCode,
   bannerFuer,
@@ -12,7 +14,11 @@ import {
   stimmeFristMs,
   mitFrist,
   abschnitteTeilen,
+  VERTONUNG_FRIST_MS,
+  VERTONUNG_FRIST_TEXT,
+  vertonenMitFrist,
 } from "../src/io/tonWeg.mjs";
+import { readFileSync } from "node:fs";
 
 let failures = 0;
 function check(name, cond) {
@@ -82,6 +88,7 @@ function makeClock() {
     },
     clearTimeoutFn: () => {},
     feuern: () => timers.splice(0).forEach((t) => t.cb()),
+    letzteMs: () => timers[timers.length - 1]?.ms,
   };
 }
 
@@ -107,6 +114,40 @@ c4.feuern();
 spaet(7);
 const r4 = await p4;
 check("nach der Frist zählt das späte Ergebnis nicht", r4.code === "frist");
+
+// E) vertonenMitFrist
+const rust = readFileSync(new URL("../src-tauri/src/tts_netzlage.rs", import.meta.url), "utf8");
+const harteFrist = rust.match(/HARTE_FRIST: Duration = Duration::from_secs\((\d+)\)/);
+check(
+  "Frist = harte Frist des Kerns + 500 ms",
+  harteFrist && Number(harteFrist[1]) * 1000 + 500 === VERTONUNG_FRIST_MS,
+);
+
+const c5 = makeClock();
+check("Vertonung vor der Frist", (await vertonenMitFrist(Promise.resolve("b64"), c5)) === "b64");
+
+const c6 = makeClock();
+let fehler6 = null;
+await vertonenMitFrist(Promise.reject("Azure: keine Verbindung zum Sprachdienst"), c6).catch(
+  (e) => (fehler6 = e),
+);
+check("Kern-Fehler bleibt erhalten", fehler6 === "Azure: keine Verbindung zum Sprachdienst");
+
+const c7 = makeClock();
+let fehler7 = null;
+const p7 = vertonenMitFrist(new Promise(() => {}), c7).catch((e) => (fehler7 = e));
+check("Frist gestellt", c7.letzteMs() === VERTONUNG_FRIST_MS);
+c7.feuern();
+await p7;
+check("hängender Kern → Fehler nach der Frist", fehler7?.message === VERTONUNG_FRIST_TEXT);
+
+const c8 = makeClock();
+let spaet8;
+let fehler8 = null;
+const p8 = vertonenMitFrist(new Promise((r) => (spaet8 = r)), c8).catch((e) => (fehler8 = e));
+c8.feuern();
+spaet8("zu spät");
+check("nach der Frist zählt die späte Vertonung nicht", (await p8) === fehler8 && fehler8 !== null);
 
 if (failures) {
   console.error(`\n${failures} Fehler`);

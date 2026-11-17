@@ -109,6 +109,20 @@ Antworten bewirken, steht unter
 [Die Suche läuft mit](tp-datei-upload.md#die-suche-läuft-mit).
 <!-- pruef: "Ja, übernehmen" in src/components/TpFundBanner.tsx -->
 
+Spricht statt der Cloud-Stimme die Ersatzstimme, steht oben ein
+orangefarbener Balken **„Hochwertige Cloud-Ansage (Azure/ElevenLabs)
+fehlgeschlagen — die Ersatzstimme übernimmt."** In Klammern dahinter steht der
+Grund (seit v0.9.443) — ohne Adresse und ohne Antworttext des Dienstes, zum
+Beispiel „keine Verbindung zum Sprachdienst", „keine Antwort innerhalb der
+Frist" oder, solange der Dienst nach einem Ausfall gesperrt ist, „zurzeit
+nicht erreichbar, die Ersatzstimme spricht, bis der Dienst wieder antwortet".
+Was dahintersteckt, steht unter
+[Ansage ohne Internet](announcements.md#ansage-ohne-internet-seit-v09443).
+<!-- pruef: "die Ersatzstimme übernimmt" in src/components/AzureFallbackBanner.tsx -->
+<!-- pruef: "keine Verbindung zum Sprachdienst" in src-tauri/src/tts_text.rs -->
+<!-- pruef: "keine Antwort innerhalb der Frist" in src-tauri/src/tts_text.rs -->
+<!-- pruef: "zurzeit nicht erreichbar, die Ersatzstimme spricht, bis der Dienst" in src-tauri/src/tts_text.rs -->
+
 ### Blaues Band: Verbesserung für Tablets und Anzeigen (seit v0.9.433)
 
 Manchmal lässt sich ein Fehler an einer Geräte-Seite — Zähl-Tablet, Monitor,

@@ -140,3 +140,50 @@ export function mitFrist(promise, ms, uhr = {}) {
     );
   });
 }
+
+/**
+ * Höchste Wartezeit auf die Cloud-Vertonung im Kern (Spec
+ * `ansage-offline-stimme`, K10): harte Frist des Kerns
+ * (`tts_netzlage::HARTE_FRIST`, 4 s) plus 0,5 s für den Rückweg. Danach
+ * spricht die Ersatzstimme, auch wenn der Kern nicht antwortet.
+ */
+export const VERTONUNG_FRIST_MS = 4500;
+
+/** Fehlertext, wenn die Vertonung die Frist im Frontend überschreitet. */
+export const VERTONUNG_FRIST_TEXT = "Cloud-Stimme: keine Antwort innerhalb der Frist";
+
+/**
+ * Wartet höchstens {@link VERTONUNG_FRIST_MS} auf die Vertonung. Anders als
+ * {@link mitFrist} bleibt der Fehlertext des Kerns erhalten (er erscheint im
+ * Rückfall-Banner); nach der Frist wirft es {@link VERTONUNG_FRIST_TEXT}.
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {{ setTimeoutFn?: Function, clearTimeoutFn?: Function }} [uhr]
+ * @returns {Promise<T>}
+ */
+export function vertonenMitFrist(promise, uhr = {}) {
+  const setT = uhr.setTimeoutFn || setTimeout;
+  const clearT = uhr.clearTimeoutFn || clearTimeout;
+  return new Promise((resolve, reject) => {
+    let fertig = false;
+    const timer = setT(() => {
+      if (fertig) return;
+      fertig = true;
+      reject(new Error(VERTONUNG_FRIST_TEXT));
+    }, VERTONUNG_FRIST_MS);
+    promise.then(
+      (wert) => {
+        if (fertig) return;
+        fertig = true;
+        clearT(timer);
+        resolve(wert);
+      },
+      (err) => {
+        if (fertig) return;
+        fertig = true;
+        clearT(timer);
+        reject(err);
+      },
+    );
+  });
+}

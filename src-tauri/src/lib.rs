@@ -22,6 +22,7 @@ pub mod tablet;
 pub mod tausch;
 pub mod tl_lokal;
 pub mod tp_finden;
+pub mod tts_netzlage;
 pub mod tts_teile;
 pub mod tts_text;
 pub mod tts_verbrauch;

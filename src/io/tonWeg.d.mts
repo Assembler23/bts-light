@@ -39,3 +39,9 @@ export declare function mitFrist<T>(
     clearTimeoutFn?: (id: unknown) => void;
   },
 ): Promise<FristErgebnis<T>>;
+export declare const VERTONUNG_FRIST_MS: number;
+export declare const VERTONUNG_FRIST_TEXT: string;
+export declare function vertonenMitFrist<T>(
+  promise: Promise<T>,
+  uhr?: { setTimeoutFn?: Function; clearTimeoutFn?: Function },
+): Promise<T>;

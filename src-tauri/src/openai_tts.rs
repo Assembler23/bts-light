@@ -5,7 +5,8 @@
 // `speed`-Parameter, nimmt aber eine Sprechanweisung (`instructions`) — dort
 // stehen Ton und Tempo.
 
-use crate::tts_text::{netz, ssml_zu_text, Format, Pausen, TtsText};
+use crate::tts_text::netz::{self, TtsFehler};
+use crate::tts_text::{ssml_zu_text, Format, Pausen, TtsText};
 use std::path::Path;
 
 /// Sprechanweisung je Ansagesprache; das Tempo wird angehängt.
@@ -47,6 +48,22 @@ fn cache_schluessel(voice: &str, modell: &str, t: &TtsText, format: Format) -> S
     )
 }
 
+/// Host des Dienstes — zugleich der Schlüssel des Ausfall-Merkers.
+pub const HOST: &str = "api.openai.com";
+
+/// Nur der Blick in den Plattencache, ohne Netz — für die Ansage bei
+/// gesetztem Ausfall-Merker.
+pub fn aus_cache(
+    voice: &str,
+    modell: &str,
+    ssml: &str,
+    cache_dir: &Path,
+    format: Format,
+) -> Option<Vec<u8>> {
+    let t = ssml_zu_text(ssml, Pausen::Satzzeichen);
+    netz::cache_holen(cache_dir, &cache_schluessel(voice, modell, &t, format))
+}
+
 /// Vertont; mit `cache_dir` über den Plattencache, ohne nur im Speicher.
 pub async fn vertonen(
     key: &str,
@@ -55,17 +72,17 @@ pub async fn vertonen(
     ssml: &str,
     cache_dir: Option<&Path>,
     format: Format,
-) -> Result<(Vec<u8>, bool), String> {
+) -> Result<(Vec<u8>, bool), TtsFehler> {
     let t = ssml_zu_text(ssml, Pausen::Satzzeichen);
     let schluessel = cache_schluessel(voice, modell, &t, format);
     if let Some(bytes) = cache_dir.and_then(|d| netz::cache_holen(d, &schluessel)) {
         return Ok((bytes, true));
     }
     if !netz::stimme_gueltig(voice) {
-        return Err("OpenAI: ungültige Stimme".to_string());
+        return Err(TtsFehler::inhalt("OpenAI: ungültige Stimme"));
     }
     if t.text.is_empty() {
-        return Err("OpenAI: leerer Ansagetext".to_string());
+        return Err(TtsFehler::inhalt("OpenAI: leerer Ansagetext"));
     }
     let body = serde_json::json!({
         "model": modell,
@@ -78,24 +95,25 @@ pub async fn vertonen(
             Format::Wav24 => "pcm",
         },
     });
-    let resp = netz::client(10)?
-        .post("https://api.openai.com/v1/audio/speech")
+    let resp = netz::client()?
+        .post(format!("https://{HOST}/v1/audio/speech"))
+        .timeout(netz::ANFRAGE_FRIST)
         .bearer_auth(key)
         .header("User-Agent", "bts-light")
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("OpenAI-Anfrage: {e}"))?;
+        .map_err(|e| TtsFehler::anfrage("OpenAI", "OpenAI-Anfrage", &e))?;
     if !resp.status().is_success() {
-        return Err(netz::http_fehler("OpenAI", resp).await);
+        return Err(netz::status_fehler("OpenAI", resp).await);
     }
     let bytes = resp
         .bytes()
         .await
-        .map_err(|e| format!("OpenAI-Antwort: {e}"))?
+        .map_err(|e| TtsFehler::antwort("OpenAI", "OpenAI-Antwort", &e))?
         .to_vec();
     if bytes.is_empty() {
-        return Err("OpenAI lieferte leeres Audio".to_string());
+        return Err(TtsFehler::inhalt("OpenAI lieferte leeres Audio"));
     }
     let bytes = match format {
         Format::Mp3 => bytes,
