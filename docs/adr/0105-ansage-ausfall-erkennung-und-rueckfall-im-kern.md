@@ -94,5 +94,66 @@ Höchstdauer des Merkers 10 Minuten.
 
 ## Ergebnis der Messung
 
-Offen — wird nach E0 hier eingetragen (Zeit bis zum Fehler je Ausfallart, Wirkung der
-Verbindungsfrist, festgelegte Konstanten).
+**Stand 16.11.2026: Das Messwerkzeug ist gebaut und am Entwicklungsrechner (Linux, gutes Netz)
+probegelaufen. Die Messung am Windows-Turnier-PC steht aus. Bis dahin bleiben die Konstanten
+Ausgangswerte.**
+
+Werkzeug: `src-tauri/tests/tts_ausfall_probe.rs`, Aufruf
+`cargo test -p bts-light --test tts_ausfall_probe -- --ignored --nocapture`. Es ruft die vier
+Sprachdienste auf drei Arten ab — wie die App heute (frischer Client, nur Gesamtfrist), mit
+Verbindungsfrist, mit harter Frist von außen — und stellt fünf Ausfallarten am eigenen Rechner
+nach. Welche Lagen am Turnier-PC zu messen sind, steht im Kopf der Datei.
+
+### Nachgestellte Ausfallarten (Linux, Zeit bis zum Fehler in ms)
+
+| Ausfallart | wie heute (Frist 10 s) | mit Verbindungsfrist 1,5 s | mit harter Frist 2,5 s |
+|---|---:|---:|---:|
+| Verbindung wird abgelehnt | 31 | 23 | 19 |
+| Name unbekannt, sofortige Absage | 58 | 49 | 47 |
+| Verbindungsaufbau läuft ins Leere | 10.022 | 1.523 | 2.501 |
+| Verbindung steht, Verschlüsselung bleibt stumm | 10.024 | 1.522 | 2.501 |
+| Anfrage angenommen, keine Antwort | 10.022 | **10.022** | 2.501 |
+
+Ohne jede Frist gab ein Verbindungsaufbau ins Leere nach 30 s noch nicht auf (dort bricht das
+Werkzeug ab).
+
+„Verbindung wird abgelehnt" ist unter Windows vermutlich kein Sofort-Fehler: Windows wiederholt
+den Verbindungsversuch auf einen geschlossenen Port erfahrungsgemäß etwa 2 s lang. Ungemessen —
+der Windows-Lauf zeigt es.
+
+### Gutes Netz (Linux, je Dienst fünf Abrufe wie heute: frischer Client, nur Gesamtfrist)
+
+| Dienst | Median | Maximum | App-Weg mit ungültigem Schlüssel |
+|---|---:|---:|---:|
+| Azure | 138 | 143 | 192 (HTTP 401) |
+| ElevenLabs | 267 | 284 | 149 (HTTP 401) |
+| OpenAI | 92 | 99 | 196 (HTTP 401) |
+| Gemini | 170 | 171 | 138 (HTTP 400) |
+
+Gemessen ist damit Verbindungsaufbau plus eine kurze Antwort, **keine Vertonung**.
+
+### Was das für die Entscheidung heißt
+
+- **Die Verbindungsfrist allein reicht nicht.** Sie deckt Verbindungsaufbau und Verschlüsselung,
+  aber nicht die Gegenstelle, die eine Anfrage annimmt und schweigt. Nur die harte Frist bricht
+  dort ab. Entscheidung 1 (beides) trägt.
+- **Die harte Frist greift pünktlich**, in jedem nachgestellten Fall auf 1 ms genau.
+- **Die Verbindungsfrist umschließt auch die Namensauflösung.** Das ist an der Quelle von
+  reqwest 0.13.5 gelesen (die Frist liegt um den ganzen Verbindungsaufbau), aber nicht gemessen:
+  Eine hängende Namensauflösung lässt sich am Entwicklungsrechner nicht nachstellen.
+- **Abstand bei gutem Netz:** Der Verbindungsaufbau braucht höchstens 0,3 s gegenüber 1,5 s
+  Verbindungsfrist. Ob 2,5 s für eine ganze Ansage reichen, sagt das nicht — dafür braucht es
+  die Messung mit echter Vertonung.
+
+### Offen (Windows-Turnier-PC)
+
+- Kabel gezogen, WLAN ohne Internet, Hotspot mit Anmeldeseite, langsames Netz: Zeit bis zum
+  Fehler wie heute, und ob Windows die Namensauflösung dabei hängen lässt.
+- Echte Vertonung bei gutem Netz (`BTS_PROBE_ECHT`): Abstand zur harten Frist. Das Werkzeug
+  vertont **in einem Stück**; mit „Ansage in Teilen" stellt die App mehrere Anfragen je Ansage.
+  Diese Lücke bleibt — die harte Frist für eine Ansage in Teilen ist danach zu schätzen
+  (Teile × Einzelwert, soweit sie nacheinander laufen) und in E1 am Bau zu prüfen.
+- Die Ausgabe des Werkzeugs nennt von einem Fehler nur feste Kennwörter, nie den Fehlertext:
+  rustls schreibt bei einer Anmeldeseite die Namen aus deren Zertifikat hinein (Router, Hotel).
+  Für die Lage `hotspot` heißt das Kennwort `tls-zertifikat`.
+- Danach: Konstanten festlegen und hier sowie in der Spec eintragen.
