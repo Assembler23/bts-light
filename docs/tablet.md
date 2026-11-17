@@ -224,6 +224,16 @@ aus.
 kein einziges `<script src>` oder `<link href>`. Es gibt nichts, was getrennt
 veralten könnte.
 
+## Titel im Browser-Tab (seit v0.9.446)
+
+Der Tab heißt nach dem Feld: **„Court 8 - Tablet"**. Eine reine Feldnummer
+aus BTP bekommt „Court" davor (bei mehreren Hallen „Halle 2 · Court 6"), ein
+Feldname mit eigenem Wort („Center Court") bleibt, wie er ist. Ohne bekanntes
+Feld bleibt es bei „Spielzettel", das Demofeld heißt „Demofeld – Übungsspiel".
+Der Court-Monitor folgt derselben Regel mit „ - Monitor"
+([court-monitor.md](court-monitor.md)).
+<!-- pruef: "' - Tablet'" in src-tauri/assets/tablet.html -->
+
 ## Demofeld: Übungsspiel ohne Turnierbezug (seit v0.9.416)
 
 `/court/demo` (LAN, Relay `/{ns}/court/demo`, Slave-Brücke) liefert dieselbe

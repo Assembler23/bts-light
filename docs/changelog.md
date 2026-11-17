@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.446
+
+- **Tab-Titel nennt das Feld.** Das Zähl-Tablet heißt im Browser-Tab jetzt
+  „Court 8 - Tablet" statt „Spielzettel", der Court-Monitor „Court 8 -
+  Monitor" statt „Court-Monitor – 8". Bei mehreren offenen Tabs sieht man so
+  sofort, welcher zu welchem Feld gehört.
+
 ## v0.9.445
 
 - **Mehr Links zu badhub in der Turnierleitungs-Ansicht.** Der Turniername
