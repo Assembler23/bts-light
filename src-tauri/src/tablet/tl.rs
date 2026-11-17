@@ -3136,6 +3136,13 @@ pub struct TlState {
     /// am Relay-Timeout. Ohne es zeigt die Seite kein Suchfeld.
     #[serde(default)]
     pub can_search: bool,
+    /// Wohin die badhub-Links dieser Seite zeigen (Spielernamen, Konkurrenz,
+    /// Turnierseite, Liveticker). `None`, wenn die Push-Adresse unbrauchbar
+    /// ist — und bei einem älteren Host: Die Seite fällt dann auf ihren
+    /// bisherigen Weg zurück (Spielerseite auf badhub.de bzw. dem Host, von
+    /// dem sie kommt). Siehe [`badhub_links`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub badhub: Option<TlBadhubLinks>,
     /// Nach wie vielen Sekunden ein „fertig aussehendes" Spiel gemeldet wird
     /// (`0` = Warnung aus). Kommt aus der Konfiguration; die Seite rechnet
     /// damit gegen [`TlCourt::decided_since_ms`].
@@ -4466,6 +4473,56 @@ pub(crate) fn prognose_rechnen(
     (stats, predictions)
 }
 
+/// Ziele der badhub-Links in der TL-Sicht.
+///
+/// **Ein Testturnier verlinkt auf das Testsystem.** Die Basis folgt der
+/// Push-Adresse (`badhub.url`) — dieselbe Ableitung wie Check-In, Logos und
+/// Relay ([`crate::badhub_host`]). Ein Link auf badhub.de zeigte bei einem
+/// Turnier auf test.badhub.de ins Leere oder, schlimmer, auf einen
+/// gleichnamigen Produktivstand.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TlBadhubLinks {
+    /// Schema + Host, z. B. `https://test.badhub.de` — ohne Schrägstrich am
+    /// Ende.
+    pub base: String,
+    /// Turnier-GUID (kanonisch). Mit ihr verlinkt die Seite über
+    /// `/checkin/<GUID>/turnier` auf Turnierseite, Konkurrenz und
+    /// Spieleransicht **dieses** Turniers; ohne sie nur auf die globale
+    /// Spielerseite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guid: Option<String>,
+    /// Öffentlicher Liveticker dieses Turniers (Live-Seite aus den
+    /// Einstellungen, aufs Zielsystem umgebogen, mit `&g=<GUID>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub liveticker: Option<String>,
+}
+
+/// Baut [`TlBadhubLinks`] aus der Konfiguration. `None`, wenn die
+/// Push-Adresse keine http(s)-Adresse ist — dann gibt es kein Ziel, dem man
+/// trauen könnte.
+pub(crate) fn badhub_links(config: &AppConfig) -> Option<TlBadhubLinks> {
+    let push = reqwest::Url::parse(config.badhub.url.trim()).ok()?;
+    if !matches!(push.scheme(), "https" | "http") || push.host_str().is_none() {
+        return None;
+    }
+    let base = push.origin().ascii_serialization();
+    let guid = config.tournament_uuid_kanonisch();
+    let test = crate::badhub_host::ist_testsystem(&config.badhub.url);
+    // Die Live-Seite trägt den Host, der beim Einrichten eingetragen wurde —
+    // beim Umschalten aufs Testsystem bleibt sie oft auf badhub.de stehen.
+    // `url_fuer` biegt nur badhub-Hosts um, eine eigene Instanz bleibt.
+    let liveticker = Some(config.badhub.live_url.trim())
+        .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+        .map(|u| {
+            crate::aushang::link_mit_guid(&crate::badhub_host::url_fuer(u, test), guid.as_deref())
+        });
+    Some(TlBadhubLinks {
+        base,
+        guid,
+        liveticker,
+    })
+}
+
 /// Baut den Anzeige-Zustand aus dem aktuellen BTP-Stand und dem, was der Host
 /// selbst verwaltet (Aufrufe, Sperren, Live-Spielstände).
 ///
@@ -4550,6 +4607,7 @@ pub(crate) fn build_state_limited(
             schedule: None,
             tournament: String::new(),
             multi_hall: false,
+            badhub: badhub_links(config),
             can_set_wish_court: true,
             can_set_highlight: true,
             can_repeat_prep_call: true,
@@ -4946,6 +5004,7 @@ pub(crate) fn build_state_limited(
         can_reload_tablets: true,
         can_clear_official_call: true,
         can_search: true,
+        badhub: badhub_links(config),
         finished_warning_seconds: config.finished_warning_seconds,
         shuttle_counter: config.shuttle_counter,
         injury_guide_seconds: config.richtzeit_s(),
@@ -5838,6 +5897,109 @@ mod tests {
         let tablet = TabletState::default();
         tablet.set_snapshot(snapshot);
         build_state(&tablet, config, 1_000_000, 7)
+    }
+
+    // ── badhub-Links (Ziel folgt der Push-Adresse) ───────────────────────
+
+    fn badhub_config(push: &str, live: &str, guid: &str) -> AppConfig {
+        let mut config = AppConfig::default();
+        config.badhub.url = push.into();
+        config.badhub.live_url = live.into();
+        config.tournament_uuid = guid.into();
+        config
+    }
+
+    #[test]
+    fn badhub_links_folgen_dem_testsystem() {
+        let config = badhub_config(
+            "https://test.badhub.de/api/live_update.php",
+            "https://badhub.de/live?t=bvbb",
+            "{0ea5fd86-a64f-4445-a8de-bae3dbf762ba}",
+        );
+        let links = badhub_links(&config).expect("Links");
+        assert_eq!(links.base, "https://test.badhub.de");
+        assert_eq!(
+            links.guid.as_deref(),
+            Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA")
+        );
+        // Die Live-Seite stand noch auf Produktiv — der Link folgt dem Push.
+        assert_eq!(
+            links.liveticker.as_deref(),
+            Some("https://test.badhub.de/live?t=bvbb&g=0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA")
+        );
+    }
+
+    #[test]
+    fn badhub_links_im_produktivbetrieb_und_ohne_angaben() {
+        let config = badhub_config(
+            "https://badhub.de/api/live_update.php",
+            "https://test.badhub.de/live?t=bvbb",
+            "",
+        );
+        let links = badhub_links(&config).expect("Links");
+        assert_eq!(links.base, "https://badhub.de");
+        assert_eq!(links.guid, None);
+        // Auch umgekehrt: Produktiv-Push zieht die Live-Seite aufs Produktivsystem.
+        assert_eq!(
+            links.liveticker.as_deref(),
+            Some("https://badhub.de/live?t=bvbb")
+        );
+
+        let ohne_live = badhub_links(&badhub_config(
+            "https://badhub.de/api/live_update.php",
+            "  ",
+            "",
+        ))
+        .expect("Links");
+        assert_eq!(ohne_live.liveticker, None);
+    }
+
+    #[test]
+    fn badhub_links_eigene_instanz_bleibt_unberuehrt() {
+        let links = badhub_links(&badhub_config(
+            "http://192.168.1.5:8000/api/live_update.php",
+            "http://192.168.1.5:8000/live?t=x",
+            "",
+        ))
+        .expect("Links");
+        assert_eq!(links.base, "http://192.168.1.5:8000");
+        assert_eq!(
+            links.liveticker.as_deref(),
+            Some("http://192.168.1.5:8000/live?t=x")
+        );
+    }
+
+    #[test]
+    fn badhub_links_ohne_brauchbare_push_adresse_fehlen() {
+        for push in ["", "kaputt", "javascript:alert(1)", "file:///etc/passwd"] {
+            assert_eq!(badhub_links(&badhub_config(push, "", "")), None, "{push}");
+        }
+        // Eine Live-Seite mit fremdem Schema wird nicht verlinkt.
+        let links = badhub_links(&badhub_config(
+            "https://badhub.de/api/live_update.php",
+            "javascript:alert(1)",
+            "",
+        ))
+        .expect("Links");
+        assert_eq!(links.liveticker, None);
+    }
+
+    #[test]
+    fn der_zustand_traegt_die_badhub_links_auch_ohne_turnierdaten() {
+        let config = badhub_config(
+            "https://test.badhub.de/api/live_update.php",
+            "",
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA",
+        );
+        let leer = build_state(&TabletState::default(), &config, 1_000_000, 1);
+        assert_eq!(leer.badhub, badhub_links(&config));
+        let voll = state_with(snap(Vec::new(), Vec::new(), Vec::new()), &config);
+        let json = serde_json::to_value(&voll).unwrap();
+        assert_eq!(json["badhub"]["base"], "https://test.badhub.de");
+        assert_eq!(
+            json["badhub"]["guid"],
+            "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA"
+        );
     }
 
     // ── Wartelisten-Einteilung, Turnier-PC-Seite (Spec
@@ -12320,6 +12482,14 @@ mod tests {
             // Fähigkeitsmerkmal (Spec tl-spielersuche): reines Bool „dieser
             // Turnier-PC kennt die Spielersuche".
             "can_search",
+            // Ziele der badhub-Links (Spielernamen, Konkurrenz,
+            // Turnierseite): Host aus der Push-Adresse, Turnier-GUID
+            // (steht ohnehin öffentlich auf turnier.de und im Check-In-
+            // Aushang) und die öffentliche Live-Seite — kein Personenbezug.
+            "badhub",
+            "base",
+            "guid",
+            "liveticker",
             // Hallen-Farbe (Spec hallen-farben): reiner Hex-Anzeigewert je
             // Halle — kein Personenbezug. Der Beendet-Hallenname reist als
             // ohnehin erlaubtes "hall".
@@ -12824,6 +12994,20 @@ mod tests {
         let value = serde_json::to_value(&s).unwrap();
         let mut names = std::collections::BTreeSet::new();
         field_names(&value, &mut names);
+        // Die allgemeinen Namen der badhub-Ziele sind NUR unter `badhub`
+        // freigegeben — tauchten sie anderswo auf, schlüpfte dort etwas
+        // unter einem harmlosen Namen durch (Review 17.11.2026).
+        assert!(value["badhub"].is_object(), "Fixture-Fehler: badhub fehlt");
+        let mut ohne_badhub = value.clone();
+        ohne_badhub.as_object_mut().unwrap().remove("badhub");
+        let mut uebrige = std::collections::BTreeSet::new();
+        field_names(&ohne_badhub, &mut uebrige);
+        for nur_badhub in ["base", "guid", "liveticker"] {
+            assert!(
+                !uebrige.contains(nur_badhub),
+                "„{nur_badhub}“ ist nur unter `badhub` freigegeben"
+            );
+        }
         let unerlaubt: Vec<&String> = names
             .iter()
             .filter(|n| !ERLAUBT.contains(&n.as_str()))
