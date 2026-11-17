@@ -676,8 +676,10 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   Netz scheitert der Abruf sofort, hinter einem Router ohne Internet
   verschwinden Verbindungen still (ADR 0105). **E1 (Ausfall erkennen) ist
   umgesetzt** (v0.9.443): harte Frist 4 s, Merker je Dienst, Prüfung im
-  Hintergrund. **Offen:** das zweite Werkzeug (`tests/offline_stimme_probe.rs`)
-  vor E2.
+  Hintergrund. Gemini hat seit v0.9.444 eine eigene Frist von 10 s. Das zweite
+  Werkzeug (`tests/offline_stimme_probe.rs`) ist gebaut, ein Vorlauf unter Linux
+  steht in ADR 0104. **Offen:** Lauf am Windows-Turnier-PC und Hörvergleich, danach
+  die Entscheidung über den Weg V1 und E2.
 - **Pi-Fernupdate** — Spec:
   [features/pi-fernupdate.md](features/pi-fernupdate.md)
   (freigegeben 16.11.2026, ADR 0102/0103). Die Monitor-Pis holen neue Skripte auf

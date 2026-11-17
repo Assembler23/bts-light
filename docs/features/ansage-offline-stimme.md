@@ -1,7 +1,8 @@
 # Ansage ohne Internet: Ausfall erkennen, Offline-Stimme, Ansagen vorab laden — Spezifikation
 
 > Status: **Freigegeben 2026-11-16** (via /idee: Brief → Grill → How-To → Review). E0 abgeschlossen (Messung, ADR 0105);
-> **E1 umgesetzt in v0.9.443**; E2–E5 offen.
+> **E1 umgesetzt in v0.9.443** (Gemini mit eigener Frist 10 s seit v0.9.444); zweites Messwerkzeug
+> gebaut (17.11.2026), Windows-Lauf und Hörvergleich offen; E2–E5 offen.
 > Quelle: Idee vom 16.11.2026. Betroffene Crates: `src-tauri`, `src`, `relay-proto` (nur Lesart eines
 > Wertes), `relay` unberührt.
 > ADR: [0104](../adr/0104-offline-stimme-engine-und-verpackung.md) (Engine und Verpackung) ·
@@ -440,7 +441,16 @@ gleiche Schlüssel — je Ansageart der Tabelle. Ein Drift-Test hält die Fixtur
   benennt `BTS_PROBE_LAGE`. Welche Lagen am Windows-PC zu messen sind, steht im Kopf der Datei;
   die Ergebnisse stehen in ADR 0105 („Ergebnis der Messung").
 - `tests/offline_stimme_probe.rs`: Ladezeit, Rechenzeit, Arbeitsspeicher, Zeit bis zum ersten Ton,
-  2.000 Ansagen am Stück ohne Absturz; schreibt die Hörproben als WAV.
+  2.000 Ansagen am Stück ohne Absturz; schreibt die Hörproben als WAV. **Gebaut (17.11.2026)**, nur
+  mit dem Feature `offline-probe` (die CI baut die Engine nicht). Vorbereitung (Engine-Archiv,
+  Stimme, Lexikon samt Prüfsummen) und Aufruf stehen im Kopf der Datei; die Ergebnisse gehören in
+  ADR 0104. Der Weg vom Text zu den Lauten (V1) liegt schon als Baustein im Kern
+  (`src-tauri/src/offline_stimme/laute.rs`, mit Unit-Tests: Lexikon-Umsetzung, Schätzer, Komposita,
+  Zahlen, K18), noch ohne Aufrufer im Programm.
+- **Lexikon:** Die in ADR 0104 genannte Quelle („voicegarden") ließ sich am 17.11.2026 nicht
+  wiederfinden. Das Messwerkzeug nutzt das deutsche Wiktionary-Lexikon aus `ipa-dict`
+  (CC-BY-SA, 705.180 brauchbare Einträge). Es braucht als Tabelle im Speicher gut 100 MB — für E2
+  ist ein kompaktes Format nötig, die Quellenangabe gehört dann in die Doku.
 
 **Manuell:** K50; Hörvergleich der 20 Probe-Ansagen (E0); Download auf einem frischen PC.
 

@@ -107,5 +107,27 @@ Recherche vom 16.11.2026 (an den Quellen geprüft, nichts gemessen):
 
 ## Ergebnis der Messung
 
-Offen — wird nach E0 hier eingetragen (exe-Zuwachs, Hörvergleich, Zeiten, gewählter
-Phonem-Weg).
+Offen — wird nach dem Windows-Lauf von `tests/offline_stimme_probe.rs` hier eingetragen
+(exe-Zuwachs, Hörvergleich, Zeiten, gewählter Phonem-Weg).
+
+### Vorlauf unter Linux (17.11.2026, Entwicklungsrechner, nicht maßgeblich)
+
+Zweck: prüfen, dass der Weg trägt, bevor am Windows-PC gemessen wird. 24 Kerne, also deutlich
+schneller als ein Turnier-PC.
+
+- **Phoneme direkt in die Engine:** sherpa-onnx 2.0.1 nimmt Lautschrift über
+  `GenerationConfig::phoneme_codepoints` an. Weg V1 ist damit technisch möglich, ohne espeak und
+  ohne Umweg über eine Lexikon-Datei der Engine.
+- **Zeiten** (20 Ansagen, 2–8 s Ton): Modell laden 0,37 s; erster Ton im Median 52 ms (1 Thread)
+  bzw. 32 ms (2 Threads), höchstens 342 ms; Rechenzeit 6 % der Tonlänge (1 Thread).
+- **Speicher:** Modell +78 MB; das Wiktionary-Lexikon als Tabelle +106 MB (zu viel für E2, ein
+  kompaktes Format ist nötig). Dauerlauf 2.000 Ansagen: kein Fehler, der Speicher steigt in den
+  ersten 250 Ansagen einmal um gut 100 MB und bleibt dann stehen.
+- **Größe:** Das Testprogramm wächst unter Linux um 26,8 MB (Windows-Archiv: anderer Wert,
+  misst der Windows-Lauf).
+- **Lautschrift:** 0 Zeichen außerhalb des Zeichenvorrats der Stimme. Von den Namen der
+  20 Ansagen werden knapp ein Drittel geschätzt (polnische und vietnamesische fast alle).
+- **Nicht gemacht:** Vergleich mit espeak-Lautschrift (espeak darf nicht gelinkt werden; ein
+  Vergleich bräuchte espeak als eigenes Programm auf dem Messrechner) und mit Supertonic 3.
+- **Lexikon:** Die oben genannte Quelle „voicegarden" war nicht wiederzufinden; gemessen wurde mit
+  dem deutschen Wiktionary-Lexikon aus `ipa-dict` (CC-BY-SA).
