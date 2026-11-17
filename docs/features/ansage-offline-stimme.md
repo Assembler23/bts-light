@@ -423,7 +423,10 @@ gleiche Schlüssel — je Ansageart der Tabelle. Ein Drift-Test hält die Fixtur
 **Messwerkzeuge** (`--ignored`, laufen nicht in der CI)
 
 - `tests/tts_ausfall_probe.rs`: Zeit bis zum Fehler je Ausfallart (Kabel, Namensauflösung, stumme
-  Gegenstelle, Anmeldeseite eines Hotspots), mit und ohne Verbindungsfrist.
+  Gegenstelle, Anmeldeseite eines Hotspots), mit und ohne Verbindungsfrist. **Gebaut (16.11.2026).**
+  Aufruf: `cargo test -p bts-light --test tts_ausfall_probe -- --ignored --nocapture`, die Lage
+  benennt `BTS_PROBE_LAGE`. Welche Lagen am Windows-PC zu messen sind, steht im Kopf der Datei;
+  die Ergebnisse stehen in ADR 0105 („Ergebnis der Messung").
 - `tests/offline_stimme_probe.rs`: Ladezeit, Rechenzeit, Arbeitsspeicher, Zeit bis zum ersten Ton,
   2.000 Ansagen am Stück ohne Absturz; schreibt die Hörproben als WAV.
 
