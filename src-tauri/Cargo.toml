@@ -59,6 +59,12 @@ ring = "0.17"
 # Prüfung der Seiten-Pakete mit dem Updater-Schlüssel (ADR 0099). Kommt über
 # `tauri-plugin-updater` ohnehin mit; hier nur direkt benannt.
 minisign-verify = "0.3"
+# Offline-Stimme (ADR 0104), bisher NUR für das Messwerkzeug E0
+# `tests/offline_stimme_probe.rs`: hinter dem Feature `offline-probe`, das
+# weder die CI noch der Release-Build einschaltet. Apache-2.0, ohne GPL
+# (seit 2.0 ohne espeak-ng). Die Engine-Bibliothek kommt geprüft über
+# `SHERPA_ONNX_LIB_DIR` (Anleitung im Kopf des Messwerkzeugs).
+sherpa-onnx = { version = "=2.0.1", optional = true, default-features = false, features = ["static"] }
 
 # Stiller Druck des Schiedsrichterzettels (ADR 0042): GDI an einen
 # benannten Drucker, ohne Dialog. Von Microsoft gepflegt, MIT/Apache-2.0,
@@ -91,12 +97,23 @@ windows = { version = "0.62", features = [
   "Win32_System_Threading",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_Storage_FileSystem",
+  # Arbeitsspeicher des eigenen Prozesses fürs Messwerkzeug der
+  # Offline-Stimme (`K32GetProcessMemoryInfo`).
+  "Win32_System_ProcessStatus",
 ] }
 # Ansage-Ton aus dem Kern (ADR 0065): WASAPI-Ausgabe mit Gerät je Stück.
 # Apache-2.0 (RustAudio), hängt an derselben `windows`-Version 0.62 — keine
 # zweite Kopie im Baum. Nur Windows: Der Linux-CI-Job hat kein ALSA, und
 # unter Linux bleibt die Ansage beim alten Weg im WebView.
 cpal = "0.18"
+
+[features]
+# Messwerkzeug der Offline-Stimme (Spec `ansage-offline-stimme`, E0).
+offline-probe = ["dep:sherpa-onnx"]
+
+[[test]]
+name = "offline_stimme_probe"
+required-features = ["offline-probe"]
 
 [dev-dependencies]
 tempfile = "3.27.0"
