@@ -588,6 +588,12 @@
   // dort HTML-escaped), damit kein Court-Name den String-Literal-Kontext
   // aufbrechen kann.
   var COURT_LABEL = "";
+  // Feldname für den Tab-Titel: reine Feldnummer bekommt „Court" davor
+  // („8" → „Court 8", „Halle 2 · 6" → „Halle 2 · Court 6"); ein Name mit
+  // eigenem Wort bleibt, wie BTP ihn liefert. Gleiche Regel wie tablet.html.
+  function tabTitelFeld(label) {
+    return String(label).replace(/(^|· )(\d+)$/, "$1Court $2");
+  }
 
   // Monitor-Stile (ADR 0068) — Inline-Kopie von src/io/monitorStil.mjs,
   // wortgleich gehalten von scripts/test-monitor-stil.mjs.
@@ -1476,7 +1482,7 @@ function namenGroesse(el, basisPx) {
     if (typeof state.courtId === "number" && state.courtId) knownCourtId = state.courtId;
     if (state.courtLabel) {
       COURT_LABEL = state.courtLabel;
-      document.title = "Court-Monitor – " + state.courtLabel;
+      document.title = tabTitelFeld(state.courtLabel) + " - Monitor";
     }
     var cfg = state.config || {};
     els.fallbackTn.textContent = state.tournamentName || "bts-light";

@@ -7492,13 +7492,23 @@ function zeigeMenueAnsicht(welche) {
 /** Alles, was nicht an `render()` hängt, in die gewählte Sprache bringen:
  *  feste Blatt-Texte, `lang` (Silbentrennung, Vorlese-Hilfen), die Marke am
  *  Menü-Eintrag und im Demofeld Titel und Szenarien. */
+/** Feldname für den Tab-Titel: reine Feldnummer bekommt „Court" davor
+ *  („8" → „Court 8", „Halle 2 · 6" → „Halle 2 · Court 6"); ein Name mit
+ *  eigenem Wort („Center Court") bleibt, wie BTP ihn liefert. */
+function tabTitelFeld(label) {
+  return String(label).replace(/(^|· )(\d+)$/, '$1Court $2');
+}
+
 function spracheAnwenden() {
   document.documentElement.lang = SPRACHE;
   statischUebersetzen();
   els.spracheDe.classList.toggle('sprache-aktiv', SPRACHE === 'de');
   els.spracheEn.classList.toggle('sprache-aktiv', SPRACHE === 'en');
   // Der Titel steht im Kiosk nirgends, wohl aber im Browser-Tab und im Verlauf.
-  document.title = DEMO ? t('Demofeld – Übungsspiel') : t('Spielzettel');
+  // „Court 8 - Tablet" macht bei mehreren offenen Tabs sichtbar, welcher
+  // welches Feld zählt; ohne bekanntes Feld bleibt es beim alten Titel.
+  document.title = DEMO ? t('Demofeld – Übungsspiel')
+    : (COURT_LABEL ? tabTitelFeld(COURT_LABEL) + ' - Tablet' : t('Spielzettel'));
   if (DEMO) {
     // Ein echter Feldname kommt aus BTP und bleibt, wie er ist; das Demofeld
     // heißt nur bei uns so.

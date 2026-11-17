@@ -378,15 +378,15 @@ LAN+Cloud voraus.
   und ziehbar; vor dem Schreiben kommt eine **Rückfrage**, die sagt, wer
   noch bis wann pausiert. Wer gerade auf einem **anderen Feld spielt**,
   bleibt dagegen unwählbar — das lehnt der Turnier-PC ab.
-- **Jeder Name ist ein Link** auf die Spielerseite von badhub
-  (`badhub.de/spieler/<Nr>/live`), erkennbar an der gepunkteten
+- **Jeder Name ist ein Link** auf badhub, erkennbar an der gepunkteten
   Unterstreichung; er öffnet in einem neuen Tab. Spieler ohne
-  Lizenznummer in BTP bleiben unverlinkt. Seit 18.08.2026 gilt das an
-  **allen drei Stellen**: in der Spielliste, in den **Feld-Kacheln** der
-  laufenden Spiele und in der Liste der **beendeten Spiele**. Ein Klick
-  auf den Namen einer Feld-Kachel öffnet nur die Spielerseite — er nimmt
-  das Spiel **nicht** zusätzlich auf; ein vom Namen aus begonnener **Zug**
-  auf ein anderes Feld funktioniert weiterhin.
+  Lizenznummer in BTP bleiben unverlinkt. Das gilt an **allen drei
+  Stellen**: in der Spielliste, in den **Feld-Kacheln** der laufenden
+  Spiele und in der Liste der **beendeten Spiele**. Ein Klick auf den
+  Namen einer Feld-Kachel öffnet nur badhub — er nimmt das Spiel **nicht**
+  zusätzlich auf; ein vom Namen aus begonnener **Zug** auf ein anderes
+  Feld funktioniert weiterhin. Wohin die Links genau führen, steht unter
+  [Links zu badhub](#links-zu-badhub-seit-v09445).
 - **Die Felder bleiben immer vollständig sichtbar**, nur die Spielliste
   scrollt für sich (Wunsch vom 10.08.2026 nach dem Turniertest): Auch ein
   Spiel von ganz unten lässt sich noch auf ein Feld ziehen oder tippen. Bei
@@ -504,6 +504,35 @@ Legt eine Disziplin/Klasse→Halle-Regel den Ort schon fest, erscheint kein
 Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
 käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
 endet mit dem Stoppen der Übertragung.
+
+### Links zu badhub (seit v0.9.445)
+
+Die Seite verlinkt an mehreren Stellen auf die öffentlichen badhub-Seiten
+des Turniers; alle öffnen in einem neuen Tab:
+
+| Wo | Führt auf |
+|---|---|
+| **Turniername** oben im Kopf | die Turnierseite des Turniers |
+| **Liveticker ↗** neben dem Namen | den öffentlichen Liveticker |
+| **Spielername** (Spielliste, Feld-Kachel, Beendet) | die Spieleransicht dieser Person in diesem Turnier |
+| **Klasse** eines Spiels („MX-B") | die Konkurrenz auf der Turnierseite, bei Gruppen direkt die Gruppe |
+
+<!-- pruef: "Liveticker ↗" in src-tauri/assets/tl.html -->
+<!-- pruef: "Turnierseite auf badhub öffnen" in src-tauri/assets/tl.html -->
+<!-- pruef: "Konkurrenz auf badhub öffnen" in src-tauri/assets/tl.html -->
+
+- **Testturnier → Testsystem.** Die Links gehen auf dasselbe badhub, an das
+  der Liveticker sendet. Läuft das Turnier auf `test.badhub.de`, zeigen auch
+  alle Links dorthin — nie auf das echte badhub.de.
+- **Turniername, Klasse und Spieleransicht brauchen die Turnier-GUID** aus
+  den Einstellungen. Ohne sie bleiben Turniername und Klasse schlichter
+  Text, und ein Spielername führt auf die allgemeine Spielerseite.
+- **Kennt badhub das Turnier noch nicht** (die TP-Datei wurde noch nicht
+  hochgeladen), landet ein Klick auf dem Liveticker bzw. bei einem
+  Spielernamen auf der Spielerseite. Ist das Turnier dort noch gar nicht zu
+  finden, sagt badhub das.
+- **Liveticker ↗** erscheint nur, wenn in den Einstellungen eine öffentliche
+  Live-Seite eingetragen ist.
 
 ### Spiele, deren Paarung noch nicht feststeht (seit v0.9.273)
 

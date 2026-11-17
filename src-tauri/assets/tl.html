@@ -106,6 +106,15 @@ header {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   flex: 1 1 8rem; min-width: 0;
 }
+.tournament a { color: inherit; text-decoration: underline dotted 1px; text-underline-offset: 2px; }
+.tournament a:hover, .tournament a:focus-visible { text-decoration: underline solid 1.5px; }
+/* Liveticker-Link neben dem Turniernamen: klein, schrumpft nie weg. */
+.kopf-live {
+  flex: none; font-size: .85rem; font-weight: 600; color: var(--accent);
+  text-decoration: none; white-space: nowrap;
+}
+.kopf-live:hover, .kopf-live:focus-visible { text-decoration: underline; }
+.kopf-live[hidden] { display: none; }
 /* Verbindungszustand: Punkt + Text. Drei Stufen, nicht zwei — „läuft",
    „hängt hinterher" und „ist weg" sind für die Turnierleitung drei
    verschiedene Lagen. */
@@ -467,6 +476,10 @@ h2 .count { color: var(--ink-faint); font-weight: 600; }
    Browser-Blau samt voller Unterstreichung zurück — eine Ergebnisliste,
    die schreit, statt zu berichten. */
 .paar a.sp-name, .fin-pair a.sp-name { color: inherit; text-decoration: underline dotted 1px; text-underline-offset: 2px; }
+/* Konkurrenz-Link (Klasse „MX-B" → Konkurrenz der badhub-Turnierseite):
+   dieselbe ruhige Schreibweise wie der Spieler-Link. */
+a.bh-konk { color: inherit; text-decoration: underline dotted 1px; text-underline-offset: 2px; }
+a.bh-konk:hover, a.bh-konk:focus-visible { text-decoration: underline solid 1.5px; }
 .paar a.sp-name:hover, .paar a.sp-name:focus-visible,
 .fin-pair a.sp-name:hover, .fin-pair a.sp-name:focus-visible { text-decoration: underline solid 1.5px; }
 /* Vereinsname unter dem Namen — klein und gedämpft, damit er den Namen nicht
@@ -1713,6 +1726,11 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
   <header>
     <span class="brand">Turnierleitung</span>
     <span class="tournament" id="tournament"></span>
+    <!-- Öffentlicher Liveticker des Turniers (Live-Seite aus den
+         Einstellungen, Host wie die Push-Adresse) — nur, wenn der Turnier-PC
+         ihn meldet. -->
+    <a class="kopf-live" id="kopf-live" hidden target="_blank" rel="noopener"
+       title="Öffentlichen Liveticker auf badhub öffnen">Liveticker ↗</a>
     <span class="halls" id="halls"></span>
     <!-- Spielersuche (Spec tl-spielersuche): erscheint nur, wenn der
          Turnier-PC `can_search` meldet und das Profil sie nicht ausblendet.
@@ -2025,6 +2043,62 @@ function zuletztText(sinceMs, nowMs) {
   if (min < 60) return `vor ${min} min`;
   const h = Math.floor(min / 60);
   return `vor ${h} h ${String(min % 60).padStart(2, "0")}`;
+}
+
+// ── Inline-Kopie von src/io/badhubLinks.mjs ─────────────────────────────
+// Kanonische Fassung samt Tests im Modul; `scripts/test-badhub-links.mjs`
+// vergleicht das Verhalten. Die Ziele meldet der Turnier-PC im Zustand
+// (`state.badhub`, Basis aus der Push-Adresse — ein Testturnier verlinkt
+// auf test.badhub.de); mit der Turnier-GUID führen sie über badhubs
+// Weiterleitung `/checkin/<GUID>/turnier` genau in DIESES Turnier.
+/** Basis der Links. Hinter dem Cloud-Relay (`praefix` nicht leer) immer der
+ *  Host, von dem die Seite kommt — der Relay liegt auf demselben badhub wie
+ *  der Liveticker (badhub.de bzw. test.badhub.de), und ein Turnier-PC soll
+ *  die Links einer badhub-Seite nicht auf einen fremden Host lenken können
+ *  (Security-Review 17.11.2026). Im Hallennetz der Wert des Hosts, nur als
+ *  `http(s)://host[:port]`; fehlt er (älterer Host), das Produktivsystem. */
+function badhubBasis(links, praefix, origin) {
+  if (praefix !== "") return origin;
+  const b = links && typeof links.base === "string" ? links.base : "";
+  return /^https?:\/\/[A-Za-z0-9.\-]+(:\d+)?$/.test(b) ? b : "https://badhub.de";
+}
+
+/** Weiterleitung `…/checkin/<GUID>/turnier[?…]`, "" ohne gültige GUID.
+ *  `angaben` nimmt nur `spiel`, `konk` und `player`; leere fallen weg. */
+function turnierSprung(links, basis, angaben) {
+  const guid = links && typeof links.guid === "string" ? links.guid : "";
+  if (!/^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/.test(guid)) return "";
+  const q = new URLSearchParams();
+  for (const k of ["spiel", "konk", "player"]) {
+    const v = angaben && angaben[k] != null ? String(angaben[k]).trim() : "";
+    if (v) q.set(k, v);
+  }
+  const s = q.toString();
+  return `${basis}/checkin/${guid}/turnier${s ? "?" + s : ""}`;
+}
+
+/** Spielerseite zu einer Lizenznummer: im Turnier (Spieleransicht), ohne
+ *  GUID die globale Weiterleitung `/spieler/<Nr>/live`. "" ohne Nummer. */
+function spielerLink(links, basis, nummer) {
+  const nr = String(nummer ?? "").trim();
+  if (!nr) return "";
+  return turnierSprung(links, basis, { player: nr })
+    || `${basis}/spieler/${encodeURIComponent(nr)}/live`;
+}
+
+/** Konkurrenz eines Spiels auf der Turnierseite (über die BTP-Spiel-ID, der
+ *  Name ist badhubs Rückfall). Nur mit GUID — sonst gibt es kein Ziel. */
+function konkurrenzLink(links, basis, matchId, konk) {
+  const id = Number(matchId);
+  if (!Number.isSafeInteger(id) || id <= 0) return "";
+  return turnierSprung(links, basis, { spiel: id, konk });
+}
+
+/** Öffentlicher Liveticker aus dem Host-Zustand — nur auf derselben Basis
+ *  wie alle übrigen Links, sonst keiner. */
+function livetickerLink(links, basis) {
+  const u = links && typeof links.liveticker === "string" ? links.liveticker.trim() : "";
+  return /^https?:\/\/[^\s"'<>]+$/.test(u) && u.startsWith(basis + "/") ? u : "";
 }
 
 // ── Inline-Kopie von src/io/zeitplan.mjs ────────────────────────────────
@@ -3862,6 +3936,25 @@ function nimmRufZurueck(courtId) {
   );
 }
 
+/** Kopfzeile: Turniername als Link auf die badhub-Turnierseite (nur mit
+ *  Turnier-GUID — ohne sie weiß bts-light nicht, welche Seite es ist) und
+ *  der Liveticker-Link. Neu geschrieben nur bei Änderung, sonst flackerte
+ *  ein Hover-Zustand bei jedem Push. */
+function renderTurnierKopf() {
+  const el = $("tournament");
+  const name = state.tournament || "";
+  const seite = name ? turnierSprung(bhLinks(), bhBasis(), {}) : "";
+  const html = seite
+    ? `<a href="${esc(seite)}" target="_blank" rel="noopener"
+         title="Turnierseite auf badhub öffnen">${esc(name)}</a>`
+    : esc(name);
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+  const live = livetickerLink(bhLinks(), bhBasis());
+  const a = $("kopf-live");
+  a.hidden = !live;
+  if (live && a.getAttribute("href") !== live) a.setAttribute("href", live);
+}
+
 function renderConnection() {
   const level = connectionLevel();
   const conn = $("conn");
@@ -3972,12 +4065,36 @@ function spielerKey(nummer, name) {
  * `siegerZuerstHtml` (Beendet-Liste).
  */
 function spielerNameHtml(name, nummer, klassen, titel) {
-  const nr = (nummer || "").trim();
+  const href = spielerLink(bhLinks(), bhBasis(), nummer);
   const attr = `class="${klassen}"${titel || ""}`;
-  return nr
-    ? `<a ${attr} href="https://badhub.de/spieler/${encodeURIComponent(nr)}/live"
+  return href
+    ? `<a ${attr} href="${esc(href)}"
          target="_blank" rel="noopener">${esc(name)}</a>`
     : `<span ${attr}>${esc(name)}</span>`;
+}
+
+/** Die badhub-Ziele des aktuellen Zustands und ihre Basis (Inline-Kopie von
+ *  `src/io/badhubLinks.mjs`). Ein älterer Host liefert `badhub` nicht — dann
+ *  der bisherige Weg (Spielerseite, keine Konkurrenz-Links). */
+function bhLinks() { return state && state.badhub; }
+function bhBasis() { return badhubBasis(bhLinks(), TL_PRAEFIX, location.origin); }
+
+/** Selektor aller badhub-Links in Zeilen und Kacheln: Ein Klick darauf
+ *  öffnet badhub und darf das Spiel weder aufnehmen noch zuweisen. */
+const BADHUB_LINK_SEL = "a.sp-name, a.bh-konk";
+
+/**
+ * Die Konkurrenz („MX-B") als Link auf ihre Stelle der badhub-Turnierseite
+ * (Konkurrenz samt Gruppe), ohne Turnier-GUID schlichter Text. Ziel über die
+ * BTP-Spiel-ID; den Namen nimmt badhub nur, wenn es das Spiel noch nicht kennt.
+ */
+function konkurrenzHtml(text, matchId) {
+  if (!text) return "";
+  const href = konkurrenzLink(bhLinks(), bhBasis(), matchId, text);
+  return href
+    ? `<a class="bh-konk" href="${esc(href)}" target="_blank" rel="noopener"
+         title="Konkurrenz auf badhub öffnen">${esc(text)}</a>`
+    : esc(text);
 }
 
 function pairOf(t1, t2, nat1, nat2, club1, club2, extra) {
@@ -4308,7 +4425,7 @@ function courtCard(c, cellStyle) {
     const sets = (c.sets || []).map(([a, b]) => `${a}:${b}`).join(" · ") || "0:0";
     body = `<div class="pair">${pairOf(c.team1, c.team2, c.team1_nat, c.team2_nat, c.team1_club, c.team2_club,
       { ids1: c.team1_ids, ids2: c.team2_ids, seed1: c.team1_seed, seed2: c.team2_seed })}</div>
-            <div class="meta">${esc([klasse(c.discipline, c.class_label), c.round_name].filter(Boolean).join(" · "))}</div>`;
+            <div class="meta">${[konkurrenzHtml(klasse(c.discipline, c.class_label), c.match_id), esc(c.round_name || "")].filter(Boolean).join(" · ")}</div>`;
     // Beschriftung nur noch, wenn sie etwas sagt, das man sonst nicht sieht.
     // „auf dem Feld seit" und „im Spiel seit" stehen inzwischen als Farbe an
     // der Kachel — das Wort wiederholte nur, was der Streifen schon zeigt,
@@ -5074,8 +5191,8 @@ function wireCourts(box) {
     // funktionieren — endet er über dem Namen, fängt `suppressNextClick`
     // die Navigation ab. Wortgleich zu `wireQueue`.
     const istSpielerLink = (ev) =>
-      ev.target instanceof Element && !!ev.target.closest("a.sp-name");
-    scopeAll(el, "a.sp-name").forEach((a) => {
+      ev.target instanceof Element && !!ev.target.closest(BADHUB_LINK_SEL);
+    scopeAll(el, BADHUB_LINK_SEL).forEach((a) => {
       a.addEventListener("click", (ev) => {
         ev.stopPropagation();
         if (suppressNextClick) ev.preventDefault();
@@ -5529,14 +5646,16 @@ function queueRow(m, topMatchId) {
   // Nur die Häppchen aufnehmen, die eingeschaltet sind — `filter(Boolean)`
   // entfernt danach sowohl fehlende Werte (BTP liefert keine Runde) als auch
   // ausgeschaltete zugleich, ohne dass ein Trenner „·" ins Leere zeigt.
+  // Die Häppchen sind fertiges HTML: Die Klasse ist ein Link auf die
+  // Konkurrenz der badhub-Turnierseite, der Rest maskierter Text.
   const metaHaeppchen = [];
-  if (zeigeDisziplinAktiv()) metaHaeppchen.push(klasse(m.discipline, m.class_label));
-  if (zeigeGruppeAktiv()) metaHaeppchen.push(m.draw_name);
-  if (zeigeRundeAktiv()) metaHaeppchen.push(m.round_name);
+  if (zeigeDisziplinAktiv()) metaHaeppchen.push(konkurrenzHtml(klasse(m.discipline, m.class_label), m.match_id));
+  if (zeigeGruppeAktiv()) metaHaeppchen.push(esc(m.draw_name || ""));
+  if (zeigeRundeAktiv()) metaHaeppchen.push(esc(m.round_name || ""));
   // Planzeit aus BTP (Spec `tl-zeitplan`): an wartenden, gerufenen und
   // offenen Zeilen. Beschriftet, damit sie niemand mit der Prognose-Marke
   // rechts verwechselt.
-  metaHaeppchen.push(geplantText(m.planned_time));
+  metaHaeppchen.push(esc(geplantText(m.planned_time)));
   // Bereitschaftslage als Farbe am NAMEN statt als Hinweistext (Nutzer-
   // Befund 17.08.2026: Die Begründungstexte machten die Liste
   // unübersichtlich). Rot = steht gerade auf einem Feld, Orange = noch in
@@ -5577,7 +5696,7 @@ function queueRow(m, topMatchId) {
           zuletzt2: zeigeZuletztGespielt() ? m.team2_last_played_ms : null });
   parts.push(`<span class="who-block">
       <span class="who">${paarHtml}</span>
-      <span class="draw">${esc(metaHaeppchen.filter(Boolean).join(" · "))}</span>
+      <span class="draw">${metaHaeppchen.filter(Boolean).join(" · ")}</span>
     </span>`);
   // ── Statusblock: EIN Flex-Kind, beliebig viele Marken darin ──────────
   // Hier landet alles, was früher eine eigene Abschnitts-Überschrift war
@@ -6039,7 +6158,7 @@ function wireQueue(box) {
   // Feld ziehen) muss weiter funktionieren (Review-Fund 17.08.2026). Endet
   // so ein Zug über dem Namen, folgt noch ein Klick-Ereignis — das darf
   // dann auch nicht navigieren (`suppressNextClick`, Muster `enableDrag`).
-  scopeAll(box, "a.sp-name").forEach((a) => {
+  scopeAll(box, BADHUB_LINK_SEL).forEach((a) => {
     a.addEventListener("click", (ev) => {
       ev.stopPropagation();
       if (suppressNextClick) ev.preventDefault();
@@ -9629,7 +9748,8 @@ function finRow(f) {
       : "";
     return `<div class="fin-row" data-fin="${f.match_id}">
       <span class="fin-pair">${siegerZuerstHtml(f)}</span>
-      <span class="fin-meta">${halle}${esc([klasse(f.discipline, f.class_label), f.round_name, f.court, zeiten, geplant].filter(Boolean).join(" · "))}${baelleMarke(f.shuttles) ? " · " + baelleMarke(f.shuttles) : ""}</span>
+      <span class="fin-meta">${halle}${[konkurrenzHtml(klasse(f.discipline, f.class_label), f.match_id),
+        ...[f.round_name, f.court, zeiten, geplant].map((t) => esc(t || ""))].filter(Boolean).join(" · ")}${baelleMarke(f.shuttles) ? " · " + baelleMarke(f.shuttles) : ""}</span>
       <span class="fin-score num">${esc(sets)}${badge}</span>
       ${kebab}
     </div>`;
@@ -10360,7 +10480,7 @@ function render() {
   // statt Config — ein Diagnosewerkzeug, kein Feature.
   const messStart = renderMessen ? performance.now() : 0;
   if (picked && !pickIsStillValid()) picked = null;
-  $("tournament").textContent = state.tournament || "";
+  renderTurnierKopf();
   renderConnection();
   renderHalls();
   renderAutoToggle();

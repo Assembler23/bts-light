@@ -218,6 +218,12 @@ jobs:
       - name: Zuletzt gespielt (JS)
         run: node scripts/test-zuletzt-gespielt.mjs
 
+      # Ziele der badhub-Links der Turnierleitung und Gleichlauf der
+      # Inline-Kopie in tl.html. Eine falsche Kopie schickte ein Testturnier
+      # auf das Produktivsystem oder auf ein fremdes Turnier.
+      - name: badhub-Links TL (JS)
+        run: node scripts/test-badhub-links.mjs
+
       # Das Stoerungsband der Turnierleitung meldet den Ruf vom Tablet. Faellt
       # die Kopie in tl.html zurueck, bleibt ein Ruf unbemerkt.
       - name: Stoerungsband der Turnierleitung (JS)

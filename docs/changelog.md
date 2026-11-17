@@ -4,6 +4,24 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.446
+
+- **Tab-Titel nennt das Feld.** Das Zähl-Tablet heißt im Browser-Tab jetzt
+  „Court 8 - Tablet" statt „Spielzettel", der Court-Monitor „Court 8 -
+  Monitor" statt „Court-Monitor – 8". Bei mehreren offenen Tabs sieht man so
+  sofort, welcher zu welchem Feld gehört.
+
+## v0.9.445
+
+- **Mehr Links zu badhub in der Turnierleitungs-Ansicht.** Der Turniername
+  oben führt auf die Turnierseite, daneben steht ein Link zum Liveticker,
+  und die Klasse eines Spiels („MX-B") öffnet die Konkurrenz — bei Gruppen
+  direkt die Gruppe. Spielernamen führen auf die Spieleransicht in genau
+  diesem Turnier, auch wenn zwei Turniere gleichzeitig laufen.
+- **Testturnier verlinkt auf das Testsystem.** Sendet der Liveticker an
+  test.badhub.de, zeigen auch alle Links der Turnierleitung dorthin.
+- Braucht badhub mit der neuen Weiterleitung `/checkin/<GUID>/turnier`.
+
 ## v0.9.444
 
 - **Gemini bekommt mehr Zeit.** Die Ansage mit Gemini darf jetzt 10 s statt
