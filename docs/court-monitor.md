@@ -102,6 +102,12 @@ ADR [0055](adr/0055-zaehltafel-anzeige-huelle-und-zuweisungsziel.md)).
   ohne Umleitung zurück auf `/monitor`. **Downgrade:** eine ältere Version
   kennt `court_tafel` nicht und verwirft die Zuweisung still (ADR 0055).
 
+## Titel im Browser-Tab (seit v0.9.446)
+
+Sobald der Monitor sein Feld kennt, heißt der Tab **„Court 8 - Monitor"**
+(Regel wie am Tablet, siehe [tablet.md](tablet.md#titel-im-browser-tab-seit-v09446)).
+<!-- pruef: / - Monitor"/ in src-tauri/assets/monitor.html -->
+
 ## Geräte-Modus & TV-Verwaltung
 
 Monitore sind **generische Geräte**: Jeder Raspberry Pi öffnet *dieselbe*
