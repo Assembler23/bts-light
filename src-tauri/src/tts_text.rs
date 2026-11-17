@@ -306,7 +306,8 @@ pub mod netz {
     /// Frist für Verbindungsaufbau samt TLS. Gemessen (ADR 0105): Im guten
     /// Netz steht die Verbindung nach höchstens 0,5 s. Sie deckt **nicht** die
     /// Gegenstelle, die eine Anfrage annimmt und dann schweigt — dafür gibt es
-    /// die harte Frist um die ganze Vertonung (`tts_netzlage::HARTE_FRIST`).
+    /// die harte Frist um die ganze Vertonung (`tts_netzlage::HARTE_FRIST`,
+    /// bei Gemini `GEMINI_FRIST`).
     pub const VERBINDUNGSFRIST: Duration = Duration::from_millis(1500);
 
     /// Gesamtfrist einer einzelnen Anfrage, wo keine harte Frist von außen

@@ -98,7 +98,7 @@ export function AnnounceJobPlayer({
     const speak = async (job: AnnounceJob) => {
       const r = await jobZuAnsage(job, cfgRef.current, azureRef.current);
       if (!r) return;
-      void playPrepared(r.ansage, azureOption(azureRef.current)?.synthesize);
+      void playPrepared(r.ansage, azureOption(azureRef.current));
     };
 
     tick();

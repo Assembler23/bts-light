@@ -284,3 +284,12 @@ Dauer jeder Vertonung ins Log, damit der Wert am ersten Turnier nachgeprüft wer
 - Die Ausgabe des Werkzeugs nennt von einem Fehler nur feste Kennwörter, nie den Fehlertext:
   rustls schreibt bei einer Anmeldeseite die Namen aus deren Zertifikat hinein (Router, Hotel).
   Für die Lage `hotspot` heißt das Kennwort `tls-zertifikat`.
+
+## Nachtrag 17.11.2026: eigene Frist für Gemini (v0.9.444)
+
+Gemini braucht für eine Ansage oft länger als 4 s und fiel deshalb auch bei gutem Internet auf die
+Ersatzstimme zurück — samt Merker, der dann 15 s lang jede weitere Ansage auf die Ersatzstimme legt.
+Der Nutzer hat entschieden: Gemini bekommt eine eigene harte Frist von **10 s**
+(`tts_netzlage::GEMINI_FRIST`, halb so lang wie die Anfragefrist von 20 s). Umgesetzt als Methode
+`harte_frist()` am Trait `Stimme`; die Frontend-Sicherung folgt mit 10,5 s
+(`vertonungFristMs`). Preis: Im Ausfall wartet die erste Gemini-Ansage bis zu 10 s. Ungemessen.

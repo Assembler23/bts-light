@@ -40,8 +40,11 @@ export declare function mitFrist<T>(
   },
 ): Promise<FristErgebnis<T>>;
 export declare const VERTONUNG_FRIST_MS: number;
+export declare const VERTONUNG_FRIST_GEMINI_MS: number;
+export declare function vertonungFristMs(art: string | undefined): number;
 export declare const VERTONUNG_FRIST_TEXT: string;
 export declare function vertonenMitFrist<T>(
   promise: Promise<T>,
   uhr?: { setTimeoutFn?: Function; clearTimeoutFn?: Function },
+  fristMs?: number,
 ): Promise<T>;

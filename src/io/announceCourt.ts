@@ -42,7 +42,7 @@ function amPcUndAufSeiten(
   azureTts: AzureTtsConfig | undefined,
   mitSpiel: boolean,
 ): void {
-  void playPrepared(p, azureOption(azureTts)?.synthesize);
+  void playPrepared(p, azureOption(azureTts));
   anSeitenGeben(p, {
     art: "desktop",
     hall: court.location,

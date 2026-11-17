@@ -145,23 +145,40 @@ export function mitFrist(promise, ms, uhr = {}) {
  * Höchste Wartezeit auf die Cloud-Vertonung im Kern (Spec
  * `ansage-offline-stimme`, K10): harte Frist des Kerns
  * (`tts_netzlage::HARTE_FRIST`, 4 s) plus 0,5 s für den Rückweg. Danach
- * spricht die Ersatzstimme, auch wenn der Kern nicht antwortet.
+ * spricht die Ersatzstimme, auch wenn der Kern nicht antwortet. Gemini:
+ * {@link VERTONUNG_FRIST_GEMINI_MS}.
  */
 export const VERTONUNG_FRIST_MS = 4500;
+
+/**
+ * Dasselbe für Gemini: eigene harte Frist im Kern
+ * (`tts_netzlage::GEMINI_FRIST`, 10 s) plus 0,5 s.
+ */
+export const VERTONUNG_FRIST_GEMINI_MS = 10500;
+
+/**
+ * Frist der Sicherung je Dienst-Art (`dienstArt` aus `sprachdienst.mjs`).
+ * @param {string | undefined} art
+ * @returns {number}
+ */
+export function vertonungFristMs(art) {
+  return art === "gemini" ? VERTONUNG_FRIST_GEMINI_MS : VERTONUNG_FRIST_MS;
+}
 
 /** Fehlertext, wenn die Vertonung die Frist im Frontend überschreitet. */
 export const VERTONUNG_FRIST_TEXT = "Cloud-Stimme: keine Antwort innerhalb der Frist";
 
 /**
- * Wartet höchstens {@link VERTONUNG_FRIST_MS} auf die Vertonung. Anders als
+ * Wartet höchstens `fristMs` (Standard {@link VERTONUNG_FRIST_MS}) auf die Vertonung. Anders als
  * {@link mitFrist} bleibt der Fehlertext des Kerns erhalten (er erscheint im
  * Rückfall-Banner); nach der Frist wirft es {@link VERTONUNG_FRIST_TEXT}.
  * @template T
  * @param {Promise<T>} promise
  * @param {{ setTimeoutFn?: Function, clearTimeoutFn?: Function }} [uhr]
+ * @param {number} [fristMs]
  * @returns {Promise<T>}
  */
-export function vertonenMitFrist(promise, uhr = {}) {
+export function vertonenMitFrist(promise, uhr = {}, fristMs = VERTONUNG_FRIST_MS) {
   const setT = uhr.setTimeoutFn || setTimeout;
   const clearT = uhr.clearTimeoutFn || clearTimeout;
   return new Promise((resolve, reject) => {
@@ -170,7 +187,7 @@ export function vertonenMitFrist(promise, uhr = {}) {
       if (fertig) return;
       fertig = true;
       reject(new Error(VERTONUNG_FRIST_TEXT));
-    }, VERTONUNG_FRIST_MS);
+    }, fristMs);
     promise.then(
       (wert) => {
         if (fertig) return;

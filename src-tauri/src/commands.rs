@@ -1304,6 +1304,10 @@ trait Stimme: Sync {
     fn dienst(&self) -> &'static str;
     /// Anzeigename für Fehlertexte.
     fn name(&self) -> &'static str;
+    /// Harte Frist um die ganze Vertonung (ADR 0105).
+    fn harte_frist(&self) -> std::time::Duration {
+        crate::tts_netzlage::HARTE_FRIST
+    }
 }
 
 /// Gemeinsamer Rahmen einer Vertonung: Cache, Merker-Stand beim Start und
@@ -1616,7 +1620,7 @@ async fn vertonen_mit_netzlage<S: Stimme>(
     let lauf = Lauf {
         cache: auftrag.cache,
         gesperrt,
-        frist: tokio::time::Instant::now() + crate::tts_netzlage::HARTE_FRIST,
+        frist: tokio::time::Instant::now() + stimme.harte_frist(),
     };
     let mut buchungen = Vec::new();
     let erg =
@@ -1899,6 +1903,13 @@ impl Stimme for TtsZiel {
 
     fn dienst(&self) -> &'static str {
         self.dienst_wert()
+    }
+
+    fn harte_frist(&self) -> std::time::Duration {
+        match self {
+            Self::Gemini { .. } => crate::tts_netzlage::GEMINI_FRIST,
+            _ => crate::tts_netzlage::HARTE_FRIST,
+        }
     }
 
     fn name(&self) -> &'static str {
@@ -12210,6 +12221,7 @@ mod ausfall_tests {
         /// SSML-Texte, die schon im Plattencache liegen.
         platte: Vec<String>,
         host: &'static str,
+        frist: std::time::Duration,
     }
 
     impl Attrappe {
@@ -12219,6 +12231,7 @@ mod ausfall_tests {
                 aufrufe: AtomicUsize::new(0),
                 platte: Vec::new(),
                 host: HOST,
+                frist: HARTE_FRIST,
             }
         }
         fn aufrufe(&self) -> usize {
@@ -12270,6 +12283,9 @@ mod ausfall_tests {
         }
         fn name(&self) -> &'static str {
             "Test"
+        }
+        fn harte_frist(&self) -> std::time::Duration {
+            self.frist
         }
     }
 
@@ -12323,6 +12339,53 @@ mod ausfall_tests {
                 // K2: nach „Netz" kein Ganz-Versuch.
                 assert_eq!(stimme.aufrufe(), if teilen { 2 } else { 1 });
             }
+        }
+    }
+
+    /// Gemini bekommt eine längere Frist; die Vertonung wartet genau so
+    /// lange und nicht die allgemeinen 4 s.
+    #[tokio::test(start_paused = true)]
+    async fn eigene_frist_des_dienstes_gilt() {
+        let dir = std::env::temp_dir();
+        let ssml = ansage("Name");
+        let mut stimme = Attrappe::neu(|_, _| Antwort::Haengt);
+        stimme.frist = crate::tts_netzlage::GEMINI_FRIST;
+        let lage = Mutex::new(Netzlage::default());
+        let start = tokio::time::Instant::now();
+        let (erg, _) =
+            vertonen_mit_netzlage(&stimme, &lage, platte_auftrag(&ssml, true, &dir)).await;
+        assert_eq!(erg.err().map(|f| f.kennwort), Some("frist"));
+        assert_eq!(start.elapsed(), crate::tts_netzlage::GEMINI_FRIST);
+    }
+
+    /// Nur Gemini hat die lange Frist; die anderen Dienste bleiben bei 4 s.
+    #[test]
+    fn nur_gemini_hat_die_lange_frist() {
+        let k = || String::from("k");
+        let v = || String::from("v");
+        let gemini = TtsZiel::Gemini {
+            key: k(),
+            voice: v(),
+            modell: "m",
+        };
+        assert_eq!(gemini.harte_frist(), crate::tts_netzlage::GEMINI_FRIST);
+        for z in [
+            TtsZiel::Azure {
+                region: "westeurope".into(),
+                key: k(),
+            },
+            TtsZiel::ElevenLabs {
+                key: k(),
+                voice: v(),
+                modell: "m",
+            },
+            TtsZiel::OpenAi {
+                key: k(),
+                voice: v(),
+                modell: "m",
+            },
+        ] {
+            assert_eq!(z.harte_frist(), HARTE_FRIST);
         }
     }
 

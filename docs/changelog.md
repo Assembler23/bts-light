@@ -4,6 +4,13 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.444
+
+- **Gemini bekommt mehr Zeit.** Die Ansage mit Gemini darf jetzt 10 s statt
+  4 s dauern, bevor die Ersatzstimme einspringt. Gemini braucht oft länger
+  als die anderen Dienste und fiel sonst auch bei gutem Internet ständig auf
+  die Ersatzstimme zurück. Für Azure, ElevenLabs und OpenAI bleibt es bei 4 s.
+
 ## v0.9.443
 
 - **Ansage ohne Internet hängt nicht mehr.** Fällt das Internet aus, spricht

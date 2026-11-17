@@ -56,6 +56,6 @@ export function vorbereitungAnsagen(
   opts: AnnounceOptions,
 ): void {
   const p = preparePreparationAnnouncement(input, lang, opts);
-  void playPrepared(p, opts.azure?.synthesize);
+  void playPrepared(p, opts.azure);
   anSeitenGeben(p, { art: "desktop", hall: input.hall ?? "" });
 }
