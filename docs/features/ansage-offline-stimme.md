@@ -49,12 +49,14 @@ Stille zwischen dem Ende des Gongs — ohne Gong: dem Auslösen — und dem erst
 | Fall | Zielwert |
 |---|---|
 | Ansage liegt vollständig vorab geladen bereit | ≤ 3 s, klingt wie immer |
-| Erste Ansage nach dem Ausfall, nicht vollständig bereit | ≤ 5 s, Offline-Stimme |
+| Erste Ansage nach dem Ausfall, nicht vollständig bereit | ≤ 5 s, Offline-Stimme. Ausnahme: Hält die App beim Ausfall noch eine offene Verbindung zum Dienst, wartet diese eine Ansage die harte Frist (4 s) ab und danach die Rechenzeit der Offline-Stimme |
 | Jede weitere Ansage während des Ausfalls | kein Netzversuch; nur noch Rechenzeit der Offline-Stimme. Ausnahme: höchstens einmal je 10 Minuten wartet eine Ansage erneut die harte Frist ab (Ablauf des Merkers, siehe unten) |
 | Netz wieder da | eine Ansage, die später als einen Prüftakt (15 s) nach der Rückkehr ausgelöst wird, kommt wieder von der Cloud-Stimme |
 
-Die Zielwerte gelten vorbehaltlich der Messung E0 auf einem echten Turnier-PC; weicht die Messung
-ab, werden sie hier und in ADR 0105 korrigiert, bevor E1 gebaut wird.
+Die Messung der Ausfall-Erkennung ist auf einem Windows-Turnier-PC gelaufen (17.11.2026); die
+Ausnahme in der zweiten Zeile stammt daher. Die Rechenzeit der Offline-Stimme ist noch nicht
+gemessen (zweites Messwerkzeug, vor E2); weicht sie ab, werden die Zielwerte hier und in ADR 0105
+korrigiert.
 
 Bedienbarkeit: Einschalten ist je Baustein **ein Schalter**. Der Download startet von selbst und
 zeigt seinen Fortschritt. Ohne Eingriff bleibt alles wie heute.
@@ -165,8 +167,17 @@ Fehler in der Prüfung die Cloud-Stimme nicht dauerhaft abschaltet. Bei einem la
 das: Nach jedem Ablauf versucht die nächste nicht vollständig gecachte Ansage einmal das Netz,
 wartet höchstens die harte Frist und setzt den Merker neu.
 
-Konstanten (Ausgangswerte; E0 legt sie fest): harte Frist 2,5 s · Verbindungsfrist 1,5 s ·
-Prüftakt 15 s · Höchstdauer des Merkers 10 Minuten.
+Konstanten: harte Frist 4 s · Verbindungsfrist 1,5 s (beide nach E0 festgelegt) · Prüftakt 15 s ·
+Höchstdauer des Merkers 10 Minuten (Ausgangswerte, am Bau von E1 zu prüfen).
+
+> **Ergebnis der Messung (17.11.2026):** Der Ausgangswert der harten Frist (2,5 s) hielt am
+> Windows-Turnier-PC nicht — zwei von fünf echten Vertonungen brauchten bei gutem Netz länger,
+> die längste 3,0 s. Die harte Frist ist deshalb auf 4 s angehoben. Die Verbindungsfrist von
+> 1,5 s hat Abstand. Die 4 s stützen sich auf fünf Vertonungen an einem Dienst; E1 schreibt die
+> Dauer jeder Vertonung ins Log, damit der Wert am ersten Turnier nachgeprüft werden kann.
+> Zahlen und verworfene Wege:
+> [ADR 0105](../adr/0105-ansage-ausfall-erkennung-und-rueckfall-im-kern.md), „Ergebnis der
+> Messung".
 
 ### Ersatzstimme
 
@@ -436,8 +447,8 @@ gleiche Schlüssel — je Ansageart der Tabelle. Ein Drift-Test hält die Fixtur
 
 | Risiko | Folge | Gegenmittel |
 |---|---|---|
-| Harte Frist zu knapp | Langsames, aber lebendes WLAN löst die Ersatzstimme aus | Wert erst nach E0; Konstante, per Hotfix änderbar; Merker löscht sich nach gelungener Prüfung |
-| Hintergrundprüfung meldet „erreichbar", die Vertonung scheitert trotzdem | Jede Ansage wartet wieder die Frist ab | Die Frist begrenzt den Schaden auf 2,5 s; der nächste Netzfehler setzt den Merker erneut |
+| Harte Frist zu knapp | Langsames, aber lebendes WLAN löst die Ersatzstimme aus | Nach E0 von 2,5 s auf 4 s angehoben; Dauer jeder Vertonung im Log; Konstante, per Hotfix änderbar; Merker löscht sich nach gelungener Prüfung |
+| Hintergrundprüfung meldet „erreichbar", die Vertonung scheitert trotzdem | Jede Ansage wartet wieder die Frist ab | Die Frist begrenzt den Schaden auf 4 s; der nächste Netzfehler setzt den Merker erneut |
 | Absturz der Engine im Prozess | bts-light stürzt mitten im Turnier ab | Dauerlauf in E0 (2.000 Ansagen). Zeigt er einen Absturz, rechnet die Stimme in einem Kindprozess derselben Programmdatei (Sonderaufruf wie `--selbsttest`) — vor der Auslieferung von E2. Schalter aus = Engine wird nie berührt |
 | Offline-Stimme betont Namen falsch | Schlechter verständlich als erhofft | Hörvergleich in E0 entscheidet; Ausnahmeliste; Wörterbuch wirkt wie bei der Windows-Stimme |
 | Phonem-Weg V1 trägt nicht | E2/E3 nicht baubar | ADR 0104: V2 nur nach ausdrücklicher Freigabe; sonst entfallen E2/E3, E1/E4/E5 bleiben |
@@ -530,6 +541,9 @@ und 0105; Konstanten und Zielwerte hier nachtragen. Danach Entscheidung zu Punkt
   Cache prüfen, dann sofort Fehler „Netz".
 - `announcer.ts` `playPrepared` und `tonWeg.mjs`: `mitFrist` um die Vertonung.
 - Vorsicht: `tts_dienste_pruefen` bucht Zeichen — nicht als Hintergrundprüfung verwenden.
+- Log: je Vertonung Dienst, Dauer in Millisekunden, Zeichenzahl und Ausgang (gelungen,
+  Fehlerklasse, harte Frist) — **nie** der Ansagetext. Damit lässt sich die harte Frist von 4 s
+  am ersten Turnier nachprüfen.
 
 **E2 — Offline-Stimme als Ersatz** (`security-reviewer` Pflicht: Download, Dateipfade)
 - `offline_stimme/mod.rs`: Schnittstelle „Abschnitte hinein, PCM heraus" nach dem Vorbild
