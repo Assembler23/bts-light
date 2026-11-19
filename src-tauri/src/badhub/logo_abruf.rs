@@ -69,12 +69,19 @@ pub fn entscheiden(lokal: &LogoConfig, antwort: &Antwort) -> Schritt {
     match &antwort.logo {
         Some(l) if l.quelle == "turnier" => {
             // Kennung des Stands: die Prüfsumme, ohne sie die Adresse (trägt `?v=`)
-            let md5 = l.md5.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| l.url.clone());
+            let md5 = l
+                .md5
+                .clone()
+                .filter(|m| !m.is_empty())
+                .unwrap_or_else(|| l.url.clone());
             let gleich = lokal.von_badhub && !lokal.data.is_empty() && md5 == lokal.badhub_md5;
             if gleich {
                 Schritt::Nichts
             } else {
-                Schritt::Uebernehmen { url: l.url.clone(), md5 }
+                Schritt::Uebernehmen {
+                    url: l.url.clone(),
+                    md5,
+                }
             }
         }
         _ if lokal.von_badhub => Schritt::Entfernen,
@@ -97,11 +104,17 @@ pub fn build_client() -> reqwest::Client {
 /// Fragt badhub nach dem Logo. `Ok(None)` heißt „keine verwertbare Antwort“
 /// (404/400: badhub kennt den Abruf nicht, unlesbarer Rumpf, `ok:false`) — dann
 /// ändert bts-light **nichts**, auch ein übernommenes Logo bleibt.
-pub async fn abrufen(client: &reqwest::Client, url: &str, password: &str) -> Result<Option<Antwort>, PushError> {
+pub async fn abrufen(
+    client: &reqwest::Client,
+    url: &str,
+    password: &str,
+) -> Result<Option<Antwort>, PushError> {
     let r = client.get(url).bearer_auth(password).send().await?;
     match r.status().as_u16() {
         // reqwest läuft ohne `json`-Feature: Text lesen, selbst parsen
-        200 => Ok(serde_json::from_str::<Antwort>(&r.text().await?).ok().filter(|a| a.ok)),
+        200 => Ok(serde_json::from_str::<Antwort>(&r.text().await?)
+            .ok()
+            .filter(|a| a.ok)),
         404 | 400 => Ok(None),
         401 => Err(PushError::Unauthorized),
         s => Err(PushError::Status(s)),
@@ -133,13 +146,18 @@ pub fn gleicher_host(live_url: &str, logo_url: &str) -> bool {
     }
     match (ursprung(live_url), ursprung(logo_url)) {
         // Auch das Schema muss passen: kein Herunterstufen von https auf http
-        (Some((sa, a)), Some((sb, b))) => a == b && sa == sb && (sb == "https" || sb == "http") && !b.is_empty(),
+        (Some((sa, a)), Some((sb, b))) => {
+            a == b && sa == sb && (sb == "https" || sb == "http") && !b.is_empty()
+        }
         _ => false,
     }
 }
 
 /// Lädt das Bild (Größe und Format geprüft).
-pub async fn bild_laden(client: &reqwest::Client, url: &str) -> Result<(Vec<u8>, &'static str), String> {
+pub async fn bild_laden(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<(Vec<u8>, &'static str), String> {
     let mut r = client.get(url).send().await.map_err(|e| e.to_string())?;
     if r.status().as_u16() != 200 {
         return Err(format!("HTTP {}", r.status().as_u16()));
@@ -183,30 +201,72 @@ mod tests {
     #[test]
     fn badhub_logo_wird_uebernommen_auch_ueber_ein_eigenes() {
         let s = entscheiden(&lokal("AAAA", false, ""), &antwort("turnier", Some("abc")));
-        assert_eq!(s, Schritt::Uebernehmen { url: "https://badhub.de/assets/logos/turnier_7.png?v=1".into(), md5: "abc".into() });
+        assert_eq!(
+            s,
+            Schritt::Uebernehmen {
+                url: "https://badhub.de/assets/logos/turnier_7.png?v=1".into(),
+                md5: "abc".into()
+            }
+        );
     }
 
     #[test]
     fn unveraendertes_badhub_logo_nicht_neu_laden() {
-        assert_eq!(entscheiden(&lokal("AAAA", true, "abc"), &antwort("turnier", Some("abc"))), Schritt::Nichts);
+        assert_eq!(
+            entscheiden(
+                &lokal("AAAA", true, "abc"),
+                &antwort("turnier", Some("abc"))
+            ),
+            Schritt::Nichts
+        );
     }
 
     #[test]
     fn geaendertes_badhub_logo_neu_laden() {
-        assert!(matches!(entscheiden(&lokal("AAAA", true, "abc"), &antwort("turnier", Some("def"))), Schritt::Uebernehmen { .. }));
+        assert!(matches!(
+            entscheiden(
+                &lokal("AAAA", true, "abc"),
+                &antwort("turnier", Some("def"))
+            ),
+            Schritt::Uebernehmen { .. }
+        ));
     }
 
     #[test]
     fn ohne_turnierlogo_bleibt_das_eigene() {
         // badhub zeigt nur, was bts-light selbst geschickt hat (Check-In) — bts-light bleibt Quelle
-        assert_eq!(entscheiden(&lokal("AAAA", false, ""), &antwort("checkin", Some("x"))), Schritt::Nichts);
-        assert_eq!(entscheiden(&lokal("AAAA", false, ""), &Antwort { ok: true, logo: None }), Schritt::Nichts);
+        assert_eq!(
+            entscheiden(&lokal("AAAA", false, ""), &antwort("checkin", Some("x"))),
+            Schritt::Nichts
+        );
+        assert_eq!(
+            entscheiden(
+                &lokal("AAAA", false, ""),
+                &Antwort {
+                    ok: true,
+                    logo: None
+                }
+            ),
+            Schritt::Nichts
+        );
     }
 
     #[test]
     fn von_badhub_entfernt_wird_lokal_entfernt() {
-        assert_eq!(entscheiden(&lokal("AAAA", true, "abc"), &Antwort { ok: true, logo: None }), Schritt::Entfernen);
-        assert_eq!(entscheiden(&lokal("AAAA", true, "abc"), &antwort("checkin", None)), Schritt::Entfernen);
+        assert_eq!(
+            entscheiden(
+                &lokal("AAAA", true, "abc"),
+                &Antwort {
+                    ok: true,
+                    logo: None
+                }
+            ),
+            Schritt::Entfernen
+        );
+        assert_eq!(
+            entscheiden(&lokal("AAAA", true, "abc"), &antwort("checkin", None)),
+            Schritt::Entfernen
+        );
     }
 
     #[test]
@@ -219,7 +279,10 @@ mod tests {
 
     #[test]
     fn abruf_url_neben_branding() {
-        assert_eq!(abruf_url("https://badhub.de/api/live_update.php", None), "https://badhub.de/api/checkin-branding/logo");
+        assert_eq!(
+            abruf_url("https://badhub.de/api/live_update.php", None),
+            "https://badhub.de/api/checkin-branding/logo"
+        );
         assert_eq!(
             abruf_url("https://test.badhub.de/api/live_update.php", Some("ABCD-1")),
             "https://test.badhub.de/api/checkin-branding/logo?tournament_uuid=ABCD-1"
@@ -231,19 +294,31 @@ mod tests {
         let a = antwort("turnier", None);
         let url = a.logo.as_ref().unwrap().url.clone();
         assert_eq!(entscheiden(&lokal("AAAA", true, &url), &a), Schritt::Nichts);
-        assert!(matches!(entscheiden(&lokal("AAAA", true, "alte-adresse"), &a), Schritt::Uebernehmen { .. }));
+        assert!(matches!(
+            entscheiden(&lokal("AAAA", true, "alte-adresse"), &a),
+            Schritt::Uebernehmen { .. }
+        ));
     }
 
     #[test]
     fn kein_herunterstufen_auf_http() {
-        assert!(!gleicher_host("https://badhub.de/api/live_update.php", "http://badhub.de/assets/logos/x.png"));
-        assert!(gleicher_host("http://localhost:8080/api/live_update.php", "http://localhost:8080/assets/logos/x.png"));
+        assert!(!gleicher_host(
+            "https://badhub.de/api/live_update.php",
+            "http://badhub.de/assets/logos/x.png"
+        ));
+        assert!(gleicher_host(
+            "http://localhost:8080/api/live_update.php",
+            "http://localhost:8080/assets/logos/x.png"
+        ));
     }
 
     #[test]
     fn nur_derselbe_host() {
         let live = "https://badhub.de/api/live_update.php";
-        assert!(gleicher_host(live, "https://badhub.de/assets/logos/turnier_7.png?v=1"));
+        assert!(gleicher_host(
+            live,
+            "https://badhub.de/assets/logos/turnier_7.png?v=1"
+        ));
         assert!(!gleicher_host(live, "https://evil.example/x.png"));
         assert!(!gleicher_host(live, "https://badhub.de.evil.example/x.png"));
         assert!(!gleicher_host(live, "file:///etc/passwd"));
@@ -266,13 +341,16 @@ mod tests {
 
     #[tokio::test]
     async fn alter_server_404_aendert_nichts() {
-        let url = mock("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        let url =
+            mock("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
         assert_eq!(abrufen(&build_client(), &url, "pw").await.unwrap(), None);
     }
 
     #[tokio::test]
     async fn unlesbare_antwort_aendert_nichts() {
-        let url = mock("HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\n<html>x</").await;
+        let url =
+            mock("HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\n<html>x</")
+                .await;
         assert_eq!(abrufen(&build_client(), &url, "pw").await.unwrap(), None);
     }
 
@@ -284,8 +362,14 @@ mod tests {
 
     #[test]
     fn bildformat_aus_dem_inhalt() {
-        assert_eq!(mime_aus_bytes(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0]), Some("image/png"));
-        assert_eq!(mime_aus_bytes(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
+        assert_eq!(
+            mime_aus_bytes(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0]),
+            Some("image/png")
+        );
+        assert_eq!(
+            mime_aus_bytes(&[0xFF, 0xD8, 0xFF, 0xE0]),
+            Some("image/jpeg")
+        );
         assert_eq!(mime_aus_bytes(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
         assert_eq!(mime_aus_bytes(b"<svg xmlns="), None);
     }

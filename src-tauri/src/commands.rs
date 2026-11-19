@@ -2710,7 +2710,10 @@ const LOGO_ABRUF_START: Duration = Duration::from_secs(20);
 /// Logo-Abruf (läuft im Sync-Task unter `TaktWaechter`, nur am Master): fragt
 /// badhub alle zehn Minuten nach dem Turnierlogo. Fehler werden nur geloggt —
 /// das Logo ist Beiwerk und darf die Übertragung nie stören.
-pub(crate) async fn logo_abruf_schleife(config: Arc<Mutex<AppConfig>>, config_path: std::path::PathBuf) {
+pub(crate) async fn logo_abruf_schleife(
+    config: Arc<Mutex<AppConfig>>,
+    config_path: std::path::PathBuf,
+) {
     tokio::time::sleep(LOGO_ABRUF_START).await;
     let client = crate::badhub::logo_abruf::build_client();
     let mut takt = tokio::time::interval(LOGO_ABRUF_TAKT);
@@ -2731,24 +2734,37 @@ pub(crate) async fn logo_abruf_schritt(
 ) -> Result<(), String> {
     use crate::badhub::logo_abruf::{self, Schritt};
     let (live_url, password, uuid, lokal) = {
-        let c = config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        (c.badhub.url.clone(), c.badhub.password.clone(), c.tournament_uuid_kanonisch(), c.tournament_logo.clone())
+        let c = config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (
+            c.badhub.url.clone(),
+            c.badhub.password.clone(),
+            c.tournament_uuid_kanonisch(),
+            c.tournament_logo.clone(),
+        )
     };
     if password.is_empty() {
         return Ok(());
     }
     let url = logo_abruf::abruf_url(&live_url, uuid.as_deref());
-    let Some(antwort) = logo_abruf::abrufen(client, &url, &password).await.map_err(|e| e.to_string())? else {
+    let Some(antwort) = logo_abruf::abrufen(client, &url, &password)
+        .await
+        .map_err(|e| e.to_string())?
+    else {
         return Ok(()); // keine verwertbare Antwort: nichts ändern
     };
     // Gilt die Entscheidung noch? Zwischen Abruf und Schreiben kann im Setup
     // gespeichert oder das Turnier gewechselt worden sein.
-    let gilt_noch = |c: &AppConfig| c.badhub.url == live_url && c.tournament_uuid_kanonisch() == uuid;
+    let gilt_noch =
+        |c: &AppConfig| c.badhub.url == live_url && c.tournament_uuid_kanonisch() == uuid;
     match logo_abruf::entscheiden(&lokal, &antwort) {
         Schritt::Nichts => Ok(()),
         Schritt::Uebernehmen { url: bild_url, md5 } => {
             if !logo_abruf::gleicher_host(&live_url, &bild_url) {
-                return Err(format!("Logo-Adresse auf fremdem Host oder Schema verworfen: {bild_url}"));
+                return Err(format!(
+                    "Logo-Adresse auf fremdem Host oder Schema verworfen: {bild_url}"
+                ));
             }
             let (bytes, mime) = logo_abruf::bild_laden(client, &bild_url).await?;
             use base64::Engine;
@@ -2769,7 +2785,10 @@ pub(crate) async fn logo_abruf_schritt(
                 l.badhub_md5 = md5;
                 Ok(())
             })?;
-            tracing::info!("Turnierlogo aus badhub übernommen ({mime}, {} Bytes)", bytes.len());
+            tracing::info!(
+                "Turnierlogo aus badhub übernommen ({mime}, {} Bytes)",
+                bytes.len()
+            );
             Ok(())
         }
         Schritt::Entfernen => {
@@ -3657,7 +3676,10 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
         // Übertragung läuft — das Passwort ist die Anmeldung.
         let _logo_abruf = (!slave_mode).then(|| {
             let st = app_handle.state::<AppState>();
-            TaktWaechter(tauri::async_runtime::spawn(logo_abruf_schleife(st.config.clone(), config_path(&app_handle))))
+            TaktWaechter(tauri::async_runtime::spawn(logo_abruf_schleife(
+                st.config.clone(),
+                config_path(&app_handle),
+            )))
         });
         // TP-Datei-Automatik (Spec `tp-datei-finden`): sucht beim Start der
         // Übertragung und danach im 60-s-Takt die in BTP geöffnete Datei.
@@ -3684,7 +3706,12 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
             // dort hinein, der nächste tset soll es tragen (Review 19.11.2026).
             {
                 let st = app_handle.state::<AppState>();
-                let neu = st.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).tournament_logo.clone();
+                let neu = st
+                    .config
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .tournament_logo
+                    .clone();
                 if neu != sync_config.tournament_logo {
                     sync_config.tournament_logo = neu;
                 }

@@ -50,6 +50,7 @@ const DATEIEN: &[&str] = &[
 const NICHT_GESPEICHERT: &[&str] = &[
     "ansage_ton/stimme.rs",
     "badhub/checkin_state.rs",
+    "badhub/logo_abruf.rs",
     "badhub/tp_upload.rs",
     "commands.rs",
     "kern_tausch.rs",
