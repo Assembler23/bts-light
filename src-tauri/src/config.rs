@@ -889,8 +889,12 @@ pub struct LogoConfig {
     /// Das Logo kommt aus badhub (Turnier-Einstellungen, `badhub::logo_abruf`):
     /// badhub ist Master, im Setup nicht änderbar, nicht zurück an badhub.
     pub von_badhub: bool,
-    /// Prüfsumme des übernommenen badhub-Logos (erkennt Änderungen ohne Neuladen).
+    /// Kennung des übernommenen badhub-Stands (Prüfsumme, sonst die Adresse mit `?v=`).
     pub badhub_md5: String,
+    /// Das eigene Logo von vor der Übernahme — kommt zurück, wenn badhub seins
+    /// entfernt (Security-/Code-Review 19.11.2026).
+    pub eigen_data: String,
+    pub eigen_mime: String,
 }
 
 /// Hochwertige Cloud-Ansage über Azure Cognitive Services Speech (Neural TTS).

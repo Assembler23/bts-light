@@ -68,12 +68,9 @@ pub fn abruf_url(live_url: &str, tournament_uuid: Option<&str>) -> String {
 pub fn entscheiden(lokal: &LogoConfig, antwort: &Antwort) -> Schritt {
     match &antwort.logo {
         Some(l) if l.quelle == "turnier" => {
-            let md5 = l.md5.clone().unwrap_or_default();
-            // Ohne Prüfsumme lässt sich „unverändert“ nicht feststellen: dann nur
-            // übernehmen, wenn noch kein badhub-Logo lokal liegt.
-            let gleich = lokal.von_badhub
-                && !lokal.data.is_empty()
-                && (md5.is_empty() || md5 == lokal.badhub_md5);
+            // Kennung des Stands: die Prüfsumme, ohne sie die Adresse (trägt `?v=`)
+            let md5 = l.md5.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| l.url.clone());
+            let gleich = lokal.von_badhub && !lokal.data.is_empty() && md5 == lokal.badhub_md5;
             if gleich {
                 Schritt::Nichts
             } else {
@@ -85,14 +82,27 @@ pub fn entscheiden(lokal: &LogoConfig, antwort: &Antwort) -> Schritt {
     }
 }
 
-/// Fragt badhub nach dem Logo. 404/400 (badhub kennt den Abruf noch nicht)
-/// ergibt eine leere Antwort — kein Fehler, bts-light behält dann sein Logo.
-pub async fn abrufen(client: &reqwest::Client, url: &str, password: &str) -> Result<Antwort, PushError> {
+/// Eigener Client ohne Weiterleitungen: `gleicher_host` prüft nur die Adresse,
+/// die badhub nennt — ein 3xx dürfte sonst auf fremde oder interne Ziele führen
+/// (Security-Review). Wie `tp_upload` und `seiten_angebot`.
+pub fn build_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+/// Fragt badhub nach dem Logo. `Ok(None)` heißt „keine verwertbare Antwort“
+/// (404/400: badhub kennt den Abruf nicht, unlesbarer Rumpf, `ok:false`) — dann
+/// ändert bts-light **nichts**, auch ein übernommenes Logo bleibt.
+pub async fn abrufen(client: &reqwest::Client, url: &str, password: &str) -> Result<Option<Antwort>, PushError> {
     let r = client.get(url).bearer_auth(password).send().await?;
     match r.status().as_u16() {
-        // reqwest läuft ohne `json`-Feature: Text lesen, selbst parsen (unbrauchbar = keine Antwort)
-        200 => Ok(serde_json::from_str(&r.text().await?).unwrap_or(Antwort { ok: false, logo: None })),
-        404 | 400 => Ok(Antwort { ok: false, logo: None }),
+        // reqwest läuft ohne `json`-Feature: Text lesen, selbst parsen
+        200 => Ok(serde_json::from_str::<Antwort>(&r.text().await?).ok().filter(|a| a.ok)),
+        404 | 400 => Ok(None),
         401 => Err(PushError::Unauthorized),
         s => Err(PushError::Status(s)),
     }
@@ -122,7 +132,8 @@ pub fn gleicher_host(live_url: &str, logo_url: &str) -> bool {
         Some((schema.to_ascii_lowercase(), host))
     }
     match (ursprung(live_url), ursprung(logo_url)) {
-        (Some((_, a)), Some((s, b))) => a == b && (s == "https" || s == "http") && !b.is_empty(),
+        // Auch das Schema muss passen: kein Herunterstufen von https auf http
+        (Some((sa, a)), Some((sb, b))) => a == b && sa == sb && (sb == "https" || sb == "http") && !b.is_empty(),
         _ => false,
     }
 }
@@ -152,9 +163,9 @@ mod tests {
         LogoConfig {
             data: data.into(),
             mime: "image/png".into(),
-            background_color: String::new(),
             von_badhub,
             badhub_md5: md5.into(),
+            ..Default::default()
         }
     }
 
@@ -216,6 +227,20 @@ mod tests {
     }
 
     #[test]
+    fn ohne_pruefsumme_zaehlt_die_adresse() {
+        let a = antwort("turnier", None);
+        let url = a.logo.as_ref().unwrap().url.clone();
+        assert_eq!(entscheiden(&lokal("AAAA", true, &url), &a), Schritt::Nichts);
+        assert!(matches!(entscheiden(&lokal("AAAA", true, "alte-adresse"), &a), Schritt::Uebernehmen { .. }));
+    }
+
+    #[test]
+    fn kein_herunterstufen_auf_http() {
+        assert!(!gleicher_host("https://badhub.de/api/live_update.php", "http://badhub.de/assets/logos/x.png"));
+        assert!(gleicher_host("http://localhost:8080/api/live_update.php", "http://localhost:8080/assets/logos/x.png"));
+    }
+
+    #[test]
     fn nur_derselbe_host() {
         let live = "https://badhub.de/api/live_update.php";
         assert!(gleicher_host(live, "https://badhub.de/assets/logos/turnier_7.png?v=1"));
@@ -223,6 +248,38 @@ mod tests {
         assert!(!gleicher_host(live, "https://badhub.de.evil.example/x.png"));
         assert!(!gleicher_host(live, "file:///etc/passwd"));
         assert!(!gleicher_host(live, "kein-url"));
+    }
+
+    /// Mini-HTTP-Server: eine Anfrage, feste Antwort.
+    async fn mock(antwort: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = l.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf).await;
+            sock.write_all(antwort.as_bytes()).await.unwrap();
+        });
+        format!("http://{addr}/api/checkin-branding/logo")
+    }
+
+    #[tokio::test]
+    async fn alter_server_404_aendert_nichts() {
+        let url = mock("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        assert_eq!(abrufen(&build_client(), &url, "pw").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn unlesbare_antwort_aendert_nichts() {
+        let url = mock("HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\n<html>x</").await;
+        assert_eq!(abrufen(&build_client(), &url, "pw").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn weiterleitung_wird_nicht_verfolgt() {
+        let url = mock("HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/x.png\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        assert!(bild_laden(&build_client(), &url).await.is_err());
     }
 
     #[test]

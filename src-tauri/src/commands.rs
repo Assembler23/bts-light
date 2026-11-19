@@ -555,6 +555,8 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
         // Das Setup kann sich nicht selbst zum badhub-Logo erklären
         incoming.tournament_logo.von_badhub = false;
         incoming.tournament_logo.badhub_md5.clear();
+        incoming.tournament_logo.eigen_data.clear();
+        incoming.tournament_logo.eigen_mime.clear();
     }
     if incoming.tl_web.enabled {
         incoming.tl_web.devices = current.tl_web.devices.clone();
@@ -2710,7 +2712,7 @@ const LOGO_ABRUF_START: Duration = Duration::from_secs(20);
 /// das Logo ist Beiwerk und darf die Übertragung nie stören.
 pub(crate) async fn logo_abruf_schleife(config: Arc<Mutex<AppConfig>>, config_path: std::path::PathBuf) {
     tokio::time::sleep(LOGO_ABRUF_START).await;
-    let client = crate::badhub::push::build_client();
+    let client = crate::badhub::logo_abruf::build_client();
     let mut takt = tokio::time::interval(LOGO_ABRUF_TAKT);
     takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -2729,28 +2731,42 @@ pub(crate) async fn logo_abruf_schritt(
 ) -> Result<(), String> {
     use crate::badhub::logo_abruf::{self, Schritt};
     let (live_url, password, uuid, lokal) = {
-        let c = config.lock().expect("Config-Mutex nicht vergiftet");
+        let c = config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         (c.badhub.url.clone(), c.badhub.password.clone(), c.tournament_uuid_kanonisch(), c.tournament_logo.clone())
     };
     if password.is_empty() {
         return Ok(());
     }
     let url = logo_abruf::abruf_url(&live_url, uuid.as_deref());
-    let antwort = logo_abruf::abrufen(client, &url, &password).await.map_err(|e| e.to_string())?;
+    let Some(antwort) = logo_abruf::abrufen(client, &url, &password).await.map_err(|e| e.to_string())? else {
+        return Ok(()); // keine verwertbare Antwort: nichts ändern
+    };
+    // Gilt die Entscheidung noch? Zwischen Abruf und Schreiben kann im Setup
+    // gespeichert oder das Turnier gewechselt worden sein.
+    let gilt_noch = |c: &AppConfig| c.badhub.url == live_url && c.tournament_uuid_kanonisch() == uuid;
     match logo_abruf::entscheiden(&lokal, &antwort) {
         Schritt::Nichts => Ok(()),
         Schritt::Uebernehmen { url: bild_url, md5 } => {
             if !logo_abruf::gleicher_host(&live_url, &bild_url) {
-                return Err(format!("Logo-Adresse auf fremdem Host verworfen: {bild_url}"));
+                return Err(format!("Logo-Adresse auf fremdem Host oder Schema verworfen: {bild_url}"));
             }
             let (bytes, mime) = logo_abruf::bild_laden(client, &bild_url).await?;
             use base64::Engine;
             let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
             mutate_config_at(config_path, config, |c| {
-                c.tournament_logo.data = data;
-                c.tournament_logo.mime = mime.to_string();
-                c.tournament_logo.von_badhub = true;
-                c.tournament_logo.badhub_md5 = md5;
+                if !gilt_noch(c) {
+                    return Err("Einstellungen haben sich inzwischen geändert".to_string());
+                }
+                let l = &mut c.tournament_logo;
+                if !l.von_badhub {
+                    // Eigenes Logo aufheben, bis badhub seins wieder entfernt
+                    l.eigen_data = std::mem::take(&mut l.data);
+                    l.eigen_mime = std::mem::take(&mut l.mime);
+                }
+                l.data = data;
+                l.mime = mime.to_string();
+                l.von_badhub = true;
+                l.badhub_md5 = md5;
                 Ok(())
             })?;
             tracing::info!("Turnierlogo aus badhub übernommen ({mime}, {} Bytes)", bytes.len());
@@ -2758,13 +2774,17 @@ pub(crate) async fn logo_abruf_schritt(
         }
         Schritt::Entfernen => {
             mutate_config_at(config_path, config, |c| {
-                c.tournament_logo.data.clear();
-                c.tournament_logo.mime.clear();
-                c.tournament_logo.von_badhub = false;
-                c.tournament_logo.badhub_md5.clear();
+                if !gilt_noch(c) || !c.tournament_logo.von_badhub {
+                    return Err("Einstellungen haben sich inzwischen geändert".to_string());
+                }
+                let l = &mut c.tournament_logo;
+                l.data = std::mem::take(&mut l.eigen_data);
+                l.mime = std::mem::take(&mut l.eigen_mime);
+                l.von_badhub = false;
+                l.badhub_md5.clear();
                 Ok(())
             })?;
-            tracing::info!("Turnierlogo in badhub entfernt — auch in bts-light entfernt");
+            tracing::info!("Turnierlogo in badhub entfernt — bts-light nutzt wieder das eigene (falls vorhanden)");
             Ok(())
         }
     }
@@ -3548,7 +3568,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
 
     // Poll-Push-Schleife BTP → Badhub.
     let app_handle = app.clone();
-    let sync_config = config.clone();
+    let mut sync_config = config.clone();
     let sync_tablet = tablet.clone();
     // Die Strecke zu badhub entsteht je Start neu — ein Halt (abgelehntes
     // Passwort) endet damit beim Speichern der Einstellungen. Geteilt
@@ -3659,6 +3679,15 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
                 tauri::async_runtime::spawn(async move {
                     crate::sync::checkin_lese_tick(&lese, &cfg, &tab).await;
                 });
+            }
+            // Turnierlogo aus der GETEILTEN Config: der Logo-Abruf von badhub schreibt
+            // dort hinein, der nächste tset soll es tragen (Review 19.11.2026).
+            {
+                let st = app_handle.state::<AppState>();
+                let neu = st.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).tournament_logo.clone();
+                if neu != sync_config.tournament_logo {
+                    sync_config.tournament_logo = neu;
+                }
             }
             let outcome = engine.run_once(&sync_config, &sync_tablet).await;
             // Ereignis-Auslöser des TP-Uploads (ADR 0062): Auslosung oder
