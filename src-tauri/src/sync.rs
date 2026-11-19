@@ -3589,6 +3589,7 @@ mod tests {
             data: data.into(),
             mime: "image/png".into(),
             background_color: "#112233".into(),
+            ..Default::default()
         }
     }
 
@@ -3643,6 +3644,7 @@ mod tests {
                 data: String::new(),
                 mime: String::new(),
                 background_color: "#112233".into(),
+                ..Default::default()
             },
             "T",
         );

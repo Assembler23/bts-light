@@ -965,6 +965,10 @@ export interface LogoConfig {
   mime: string;
   /** CSS-Hintergrundfarbe hinter dem Logo (leer = badhub-Standard). */
   background_color: string;
+  /** Logo kommt aus badhub (Turnier-Einstellungen) — badhub ist Master, hier nicht änderbar. */
+  von_badhub?: boolean;
+  /** Prüfsumme des übernommenen badhub-Logos (nur vom Rust-Kern gesetzt). */
+  badhub_md5?: string;
 }
 
 /** Stand des Update-Ablaufs (Rust: update::UpdateInfo, Spec

@@ -373,6 +373,8 @@ export function SetupWizard({
   const [tournamentGuid, setTournamentGuid] = useState(
     initialConfig.tournament_uuid || initialConfig.checkin?.tournament_uuid || "",
   );
+  // Logo aus badhub übernommen (badhub ist Master): hier nur ansehen, nicht ändern.
+  const logoVonBadhub = initialConfig.tournament_logo?.von_badhub === true;
   // Turnierlogo (badhub-Liveticker). BTP liefert keins → Upload.
   const [logoData, setLogoData] = useState(
     initialConfig.tournament_logo?.data ?? "",
@@ -1071,6 +1073,9 @@ export function SetupWizard({
         data: logoData,
         mime: logoMime,
         background_color: logoBg.trim(),
+        // Vom Kern gepflegt (Logo aus badhub); der Kern schützt beides ohnehin beim Speichern
+        von_badhub: logoVonBadhub,
+        badhub_md5: initialConfig.tournament_logo?.badhub_md5 ?? "",
       },
       // Turnierleitungs-Oberfläche unverändert durchreichen – hier nicht
       // editiert. WICHTIG: Dieses Objekt wird Feld für Feld gebaut, nicht
@@ -1543,8 +1548,16 @@ export function SetupWizard({
           <SectionHeader icon={Image}>Turnierlogo (optional)</SectionHeader>
           <p className="text-sm text-slate-600">
             Erscheint oben auf der Live-Seite (badhub.de/live). BTP liefert kein
-            Logo – lade es hier hoch (PNG, JPG, WEBP, GIF, SVG; max. 2 MB).
+            Logo – lade es hier hoch (PNG, JPG, WEBP, GIF, SVG; max. 2 MB). Ist in
+            badhub in den Einstellungen des Turniers ein Logo hinterlegt, gilt
+            dieses und bts-light übernimmt es automatisch.
           </p>
+          {logoVonBadhub && (
+            <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-800">
+              Dieses Logo kommt aus badhub (Einstellungen des Turniers). Ändern oder
+              entfernen kannst du es dort.
+            </p>
+          )}
           <div className="flex items-center gap-3">
             {logoData ? (
               <img
@@ -1561,6 +1574,7 @@ export function SetupWizard({
                 <Image size={22} />
               </div>
             )}
+            {!logoVonBadhub && (
             <div className="flex flex-col gap-1.5">
               <button
                 onClick={() => void pickLogo()}
@@ -1579,6 +1593,7 @@ export function SetupWizard({
                 </button>
               )}
             </div>
+            )}
           </div>
           {logoData && (
             <label className="flex items-center gap-2 text-sm text-slate-700">

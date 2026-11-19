@@ -886,6 +886,15 @@ pub struct LogoConfig {
     /// CSS-Hintergrundfarbe hinter dem Logo (viele Logos sind transparent).
     /// Leer ⇒ badhub fällt auf sein Standard-Weiß zurück.
     pub background_color: String,
+    /// Das Logo kommt aus badhub (Turnier-Einstellungen, `badhub::logo_abruf`):
+    /// badhub ist Master, im Setup nicht änderbar, nicht zurück an badhub.
+    pub von_badhub: bool,
+    /// Kennung des übernommenen badhub-Stands (Prüfsumme, sonst die Adresse mit `?v=`).
+    pub badhub_md5: String,
+    /// Das eigene Logo von vor der Übernahme — kommt zurück, wenn badhub seins
+    /// entfernt (Security-/Code-Review 19.11.2026).
+    pub eigen_data: String,
+    pub eigen_mime: String,
 }
 
 /// Hochwertige Cloud-Ansage über Azure Cognitive Services Speech (Neural TTS).
@@ -2948,6 +2957,7 @@ mod tests {
                 data: "aGVsbG8=".to_string(),
                 mime: "image/png".to_string(),
                 background_color: "#112233".to_string(),
+                ..Default::default()
             },
             tl_web: TlWebConfig {
                 enabled: true,

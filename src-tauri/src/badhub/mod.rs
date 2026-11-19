@@ -3,6 +3,7 @@
 
 pub mod checkin_state;
 pub mod diff;
+pub mod logo_abruf;
 pub mod messung;
 pub mod payload;
 pub mod push;

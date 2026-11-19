@@ -1050,6 +1050,7 @@ mod tests {
             mime: mime.into(),
             data: data.into(),
             background_color: String::new(),
+            ..Default::default()
         };
         assert_eq!(
             logo_data_uri(&logo("image/png", "aGVsbG8=")).as_deref(),
