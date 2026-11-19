@@ -137,6 +137,15 @@ und auf den Anzeigen in der Halle. BTP liefert kein Logo — deshalb hier.
 Ein **neues Bild** wird zusätzlich einmalig an den Check-In übertragen; eine
 reine Farbänderung nicht.
 
+**badhub ist Master.** Ist in badhub in den **Einstellungen des Turniers** ein
+Turnierlogo hinterlegt, übernimmt bts-light es automatisch (Abfrage alle zehn
+Minuten, solange die Übertragung läuft) und zeigt hier den Hinweis
+<!-- pruef: "Dieses Logo kommt aus badhub" in src/pages/SetupWizard.tsx -->
+„Dieses Logo kommt aus badhub“ — Wählen und Entfernen gibt es dann nur in
+badhub, die Hintergrundfarbe bleibt hier einstellbar. Entfernt badhub das Logo,
+verschwindet es auch hier. Hat badhub keins, gilt das hier hochgeladene und geht
+wie bisher an badhub.
+
 ### 2 · BTP-Verbindung
 
 | Feld | Voreinstellung | Bedeutung |

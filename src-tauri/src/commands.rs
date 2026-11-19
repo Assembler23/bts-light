@@ -544,6 +544,18 @@ pub fn load_config(app: AppHandle, state: State<'_, AppState>) -> Result<AppConf
 /// **einzige** Schreibpfad neben `load_from`, der den Gleichlauf von
 /// Wurzelfeld und `checkin.tournament_uuid` erzwingt.
 fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> AppConfig {
+    // Turnierlogo aus badhub (badhub::logo_abruf): badhub ist Master — das Setup
+    // darf es nicht mit seinem Formularstand überschreiben oder entfernen. Nur die
+    // Hintergrundfarbe bleibt lokal einstellbar.
+    if current.tournament_logo.von_badhub {
+        let farbe = incoming.tournament_logo.background_color.clone();
+        incoming.tournament_logo = current.tournament_logo.clone();
+        incoming.tournament_logo.background_color = farbe;
+    } else {
+        // Das Setup kann sich nicht selbst zum badhub-Logo erklären
+        incoming.tournament_logo.von_badhub = false;
+        incoming.tournament_logo.badhub_md5.clear();
+    }
     if incoming.tl_web.enabled {
         incoming.tl_web.devices = current.tl_web.devices.clone();
     } else {
@@ -2688,6 +2700,76 @@ pub(crate) fn tp_takt_start(an: bool, status: &Mutex<TpUploadStatus>, jetzt_ms: 
     }
 }
 
+/// Abstand des Logo-Abrufs von badhub (badhub ist Master, `badhub::logo_abruf`).
+const LOGO_ABRUF_TAKT: Duration = Duration::from_secs(600);
+/// Erster Abruf kurz nach dem Start der Übertragung.
+const LOGO_ABRUF_START: Duration = Duration::from_secs(20);
+
+/// Logo-Abruf (läuft im Sync-Task unter `TaktWaechter`, nur am Master): fragt
+/// badhub alle zehn Minuten nach dem Turnierlogo. Fehler werden nur geloggt —
+/// das Logo ist Beiwerk und darf die Übertragung nie stören.
+pub(crate) async fn logo_abruf_schleife(config: Arc<Mutex<AppConfig>>, config_path: std::path::PathBuf) {
+    tokio::time::sleep(LOGO_ABRUF_START).await;
+    let client = crate::badhub::push::build_client();
+    let mut takt = tokio::time::interval(LOGO_ABRUF_TAKT);
+    takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        takt.tick().await;
+        if let Err(e) = logo_abruf_schritt(&config, &config_path, &client).await {
+            tracing::info!("Turnierlogo von badhub: {e}");
+        }
+    }
+}
+
+/// Ein Abruf: fragen, entscheiden, ggf. laden und in die Config schreiben.
+pub(crate) async fn logo_abruf_schritt(
+    config: &Arc<Mutex<AppConfig>>,
+    config_path: &std::path::Path,
+    client: &reqwest::Client,
+) -> Result<(), String> {
+    use crate::badhub::logo_abruf::{self, Schritt};
+    let (live_url, password, uuid, lokal) = {
+        let c = config.lock().expect("Config-Mutex nicht vergiftet");
+        (c.badhub.url.clone(), c.badhub.password.clone(), c.tournament_uuid_kanonisch(), c.tournament_logo.clone())
+    };
+    if password.is_empty() {
+        return Ok(());
+    }
+    let url = logo_abruf::abruf_url(&live_url, uuid.as_deref());
+    let antwort = logo_abruf::abrufen(client, &url, &password).await.map_err(|e| e.to_string())?;
+    match logo_abruf::entscheiden(&lokal, &antwort) {
+        Schritt::Nichts => Ok(()),
+        Schritt::Uebernehmen { url: bild_url, md5 } => {
+            if !logo_abruf::gleicher_host(&live_url, &bild_url) {
+                return Err(format!("Logo-Adresse auf fremdem Host verworfen: {bild_url}"));
+            }
+            let (bytes, mime) = logo_abruf::bild_laden(client, &bild_url).await?;
+            use base64::Engine;
+            let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            mutate_config_at(config_path, config, |c| {
+                c.tournament_logo.data = data;
+                c.tournament_logo.mime = mime.to_string();
+                c.tournament_logo.von_badhub = true;
+                c.tournament_logo.badhub_md5 = md5;
+                Ok(())
+            })?;
+            tracing::info!("Turnierlogo aus badhub übernommen ({mime}, {} Bytes)", bytes.len());
+            Ok(())
+        }
+        Schritt::Entfernen => {
+            mutate_config_at(config_path, config, |c| {
+                c.tournament_logo.data.clear();
+                c.tournament_logo.mime.clear();
+                c.tournament_logo.von_badhub = false;
+                c.tournament_logo.badhub_md5.clear();
+                Ok(())
+            })?;
+            tracing::info!("Turnierlogo in badhub entfernt — auch in bts-light entfernt");
+            Ok(())
+        }
+    }
+}
+
 /// Takt-Task (läuft im Sync-Task unter `TaktWaechter`): prüft alle
 /// `PRUEFTAKT`, ob der Termin fällig ist. Beim Start bleibt ein Termin aus dem
 /// vorigen Lauf stehen (Speichern = Stopp + Start), ein fehlender oder zu
@@ -3550,6 +3632,12 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
             let cfg = st.config.clone();
             let status = st.tp_upload.clone();
             TaktWaechter(tauri::async_runtime::spawn(tp_takt_schleife(cfg, status)))
+        });
+        // Turnierlogo von badhub (badhub ist Master): nur am Master, solange die
+        // Übertragung läuft — das Passwort ist die Anmeldung.
+        let _logo_abruf = (!slave_mode).then(|| {
+            let st = app_handle.state::<AppState>();
+            TaktWaechter(tauri::async_runtime::spawn(logo_abruf_schleife(st.config.clone(), config_path(&app_handle))))
         });
         // TP-Datei-Automatik (Spec `tp-datei-finden`): sucht beim Start der
         // Übertragung und danach im 60-s-Takt die in BTP geöffnete Datei.
@@ -9393,6 +9481,33 @@ mod tests {
         cfg.tp_upload.tournament_uuid = kennung.to_string();
         cfg.tp_upload.stand = stand;
         cfg
+    }
+
+    #[test]
+    fn keep_host_managed_fields_schuetzt_badhub_logo() {
+        // badhub ist Master: ein übernommenes Logo überlebt das Speichern im Setup (auch
+        // „Entfernen“ dort), nur die Hintergrundfarbe kommt aus dem Formular.
+        let mut current = AppConfig::default();
+        current.tournament_logo.data = "QkFESFVC".into();
+        current.tournament_logo.mime = "image/png".into();
+        current.tournament_logo.von_badhub = true;
+        current.tournament_logo.badhub_md5 = "abc".into();
+        let mut from_ui = AppConfig::default();
+        from_ui.tournament_logo.background_color = "#000000".into();
+        let merged = keep_host_managed_fields(from_ui, &current);
+        assert_eq!(merged.tournament_logo.data, "QkFESFVC");
+        assert!(merged.tournament_logo.von_badhub);
+        assert_eq!(merged.tournament_logo.badhub_md5, "abc");
+        assert_eq!(merged.tournament_logo.background_color, "#000000");
+        // Ohne badhub-Logo kann sich das Formular nicht selbst zum badhub-Logo erklären
+        let mut eigenes = AppConfig::default();
+        eigenes.tournament_logo.data = "RUlHRU4=".into();
+        eigenes.tournament_logo.von_badhub = true;
+        eigenes.tournament_logo.badhub_md5 = "x".into();
+        let merged = keep_host_managed_fields(eigenes, &AppConfig::default());
+        assert_eq!(merged.tournament_logo.data, "RUlHRU4=");
+        assert!(!merged.tournament_logo.von_badhub);
+        assert!(merged.tournament_logo.badhub_md5.is_empty());
     }
 
     #[test]
