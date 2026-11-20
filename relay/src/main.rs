@@ -11522,6 +11522,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn die_rueckgabe_an_badhub_kommt_nur_von_tl_geraeten_durch() {
+        // Der Kern-Zugang darf die Steuerung nicht über den Turnier-PC
+        // zurückgeben — badhub holt sie über seine eigene Oberfläche.
+        assert!(!kern_zugang_passt(
+            relay_proto::TL_GERAET_KERN,
+            &TlAction::BadhubZurueckgeben
+        ));
+        assert!(kern_zugang_passt("tl-1", &TlAction::BadhubZurueckgeben));
+
+        let (broker, mut host_rx, _host) = broker_mit_kern_zugang().await;
+        let nein = tl_command_route(
+            State(broker.clone()),
+            bearer_kopf("token-kern"),
+            Json(TlCommandBody {
+                op_id: "op".into(),
+                view_rev: 0,
+                action: TlAction::BadhubZurueckgeben,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(nein.status(), StatusCode::FORBIDDEN);
+        assert!(host_rx.try_recv().is_err());
+
+        // Vom TL-Gerät reicht der Relay die Aktion unverändert durch —
+        // geprüft wird am Turnier-PC.
+        let b = broker.clone();
+        let auftrag = tokio::spawn(async move {
+            tl_command_route(
+                State(b),
+                bearer_kopf("token-tl"),
+                Json(TlCommandBody {
+                    op_id: "badhub-zurueck-1".into(),
+                    view_rev: 0,
+                    action: TlAction::BadhubZurueckgeben,
+                }),
+            )
+            .await
+            .into_response()
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("kein Kommando")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text erwartet")
+        };
+        let frame: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
+        let RelayFrame::TlCommand { action, .. } = frame else {
+            panic!("TlCommand erwartet");
+        };
+        assert_eq!(action, TlAction::BadhubZurueckgeben);
+        auftrag.abort();
+    }
+
+    #[tokio::test]
     async fn a_command_reaches_the_host_and_its_answer_comes_back() {
         let (broker, mut host_rx, host) = broker_with_tl_device("token").await;
         let broker2 = broker.clone();

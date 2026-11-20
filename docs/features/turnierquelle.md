@@ -4,6 +4,8 @@
 > Paket L2 umgesetzt (v0.9.449): Quelle `badhub` lesend — Kopplung, Turnierpaket, Kern-Faltung, Wizard-Schritt.
 > Paket L3 umgesetzt (v0.9.450): Schreibpfad über Kernbefehle, lokales Protokoll, Lease, Outbox, Relay-Aktion
 > `KernBefehl` für Eingaben aus badhub, LAN-Slave liest vom Master, Stores an der Turnier-UUID.
+> v0.9.451: Rückgabe der Steuerung auch aus dem TL-Web (`TlAction::BadhubZurueckgeben`); Turnierpaket in Teilen
+> (badhub kappt auf 2000 Ereignisse, bts-light lädt seitenweise nach).
 > Ziel und Gesamtplan: badhub `docs/features/bts_light_steuerung.md`, Entscheidung badhub ADR-0084 (bts-light hält am
 > Turniertag die Lease eines badhub-Turniers).
 
@@ -49,7 +51,7 @@ nicht die eingestellte Quelle.
 | Der eine Abzweig beim Start | `quelle::starten(config, daten)` → `QuellenStart { kern_abgleich, btp_dienste }` in `start_sync_kern`. Bei BTP startet nichts Neues; bei badhub wird das Turnier von der Platte geladen und `quelle::badhub::abgleich_schleife` gestartet, TP-Takt und TP-Datei-Suche nicht |
 | Lesen | `quelle::stand` → `quelle::badhub::stand` → `KernQuelle::stand` = `turnierkern::falten_turnier` + `abbildung::abbilden` (zwischengespeichert, bis neue Ereignisse oder Stammdaten kommen) |
 | Kopplung | Tauri-Command `badhub_koppeln(code, geraet_name)` → `POST koppeln {code, install_id, name}` → `GET turnier/paket` → Ablage → `config.badhub_turnier`. `badhub_turnier_info` für den Assistenten |
-| Abgleich | alle 5 s `GET turnier/ereignisse?ab=<n>&max=500`, alle 60 s `GET turnier/paket` mit `If-None-Match` (ETag-Header, sonst `stammdaten_etag`). Offline bleibt der letzte Stand; 401/403 hält den Abgleich bis zum nächsten Start an |
+| Abgleich | alle 5 s `GET turnier/ereignisse?ab=<n>&max=500` (seitenweise bis zum Kopf, siehe „Paket in Teilen“), alle 60 s `GET turnier/paket` mit `If-None-Match` (ETag-Header, sonst `stammdaten_etag`). Offline bleibt der letzte Stand; 401/403 hält den Abgleich bis zum nächsten Start an |
 | API-Basis | aus der Push-Adresse (`badhub.url`, folgt damit dem Testsystem-Schalter) + `/api/torg/v1`, beim Koppeln in `badhub_turnier.basis` festgehalten — das Token geht nie an das andere System. Nur `https://` (Ausnahme `localhost`/`127.0.0.1` für Tests) |
 | Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.14.0`), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht, solange das Protokoll keine Ereignisarten enthält, die diese Version nicht kennt (neue Befehle eines neueren Kerns, z. B. `zaehlweise_festlegen` ab 0.14.0, lassen das Falten scheitern — deshalb bts-light zusammen mit dem Kern in badhub aktualisieren), Schreiben (L3) verlangt Gleichstand |
 
@@ -134,7 +136,8 @@ zur Generalprobe E1 nicht produktiv.
 ### Abstimmung mit badhub (B1)
 
 - Gebaut gegen das Spec-Format; getestet gegen eine Attrappe (`quelle/badhub/tests.rs`).
-- `GET turnier/ereignisse`: Hülle nicht festgelegt — gelesen wird eine Liste oder `{ "ereignisse": [...] }`.
+- `GET turnier/ereignisse`: gelesen wird eine Liste, `{ "ereignisse": [...] }` oder (seit dem Paket in Teilen)
+  `{ "ab", "n", "ereignisse" }` mit dem Kopf `n`.
 - `runden`: Schlüssel = Spielnummer (als Text).
 - Feldnamen in `rahmen.hallen[].felder`: mit oder ohne Hallenpräfix; maßgeblich ist das Kern-Feld aus `spiel_aufrufen`.
 - `POST koppeln`: 400/401/403/404/409/410/422 gelten als „Code ungültig“, 429 als Drossel.
@@ -182,9 +185,10 @@ Zeiten: lokale Wandzeit des Hallen-PCs `JJJJ-MM-TTTHH:MM:SS` (`schreiben::wandze
   für den Übernahme-Weg vorbereitet (`lease_ablehnung_text`).
 - Weiterleitung aus badhub B2 (`{"opId", "viewRev": 0, "action": {"action": "kern_befehl", "befehl": {"id", "art", …}}}`
   ohne `jetzt`) wird genau so angenommen (Test `weiterleitung_von_badhub_b2_genau_so_wie_gesendet`).
-- Rückgabe (Knopf **Turnier beenden / Steuerung an badhub zurückgeben**, Tauri `badhub_turnier_beenden`): nur mit leerer
-  Outbox, `DELETE turnier/lease {epoche, n}`, danach Zustand `zurueckgegeben`, Kern-Zugang weg, Personenauszug gelöscht.
-  Kein automatisches Neunehmen nach Neustart.
+- Rückgabe (Knopf **Turnier beenden / Steuerung an badhub zurückgeben**, Tauri `badhub_turnier_beenden`; seit v0.9.451
+  auch **Turnier beenden** im TL-Web, siehe unten): nur mit leerer Outbox, `DELETE turnier/lease {epoche, n}`, danach
+  Zustand `zurueckgegeben`, Kern-Zugang weg, Personenauszug gelöscht. Kein automatisches Neunehmen nach Neustart. Bei
+  offener Outbox lautet die Ablehnung „N Ereignisse warten noch auf den Abgleich mit badhub …“ (`text_outbox_offen`).
 - **Steuerung wieder übernehmen** (`badhub_steuerung_uebernehmen`, nach Rückgabe oder Rückholung): eigene, nicht
   bestätigte Posten wandern nach `verworfen-<ms>.jsonl`, Paket frisch von badhub, Lease weg — der Abgleich nimmt sie neu.
 
@@ -218,3 +222,52 @@ Antwort `ok`, `kern_abgelehnt` (+ `ablehnung`), `not_allowed` (keine Lease) oder
 - B2 schickt Kernbefehle mit `op_id` = Befehls-ID; `jetzt` darf fehlen. Erwartete Antworten wie oben; `host_offline`
   bzw. Zeitüberschreitung → Hinweis „Halle nicht erreichbar“.
 - Befehle aus bts-light tragen kein Feld `geraet`: Wer in der Halle gehandelt hat, steht nur lokal im Protokoll.
+
+## Rückgabe aus dem TL-Web (v0.9.451)
+
+| Was | Wo |
+|---|---|
+| Aktion | `relay-proto` `TlAction::BadhubZurueckgeben` (`{"action": "badhub_zurueckgeben"}`, ohne Felder, Serde-Roundtrip) |
+| Relay | reicht durch; `kern_zugang_passt` lässt den Kern-Zugang `badhub-kern` nur `KernBefehl` senden → `403` |
+| Host | `tablet/tl.rs` `execute`: Kern-Zugang abgelehnt (vor allem anderen), dann `badhub_rueckgabe_erlaubt` (Quelle badhub, kein Slave) und `quelle::badhub::turnier_beenden` — derselbe Weg wie der Desktop-Knopf; Antwort `badhub_rueckgabe_antwort` (`not_allowed` + Klartext) |
+| Merkmal | `TlState.can_return_badhub`; Knopf `#bh-beenden` in `assets/tl.html` nur mit `badhub_abgleich.zustand` `aktuell`/`wartet`, Rückfrage, bei `wartend > 0` sofort „N Ereignisse warten noch …“ |
+| Rechte | Das TL-Web hat kein abgestuftes Rechtemodell: Profile blenden nur aus (kein Zugriffsschutz), `TlDevice.hall` wird nicht erzwungen. Deshalb darf **jedes gekoppelte TL-Gerät** zurückgeben — dieselbe Vertrauensstufe, die Ergebnisse eintragen und überschreiben darf. Nur der Kern-Zugang darf es nicht: badhub holt die Steuerung über seine eigene Oberfläche zurück |
+
+## Paket in Teilen (v0.9.451)
+
+badhub kappt `GET turnier/paket` auf höchstens 2000 Ereignisse und liefert neben dem Kopf `n` das letzte enthaltene
+`ereignisse_bis_n`. Der Rest kommt über `GET turnier/ereignisse?ab=<n>&max=500` (`{ab, n, ereignisse}`).
+
+- **Lesen:** `api::paket` liest `n`/`ereignisse_bis_n` aus derselben Antwort (`PaketKopf`, nicht Teil von `Paket` —
+  `paket.json` behält sein Format) und meldet `PaketAntwort::Neu.nachladen_bis`. Fehlt `ereignisse_bis_n` (altes
+  badhub) oder ist `ereignisse_bis_n >= n`, gilt das Paket als vollständig.
+- **Seitenweise:** `seiten_holen` fragt ab dem lokalen `n`, bis der Kopf erreicht ist; der Kopf jeder Antwort geht dem
+  des Pakets vor (badhub kann inzwischen weiter sein). Maßgeblich ist der Kopf, nicht die Seitenlänge — eine kurze Seite
+  heißt nur bei einem badhub ohne Kopf „Ende“. Jede Seite wird sofort abgelegt; leere Seite oder kein Fortschritt
+  beendet den Durchlauf, höchstens 400 Seiten am Stück.
+- **Koppeln** (`koppeln`) und **Steuerung wieder übernehmen** (`uebernehmen_in`) laden nach (`paket_nachladen`). Bricht
+  das Netz mittendrin ab, bleibt ein lückenloser Anfang liegen: Die Kopplung gilt trotzdem (der Code ist eingelöst), der
+  Assistent zeigt `Kopplung.nachlade_hinweis`, der Abgleich holt den Rest. 401/403 beim Nachladen bricht ab.
+- **Vor `POST turnier/lease`:** Der Abgleich (`abgleich_schritt_in`) nimmt die Lease nur mit vollständigem Stand; sonst
+  bleibt der Hinweis „Stand wird von badhub nachgeladen“ bzw. der Netzfehler stehen. So stimmt `n` beim ersten Versuch
+  (früher heilte `n_veraltet` erst über mehrere Takte).
+- **Stammdaten-Abruf alle 60 s:** braucht kein Nachladen — die Ereignisse werden mit den gespeicherten vereinigt, das
+  Paket ist immer ein Anfang ohne Lücke, und was fehlt, holt der nächste Takt ab `n`.
+- **Jeder Pfad, der das Paket ersetzt oder lädt,** endet bei „seitenweise bis `n`, dann erst Lease“: Koppeln und
+  Übernehmen laden selbst nach, der Start (`KernQuelle::laden`) und der 60-s-Abruf überlassen den Rest dem Abgleich,
+  der ohne vollständigen Stand keine Lease nimmt; die Outbox läuft ohnehin nur unter einer Lease.
+- **Befund aus v0.9.450 (behoben):** „Steuerung wieder übernehmen“ ersetzte das Paket, ließ aber bestätigte Posten im
+  Protokoll. Trug badhubs gekapptes Paket weniger, als der PC bestätigt hatte, zählten sie als „wartend“ — kein
+  Nachladen, keine Lease, keine Outbox, Neu-Koppeln abgewiesen. Jetzt leert `uebernehmen_in` das Protokoll nach dem
+  Verwerfen des Nicht-Angekommenen (der Rest ist bestätigt und kommt von badhub zurück), und `KernQuelle::laden` räumt
+  einen so hängenden Stand ohne Lease (`protokoll_ohne_lease_raeumen`: was über dem Paket liegt, gesichert nach
+  `verworfen-<ms>.jsonl`).
+- **Rückgabe nur einmal zugleich:** `zurueckgeben_in` sperrt über `rueckgabe_laeuft` (auch bei Abbruch freigegeben).
+  Ein zweiter, gleichzeitiger `DELETE` bekäme sonst `epoche_veraltet`, würde als Rückholung gewertet und holte mit dem
+  nächsten Paket die Namen zurück.
+- Tests: `gekapptes_paket_wird_beim_koppeln_seitenweise_nachgeladen`,
+  `abbruch_beim_nachladen_laesst_einen_lueckenlosen_anfang_den_der_abgleich_ergaenzt` (`tests.rs`),
+  `lease_erst_wenn_der_stand_bis_zum_kopf_nachgeladen_ist`,
+  `uebernehmen_mit_mehr_bestaetigten_als_das_gekappte_paket_traegt_laedt_nach_und_nimmt_die_lease`,
+  `haengender_stand_aus_v0_9_450_heilt_beim_laden`, `gleichzeitige_rueckgabe_bleibt_zurueckgegeben_und_holt_keine_namen_zurueck`
+  (`tests_l3.rs`).

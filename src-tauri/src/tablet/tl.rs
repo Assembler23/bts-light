@@ -1914,6 +1914,19 @@ pub(crate) async fn execute(
         return TlResponse::err(C::NotAllowed, "Dieser Zugang darf nur Kernbefehle senden.");
     }
 
+    // „Turnier beenden / Steuerung an badhub zurückgeben“ (Paket L3) —
+    // derselbe Weg wie der Knopf im Hauptfenster. Bewusst ohne
+    // Wiederholungs-Speicher: Die Rückgabe trägt ihren Zielzustand, ein
+    // zweiter Druck nach Erfolg bekommt „hält die Steuerung nicht“.
+    if let relay_proto::TlAction::BadhubZurueckgeben = &action {
+        let config = ctx.app_config();
+        let ergebnis = match badhub_rueckgabe_erlaubt(&config) {
+            Ok(()) => crate::quelle::badhub::turnier_beenden().await,
+            Err(text) => Err(text),
+        };
+        return badhub_rueckgabe_antwort(&device.id, ergebnis);
+    }
+
     // Wiederholung? Dann die gespeicherte Antwort, ohne erneut zu schreiben.
     // Ein Doppeltipp bei träger Verbindung schickt dieselbe Aktion zweimal;
     // ohne diese Prüfung landete sie zweimal in BTP. Der Fingerabdruck stellt
@@ -2177,6 +2190,42 @@ pub(crate) async fn execute(
             // Fehlgeschlagene Schreibvorgänge werden NICHT gemerkt: Ein
             // erneuter Versuch soll es wirklich noch einmal versuchen.
             crate::quelle::schreib_ablehnung(&config, &e)
+        }
+    }
+}
+
+/// Darf dieser Turnier-PC die Steuerung aus dem TL-Web zurückgeben? Nur bei
+/// Quelle badhub am Master. Welches **Gerät** es darf, ist schon vorher
+/// entschieden: jedes gekoppelte TL-Gerät — das Rechtemodell des TL-Web
+/// kennt keine Abstufung (Profile blenden nur aus, die Hallenbindung ist
+/// nicht erzwungen) —, nie der Kern-Zugang `badhub-kern`.
+fn badhub_rueckgabe_erlaubt(config: &AppConfig) -> Result<(), String> {
+    if config.slave_mode {
+        return Err(
+            "Dieser Rechner ist ein Ansage-Slave — die Steuerung gibt nur der Turnier-PC zurück."
+                .into(),
+        );
+    }
+    if config.quelle != crate::config::QuelleArt::Badhub {
+        return Err("Dieser PC steuert kein badhub-Turnier.".into());
+    }
+    Ok(())
+}
+
+/// Antwort auf `BadhubZurueckgeben`: Erfolg, sonst der Grund im Klartext —
+/// bei offener Outbox „N Ereignisse warten noch …“.
+fn badhub_rueckgabe_antwort(
+    geraet: &str,
+    ergebnis: Result<String, String>,
+) -> relay_proto::TlResponse {
+    match ergebnis {
+        Ok(_) => {
+            tracing::info!("TL-Web [{geraet}]: Steuerung an badhub zurückgegeben");
+            relay_proto::TlResponse::ok(0)
+        }
+        Err(text) => {
+            tracing::info!("TL-Web [{geraet}]: Rückgabe an badhub abgelehnt ({text})");
+            relay_proto::TlResponse::err(relay_proto::TlErrorCode::NotAllowed, text)
         }
     }
 }
@@ -2772,6 +2821,9 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::ProfileDelete { profile_id } => format!("profile-delete:{profile_id}"),
         A::ProfileSelect { profile_id } => format!("profile-select:{profile_id}"),
         A::ProfileSetDefault { profile_id } => format!("profile-default:{profile_id}"),
+        // Ohne Nutzlast: Die Idempotenz hängt an der Vorgangs-Kennung (die
+        // Seite vergibt sie je Druck neu).
+        A::BadhubZurueckgeben => "badhub-zurueck".to_string(),
         // Die Befehls-ID trägt die Identität; der Kern ist ohnehin idempotent.
         A::KernBefehl { befehl } => format!(
             "kern:{}",
@@ -2923,6 +2975,7 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         A::ProfileSetDefault { profile_id } => {
             format!("Profil {profile_id} als Standard gesetzt")
         }
+        A::BadhubZurueckgeben => "Steuerung an badhub zurückgeben".to_string(),
         // Nur Art und Kennung: der Befehl selbst trägt keine Namen, aber
         // kurz bleibt das Protokoll lesbar.
         A::KernBefehl { befehl } => format!(
@@ -3266,6 +3319,13 @@ pub struct TlState {
     /// am Relay-Timeout. Ohne es zeigt die Seite kein Suchfeld.
     #[serde(default)]
     pub can_search: bool,
+    /// Kennt dieser Turnier-PC die Rückgabe der Steuerung an badhub
+    /// ([`relay_proto::TlAction::BadhubZurueckgeben`])? Der Relay liefert die
+    /// neue Seite sofort aus, der Turnier-PC kommt erst mit dem Tag — ohne
+    /// dieses Merkmal zeigt die Seite den Knopf nicht. Sichtbar wird er nur
+    /// zusammen mit [`Self::badhub_abgleich`] und aktiver Lease.
+    #[serde(default)]
+    pub can_return_badhub: bool,
     /// Wohin die badhub-Links dieser Seite zeigen (Spielernamen, Konkurrenz,
     /// Turnierseite, Liveticker). `None`, wenn die Push-Adresse unbrauchbar
     /// ist — und bei einem älteren Host: Die Seite fällt dann auf ihren
@@ -4762,6 +4822,7 @@ pub(crate) fn build_state_limited(
             can_reload_tablets: true,
             can_clear_official_call: true,
             can_search: true,
+            can_return_badhub: true,
             halls: Vec::new(),
             auto_assign: auto_assign_view(config, tablet.auto_assign_paused()),
             hall_prefill: Some(hall_prefill_view(config, 0, false)),
@@ -5141,6 +5202,7 @@ pub(crate) fn build_state_limited(
         can_reload_tablets: true,
         can_clear_official_call: true,
         can_search: true,
+        can_return_badhub: true,
         badhub: badhub_links(config),
         badhub_abgleich: badhub_abgleich(config),
         finished_warning_seconds: config.finished_warning_seconds,
@@ -12620,6 +12682,9 @@ mod tests {
             // Fähigkeitsmerkmal (Spec tl-spielersuche): reines Bool „dieser
             // Turnier-PC kennt die Spielersuche".
             "can_search",
+            // Fähigkeitsmerkmal (v0.9.451): reines Bool „dieser Turnier-PC
+            // kennt die Rückgabe der Steuerung an badhub".
+            "can_return_badhub",
             // Ziele der badhub-Links (Spielernamen, Konkurrenz,
             // Turnierseite): Host aus der Push-Adresse, Turnier-GUID
             // (steht ohnehin öffentlich auf turnier.de und im Check-In-
@@ -13942,5 +14007,38 @@ mod tests {
             json.contains("sabine schiedsmann"),
             "der Schiedsrichter-Name muss transportiert werden"
         );
+    }
+
+    #[test]
+    fn badhub_rueckgabe_nur_am_master_mit_quelle_badhub_und_klare_rueckmeldung() {
+        let mut cfg = AppConfig::default();
+        let e = badhub_rueckgabe_erlaubt(&cfg).unwrap_err();
+        assert!(e.contains("kein badhub-Turnier"), "{e}");
+        cfg.quelle = crate::config::QuelleArt::Badhub;
+        assert!(badhub_rueckgabe_erlaubt(&cfg).is_ok());
+        cfg.slave_mode = true;
+        assert!(badhub_rueckgabe_erlaubt(&cfg)
+            .unwrap_err()
+            .contains("Ansage-Slave"));
+
+        // Offene Outbox: Ablehnung mit „N Ereignisse warten noch“.
+        let r = badhub_rueckgabe_antwort("tl-1", Err(crate::quelle::badhub::text_outbox_offen(3)));
+        assert!(!r.ok);
+        assert_eq!(r.code, Some(relay_proto::TlErrorCode::NotAllowed));
+        assert!(
+            r.error
+                .as_deref()
+                .unwrap()
+                .starts_with("3 Ereignisse warten noch"),
+            "{r:?}"
+        );
+        assert!(badhub_rueckgabe_antwort("tl-1", Ok("ok".into())).ok);
+
+        // Fingerabdruck und Protokoll-Etikett ohne Nutzlast.
+        assert_eq!(
+            action_fingerprint(&relay_proto::TlAction::BadhubZurueckgeben),
+            "badhub-zurueck"
+        );
+        assert!(action_label(&relay_proto::TlAction::BadhubZurueckgeben).contains("badhub"));
     }
 }

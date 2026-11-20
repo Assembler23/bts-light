@@ -214,6 +214,8 @@ pub struct KernQuelle {
     pub(crate) slave_schluessel: Option<String>,
     /// Am Slave: die vom Master geholten Ereignisse.
     slave_ereignisse: Vec<TurnierEreignis>,
+    /// Eine Rückgabe (`DELETE turnier/lease`) ist unterwegs.
+    rueckgabe_laeuft: bool,
 }
 
 // Debug von Hand: Gerätetoken und Relay-Zugang erscheinen nie im Klartext,
@@ -270,14 +272,40 @@ impl KernQuelle {
             id_zaehler: 0,
             slave_schluessel: None,
             slave_ereignisse: Vec::new(),
+            rueckgabe_laeuft: false,
         })
         .map(|mut q: Self| {
+            q.protokoll_ohne_lease_raeumen();
             q.slave_schluessel = q
                 .ablage
                 .geheimnis_laden(slave::SCHLUESSEL_DATEI)
                 .and_then(|s| slave::schluessel_normal(&s));
             q
         })
+    }
+
+    /// Ohne Lease kann kein Posten mehr hochgeladen werden (die Outbox
+    /// braucht eine Epoche) — Posten im Protokoll sind dann von badhub
+    /// bestätigte Reste. Liegen sie über einem gekappten Paket, zählten sie
+    /// als „wartend“: kein Nachladen, keine Lease, kein Neu-Koppeln
+    /// (v0.9.450 nach „Steuerung wieder übernehmen“ mit mehr als 2000
+    /// Ereignissen). Deshalb räumen: was das Paket schon trägt, ersatzlos;
+    /// was darüber liegt, mit Sicherung in `verworfen-<ms>.jsonl` — es kommt
+    /// über das seitenweise Nachladen von badhub zurück.
+    fn protokoll_ohne_lease_raeumen(&mut self) {
+        if self.lease.is_some() || self.protokoll.posten().is_empty() {
+            return;
+        }
+        let r = self
+            .protokoll
+            .kuerzen_auf(self.paket.n(), jetzt_ms())
+            .and_then(|gesichert| self.protokoll.leeren().map(|()| gesichert));
+        match r {
+            Ok(gesichert) => tracing::info!(
+                "Quelle badhub: Protokoll ohne Lease geräumt ({gesichert} Posten über dem Paket gesichert)"
+            ),
+            Err(e) => tracing::warn!("Quelle badhub: Protokoll ohne Lease nicht geräumt ({e})"),
+        }
     }
 
     /// Alle Ereignisse: von badhub bestätigte (Paket) und die eigenen aus
@@ -1125,60 +1153,187 @@ pub fn abgleich_lage() -> Option<Abgleich> {
     zustand().as_ref().map(KernQuelle::abgleich)
 }
 
+/// Höchstzahl Seiten, die ein Nachladen am Stück holt (je [`api::SEITE`]
+/// Ereignisse) — Schutz gegen ein badhub, das nie „fertig“ meldet.
+const MAX_SEITEN: usize = 400;
+
+/// Holt Ereignisse seitenweise ab `ab` (`GET turnier/ereignisse?ab=&max=`),
+/// bis der Kopf `n` erreicht ist (badhub kappt das Paket auf 2000
+/// Ereignisse). `ziel` = bekannter Kopf (aus dem Paket), der Kopf jeder
+/// Antwort geht vor. `uebernehmen` legt eine Seite ab und liefert das neue
+/// lokale `n` — jede Seite ist sofort gesichert, ein Abbruch mittendrin
+/// verliert nichts (Ereignisse kommen lückenlos ab `n`).
+///
+/// Liefert, ob der Stand vollständig ist. Ohne Kopf (badhub vor dem Paket
+/// in Teilen) gilt eine nicht volle Seite als Ende.
+async fn seiten_holen(
+    basis: &str,
+    token: &str,
+    mut ab: u64,
+    ziel: Option<u64>,
+    mut uebernehmen: impl FnMut(Vec<TurnierEreignis>) -> u64,
+) -> Result<bool, api::ApiFehler> {
+    let mut ziel = ziel;
+    for _ in 0..MAX_SEITEN {
+        if ziel.is_some_and(|z| ab >= z) {
+            return Ok(true);
+        }
+        let seite = api::ereignisse(basis, token, ab).await?;
+        if seite.kopf.is_some() {
+            ziel = seite.kopf;
+        }
+        let voll = seite.ereignisse.len() >= api::SEITE;
+        if seite.ereignisse.is_empty() {
+            return Ok(ziel.is_none_or(|z| ab >= z));
+        }
+        let neu_n = uebernehmen(seite.ereignisse);
+        if neu_n <= ab {
+            // Kein Fortschritt (nur schon bekannte Nummern): nicht weiter
+            // fragen, der nächste Takt versucht es neu.
+            return Ok(ziel.is_none_or(|z| neu_n >= z));
+        }
+        ab = neu_n;
+        match ziel {
+            Some(z) if ab >= z => return Ok(true),
+            Some(_) => {}
+            None if !voll => return Ok(true),
+            None => {}
+        }
+    }
+    Ok(false)
+}
+
+/// Lädt ein gekapptes Paket bis `bis` nach. Ein Abbruch (offline) lässt das
+/// Paket teilweise stehen — der Abgleich holt den Rest vor der Lease nach.
+/// Liefert einen Hinweis, wenn es unvollständig blieb.
+async fn paket_nachladen(
+    basis: &str,
+    token: &str,
+    paket: &mut Paket,
+    bis: Option<u64>,
+) -> Result<Option<String>, api::ApiFehler> {
+    let Some(bis) = bis else {
+        return Ok(None);
+    };
+    let ab = paket.n();
+    let r = seiten_holen(basis, token, ab, Some(bis), |neu| {
+        paket.ereignisse_anhaengen(neu);
+        paket.n()
+    })
+    .await;
+    let hinweis = || {
+        format!(
+            "Turnierstand erst bis Ereignis {} von {bis} geladen — der Rest kommt mit der              Übertragung nach, bevor bts-light die Steuerung übernimmt.",
+            paket.n()
+        )
+    };
+    match r {
+        Ok(true) => Ok(None),
+        Ok(false) => Ok(Some(hinweis())),
+        Err(api::ApiFehler::Zugang) => Err(api::ApiFehler::Zugang),
+        Err(e) => {
+            tracing::info!("Quelle badhub: Paket nur teilweise nachgeladen ({e})");
+            Ok(Some(hinweis()))
+        }
+    }
+}
+
+/// Ein Schritt des Abgleichs gegen den globalen Zustand.
+async fn abgleich_schritt(paket_faellig: bool, relay_ns: Option<&str>) -> bool {
+    abgleich_schritt_in(&ZUSTAND, paket_faellig, relay_ns).await
+}
+
 /// Ein Schritt des Abgleichs; reine Netzarbeit außerhalb der Sperre.
 ///
-/// Ohne aktive, angemeldete Lease holt er neue Ereignisse und nimmt die
-/// Lease (`POST turnier/lease`). Unter der Lease holt er keine Ereignisse —
-/// neue gibt es dann nur von diesem PC —, nur alle 60 s die Stammdaten.
-async fn abgleich_schritt(paket_faellig: bool, relay_ns: Option<&str>) -> bool {
-    let Some((basis, token, n, etag)) = zustand().as_ref().and_then(KernQuelle::zugang) else {
+/// Ohne aktive, angemeldete Lease holt er neue Ereignisse — seitenweise,
+/// bis der Kopf von badhub erreicht ist — und nimmt erst dann die Lease
+/// (`POST turnier/lease`, das `n` muss passen). Unter der Lease holt er
+/// keine Ereignisse — neue gibt es dann nur von diesem PC —, nur alle 60 s
+/// die Stammdaten.
+pub(crate) async fn abgleich_schritt_in(
+    z: &Mutex<Option<KernQuelle>>,
+    paket_faellig: bool,
+    relay_ns: Option<&str>,
+) -> bool {
+    let sperre = || z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some((basis, token, n, etag)) = sperre().as_ref().and_then(KernQuelle::zugang) else {
         return false;
     };
-    let ereignisse_holen = zustand().as_ref().is_some_and(|q| {
+    let ereignisse_holen = sperre().as_ref().is_some_and(|q| {
         let unter_lease = q.lease.as_ref().is_some_and(Lease::aktiv) && q.lease_angemeldet;
         let entzogen = q.lease.as_ref().is_some_and(|l| !l.aktiv());
         !unter_lease && q.wartende_posten() == 0 && !entzogen
     });
     let mut paket_geholt = false;
+    let mut vollstaendig = true;
     if ereignisse_holen {
-        match api::ereignisse(&basis, &token, n).await {
-            Ok(neu) if !neu.is_empty() => {
-                if let Some(q) = zustand().as_mut() {
-                    let zahl = q.ereignisse_uebernehmen(neu);
-                    if zahl > 0 {
-                        tracing::info!(
-                            "Quelle badhub: {zahl} neue Ereignisse (bis n={})",
+        let r = seiten_holen(&basis, &token, n, None, |neu| match sperre().as_mut() {
+            Some(q) => {
+                let zahl = q.ereignisse_uebernehmen(neu);
+                if zahl > 0 {
+                    tracing::info!(
+                        "Quelle badhub: {zahl} neue Ereignisse (bis n={})",
+                        q.paket.n()
+                    );
+                }
+                q.paket.n()
+            }
+            None => 0,
+        })
+        .await;
+        match r {
+            Ok(fertig) => {
+                vollstaendig = fertig;
+                if !fertig {
+                    if let Some(q) = sperre().as_mut().filter(|q| q.lease.is_none()) {
+                        q.lease_hinweis = Some(format!(
+                            "Stand wird von badhub nachgeladen (bis Ereignis {})",
                             q.paket.n()
-                        );
+                        ));
                     }
                 }
             }
-            Ok(_) => {}
             Err(api::ApiFehler::Zugang) => {
                 tracing::warn!("Quelle badhub: Zugang abgelehnt (401/403) — Abgleich angehalten");
-                if let Some(q) = zustand().as_mut() {
+                if let Some(q) = sperre().as_mut() {
                     q.zugang_abgelehnt = true;
                 }
                 return false;
             }
-            // Offline: letzter Stand bleibt, kein Lärm im Log.
-            Err(e) => tracing::debug!("Quelle badhub: Ereignisse nicht abgeholt ({e})"),
+            // Offline: letzter Stand bleibt, kein Lärm im Log. Was bis zum
+            // Abbruch kam, ist schon abgelegt. Die Lease wartet, bis der
+            // Stand vollständig ist — sonst stimmte `n` nicht.
+            Err(e) => {
+                tracing::debug!("Quelle badhub: Ereignisse nicht abgeholt ({e})");
+                vollstaendig = false;
+                if let Some(q) = sperre().as_mut().filter(|q| q.lease.is_none()) {
+                    q.lease_hinweis = Some(format!("{e}"));
+                }
+            }
         }
     }
-    // Lease nehmen bzw. anmelden (nicht am Slave — der startet keinen Abgleich).
-    let bedarf = zustand().as_mut().and_then(|q| q.lease_bedarf(relay_ns));
+    // Lease nehmen bzw. anmelden (nicht am Slave — der startet keinen
+    // Abgleich), nur mit vollständigem Stand.
+    let bedarf = if vollstaendig {
+        sperre().as_mut().and_then(|q| q.lease_bedarf(relay_ns))
+    } else {
+        None
+    };
     if let Some((n, relay)) = bedarf {
         let antwort = api::lease_nehmen(&basis, &token, n, relay.as_ref()).await;
-        if let Some(q) = zustand().as_mut() {
+        if let Some(q) = sperre().as_mut() {
             q.lease_antwort(antwort, relay);
         }
     }
     if paket_faellig {
+        // Ein gekapptes Paket braucht hier kein Nachladen: Die Ereignisse
+        // werden mit den gespeicherten vereinigt, und was fehlt, holt der
+        // nächste Takt ab `n` (das Paket ist immer ein Anfang ohne Lücke).
         match api::paket(&basis, &token, etag.as_deref()).await {
             Ok(api::PaketAntwort::Unveraendert) => paket_geholt = true,
-            Ok(api::PaketAntwort::Neu { paket, etag }) => {
+            Ok(api::PaketAntwort::Neu { paket, etag, .. }) => {
                 paket_geholt = true;
-                if let Some(q) = zustand().as_mut() {
+                if let Some(q) = sperre().as_mut() {
                     // Zurückgegeben: Der Personenauszug ist gelöscht und
                     // bleibt es — das Paket kommt erst mit „übernehmen“.
                     let zurueck = q
@@ -1194,7 +1349,7 @@ async fn abgleich_schritt(paket_faellig: bool, relay_ns: Option<&str>) -> bool {
                 }
             }
             Err(api::ApiFehler::Zugang) => {
-                if let Some(q) = zustand().as_mut() {
+                if let Some(q) = sperre().as_mut() {
                     q.zugang_abgelehnt = true;
                 }
             }
@@ -1293,26 +1448,46 @@ pub async fn outbox_schleife() {
 /// gelöscht.
 pub(crate) async fn zurueckgeben_in(z: &Mutex<Option<KernQuelle>>) -> Result<String, String> {
     let auftrag = {
-        let g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let q = g.as_ref().ok_or("Kein badhub-Turnier geladen.")?;
-        let l = q
+        let mut g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let q = g.as_mut().ok_or("Kein badhub-Turnier geladen.")?;
+        let epoche = q
             .lease
             .as_ref()
             .filter(|l| l.aktiv())
-            .ok_or("bts-light hält die Steuerung dieses Turniers nicht.")?;
+            .ok_or("bts-light hält die Steuerung dieses Turniers nicht.")?
+            .epoche;
         let wartend = q.wartende_ereignisse();
         if wartend > 0 {
-            return Err(format!(
-                "Es warten noch {wartend} Ereignisse auf den Abgleich mit badhub — bitte mit \
-                 Internet warten, bis „badhub: aktuell“ steht."
-            ));
+            return Err(text_outbox_offen(wartend));
+        }
+        // Höchstens eine Rückgabe zugleich (Hauptfenster, mehrere TL-Geräte,
+        // Doppeltipp): Ein zweiter `DELETE` bekäme `epoche_veraltet`, und das
+        // sähe aus wie eine Rückholung.
+        if q.rueckgabe_laeuft {
+            return Err("Die Rückgabe läuft schon — bitte kurz warten.".into());
         }
         let token = q
             .token
             .clone()
             .ok_or("Kein Gerätetoken — bitte neu koppeln.")?;
-        (q.basis.clone(), token, l.epoche, q.n_bestaetigt())
+        q.rueckgabe_laeuft = true;
+        (q.basis.clone(), token, epoche, q.n_bestaetigt())
     };
+    // Freigabe auch, wenn der Aufruf abgebrochen wird (Gerät trennt).
+    struct Frei<'a>(&'a Mutex<Option<KernQuelle>>);
+    impl Drop for Frei<'_> {
+        fn drop(&mut self) {
+            if let Some(q) = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_mut()
+            {
+                q.rueckgabe_laeuft = false;
+            }
+        }
+    }
+    let _frei = Frei(z);
     let (basis, token, epoche, n) = auftrag;
     let r = api::lease_zurueckgeben(&basis, &token, epoche, n).await;
     let mut g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1347,7 +1522,22 @@ pub(crate) async fn zurueckgeben_in(z: &Mutex<Option<KernQuelle>>) -> Result<Str
     }
 }
 
-/// Globaler Weg für den Knopf im Hauptfenster.
+/// Rückmeldung, wenn die Rückgabe an der Outbox scheitert („N Ereignisse
+/// warten noch“) — gleich im Hauptfenster und im TL-Web.
+pub fn text_outbox_offen(wartend: usize) -> String {
+    let (wort, verb) = if wartend == 1 {
+        ("Ereignis", "wartet")
+    } else {
+        ("Ereignisse", "warten")
+    };
+    format!(
+        "{wartend} {wort} {verb} noch auf den Abgleich mit badhub — die Rückgabe geht erst, wenn \
+         „badhub: aktuell“ steht. Bitte mit Internet kurz warten."
+    )
+}
+
+/// Globaler Weg für den Knopf im Hauptfenster und im TL-Web
+/// (`TlAction::BadhubZurueckgeben`).
 pub async fn turnier_beenden() -> Result<String, String> {
     zurueckgeben_in(&ZUSTAND).await
 }
@@ -1370,14 +1560,23 @@ pub(crate) async fn uebernehmen_in(z: &Mutex<Option<KernQuelle>>) -> Result<Stri
                 .ok_or("Kein Gerätetoken — bitte neu koppeln.")?,
         )
     };
-    let (paket, etag) = match api::paket(&basis, &token, None).await {
-        Ok(api::PaketAntwort::Neu { paket, etag }) => (*paket, etag),
+    let (mut paket, etag, bis) = match api::paket(&basis, &token, None).await {
+        Ok(api::PaketAntwort::Neu {
+            paket,
+            etag,
+            nachladen_bis,
+        }) => (*paket, etag, nachladen_bis),
         Ok(api::PaketAntwort::Unveraendert) => {
             return Err("badhub liefert kein Turnierpaket.".into())
         }
         Err(e) => return Err(format!("{e} — Übernehmen braucht Internet.")),
     };
     paket.pruefen()?;
+    // Gekapptes Paket: Rest seitenweise. Bleibt es unvollständig (offline),
+    // holt der Abgleich den Rest, bevor er die Lease neu nimmt.
+    let teilweise = paket_nachladen(&basis, &token, &mut paket, bis)
+        .await
+        .map_err(|e| format!("{e} — Übernehmen braucht Internet."))?;
     let mut g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let q = g.as_mut().ok_or("Kein badhub-Turnier geladen.")?;
     if !paket
@@ -1389,6 +1588,10 @@ pub(crate) async fn uebernehmen_in(z: &Mutex<Option<KernQuelle>>) -> Result<Stri
     }
     let bis = q.n_bestaetigt();
     let verworfen = q.protokoll.kuerzen_auf(bis, jetzt_ms())?;
+    // Was bleibt, hat badhub bestätigt und kommt über Paket und Ereignisse
+    // zurück. Bliebe es liegen, zählte es über einem gekappten Paket als
+    // „wartend“ und hielte Nachladen und Lease an.
+    q.protokoll.leeren()?;
     q.ablage.paket_speichern(&paket, etag.as_deref())?;
     q.paket = paket;
     q.etag = etag;
@@ -1402,13 +1605,17 @@ pub(crate) async fn uebernehmen_in(z: &Mutex<Option<KernQuelle>>) -> Result<Stri
     q.abbild = None;
     q.kern = None;
     tracing::info!("Quelle badhub: Steuerung wird neu übernommen ({verworfen} Posten verworfen)");
-    Ok(if verworfen > 0 {
+    let text = if verworfen > 0 {
         format!(
             "Stand aus badhub geladen; {verworfen} Eingaben dieses PCs waren nicht in badhub \
              angekommen und wurden verworfen. Die Steuerung wird gleich übernommen."
         )
     } else {
-        "Stand aus badhub geladen; die Steuerung wird gleich übernommen.".into()
+        "Stand aus badhub geladen; die Steuerung wird gleich übernommen.".to_string()
+    };
+    Ok(match teilweise {
+        Some(h) => format!("{text} {h}"),
+        None => text,
     })
 }
 
@@ -1507,6 +1714,8 @@ pub struct Kopplung {
     pub spiele: usize,
     /// Kern-Version in badhub, wenn sie von der eingebundenen abweicht.
     pub kern_hinweis: Option<String>,
+    /// Paket nur teilweise geladen (Netz brach beim Nachladen ab).
+    pub nachlade_hinweis: Option<String>,
 }
 
 /// Löst den Code ein, lädt das Paket und legt beides ab. Setzt die
@@ -1533,16 +1742,27 @@ pub async fn koppeln(
     if !uuid_gueltig(&antwort.turnier.uuid) {
         return Err("badhub nennt keine gültige Turnier-UUID.".into());
     }
-    let (paket, etag) = match api::paket(basis, &antwort.token, None)
+    let (mut paket, etag, bis) = match api::paket(basis, &antwort.token, None)
         .await
         .map_err(|e| e.to_string())?
     {
-        api::PaketAntwort::Neu { paket, etag } => (*paket, etag),
+        api::PaketAntwort::Neu {
+            paket,
+            etag,
+            nachladen_bis,
+        } => (*paket, etag, nachladen_bis),
         api::PaketAntwort::Unveraendert => {
             return Err("badhub liefert kein Turnierpaket.".into());
         }
     };
     paket.pruefen()?;
+    // Gekapptes Paket (höchstens 2000 Ereignisse): Rest seitenweise. Bricht
+    // das Netz mittendrin ab, gilt die Kopplung trotzdem — der Code ist
+    // eingelöst, das Paket ist ein lückenloser Anfang, und der Abgleich holt
+    // den Rest, bevor er die Lease nimmt.
+    let nachlade_hinweis = paket_nachladen(basis, &antwort.token, &mut paket, bis)
+        .await
+        .map_err(|e| e.to_string())?;
     if !paket
         .turnier
         .uuid
@@ -1590,6 +1810,7 @@ pub async fn koppeln(
         konkurrenzen: paket.konkurrenzen.len(),
         spiele,
         kern_hinweis,
+        nachlade_hinweis,
     })
 }
 

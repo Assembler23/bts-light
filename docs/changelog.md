@@ -15,6 +15,24 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   badhub-Turnieren den Hinweis auf die abweichende Kern-Version.
 - BTP-Turniere laufen unverändert.
 
+## v0.9.451
+
+- **Turnier beenden auch im TL-Web.** Bei einem badhub-Turnier steht im Kopf
+  der Turnierleitung der Knopf **Turnier beenden**: Er gibt die Steuerung an
+  badhub zurück, genau wie der Knopf im Hauptfenster — mit Rückfrage und nur,
+  wenn alles bei badhub angekommen ist. Sonst sagt die Seite, wie viele
+  Ereignisse noch warten.
+- Große badhub-Turniere: bts-light lädt das Turnierpaket in Teilen nach, wenn
+  badhub es kürzt. Bricht dabei das Internet ab, bleibt das Geladene stehen
+  und der Rest kommt mit der Übertragung nach; die Steuerung übernimmt
+  bts-light erst mit vollständigem Stand.
+- Behoben: Nach **Steuerung wieder übernehmen** konnte ein großes
+  badhub-Turnier hängen bleiben (keine Steuerung, keine Übertragung). Ein so
+  hängender Stand heilt beim nächsten Start von selbst.
+- BTP-Turniere laufen unverändert.
+- Braucht das aktualisierte Relay auf badhub.de (wird vor dem Release
+  eingespielt).
+
 ## v0.9.450
 
 - **badhub-Turniere aus der Halle steuern.** Beim Start der Übertragung

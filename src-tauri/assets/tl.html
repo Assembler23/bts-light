@@ -1744,6 +1744,12 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
            autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" maxlength="64" />
     <button type="button" class="auto" id="auto-toggle" hidden></button>
     <span class="bh-abgleich" id="bh-abgleich" hidden></span>
+    <!-- Rückgabe der Steuerung an badhub (Paket L3): nur bei einem
+         badhub-Turnier mit aktiver Lease und nur, wenn der Turnier-PC die
+         Aktion kennt (`can_return_badhub`). Mit Rückfrage; bei offener Outbox
+         sagt die Seite, wie viele Ereignisse noch warten. -->
+    <button type="button" class="profiles-btn" id="bh-beenden" hidden
+            title="Turnier beenden / Steuerung an badhub zurückgeben">Turnier beenden</button>
     <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">verbinde …</span></span>
     <!-- Profile (Spec tl-web-panelsystem) ersetzen das frühere
          Anzeige-Klappmenü — Panel-Sichtbarkeit/-Reihenfolge/-Höhe UND die
@@ -9358,6 +9364,7 @@ function wireProfileEditorEvents() {
 }
 
 $("tablets-reload").addEventListener("click", reloadTablets);
+$("bh-beenden").addEventListener("click", badhubZurueckgeben);
 verdrahteSuche();
 $("profiles-open").addEventListener("click", openProfilesOverlay);
 $("profiles-close").addEventListener("click", closeProfilesOverlay);
@@ -10480,6 +10487,10 @@ function renderBadhubAbgleich() {
   const a = state && state.badhub_abgleich;
   const zeile = $("bh-abgleich");
   let band = document.getElementById("bh-abgleich-band");
+  // Rückgabe nur unter aktiver Lease (aktuell oder wartend) — nach Rückgabe,
+  // Rückholung oder ohne Lease gibt es nichts zurückzugeben.
+  $("bh-beenden").hidden = !(state && state.can_return_badhub && a
+    && (a.zustand === "aktuell" || a.zustand === "wartet"));
   if (!a) {
     zeile.hidden = true;
     if (band) band.remove();
@@ -10499,6 +10510,35 @@ function renderBadhubAbgleich() {
   } else if (band) {
     band.remove();
   }
+}
+
+// „Turnier beenden / Steuerung an badhub zurückgeben" — derselbe Weg wie der
+// Knopf im Hauptfenster. Die Rückgabe geht nur mit leerer Outbox; die Seite
+// sagt das vorab aus ihrem Stand, entscheiden tut der Turnier-PC.
+function badhubWartetText(n) {
+  return `${n} ${n === 1 ? "Ereignis wartet" : "Ereignisse warten"} noch auf den Abgleich `
+    + "mit badhub — die Rückgabe geht erst, wenn „badhub: aktuell“ steht.";
+}
+
+async function badhubZurueckgeben() {
+  const a = state && state.badhub_abgleich;
+  if (!a) return;
+  if (a.wartend > 0) {
+    toast(badhubWartetText(a.wartend), true);
+    return;
+  }
+  if (!confirm("Turnier beenden und die Steuerung an badhub zurückgeben?\n\n"
+    + "Danach sind Eingaben nur noch in badhub möglich, und die Namen werden "
+    + "vom Turnier-PC gelöscht.")) {
+    return;
+  }
+  // Zeitstempel in der Vorgangs-Kennung: Ein zweiter, bewusster Druck (etwa
+  // nachdem die Outbox leer ist) ist ein neuer Versuch.
+  await send(
+    `badhub-zurueck-${Date.now()}`,
+    { action: "badhub_zurueckgeben" },
+    "Steuerung an badhub zurückgegeben. Die Namen sind vom Turnier-PC gelöscht.",
+  );
 }
 
 function render() {

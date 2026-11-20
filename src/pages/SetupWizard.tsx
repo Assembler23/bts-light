@@ -1751,6 +1751,9 @@ export function SetupWizard({
                 {kopplung.kind === "ok" && kopplung.info.kern_hinweis && (
                   <p className="text-xs text-amber-700">{kopplung.info.kern_hinweis}</p>
                 )}
+                {kopplung.kind === "ok" && kopplung.info.nachlade_hinweis && (
+                  <p className="text-xs text-amber-700">{kopplung.info.nachlade_hinweis}</p>
+                )}
                 {kopplung.kind === "fehler" && (
                   <p className="flex items-start gap-1.5 text-sm text-rose-700">
                     <X size={16} className="mt-0.5 shrink-0" /> {kopplung.text}
