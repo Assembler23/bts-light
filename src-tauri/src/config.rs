@@ -1180,18 +1180,62 @@ impl MeetingpointConfig {
     }
 }
 
-/// Turnierquelle. Heute nur BTP; der badhub-Turnierkern folgt (ADR-0084 in
-/// badhub).
+/// Turnierquelle: BTP oder ein in badhub organisiertes Turnier, dessen Stand
+/// der Turnierkern lokal faltet (ADR-0084 in badhub, Spec
+/// `docs/features/turnierquelle.md`).
 ///
 /// Ein unbekannter Wert (etwa aus einer neueren Version nach einem Downgrade)
 /// wird als BTP gelesen, statt die ganze Konfiguration unlesbar zu machen.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum QuelleArt {
-    /// Badminton Tournament Planner über TP-Network (`config.btp`).
+    /// badhub-Turnier über das Turnierpaket (`badhub_turnier`); seit Paket L2
+    /// nur lesend, Schreiben folgt mit L3.
+    Badhub,
+    /// Badminton Tournament Planner über TP-Network (`config.btp`). Steht
+    /// zuletzt, weil serde `other` nur an der letzten Variante erlaubt.
     #[default]
     #[serde(other)]
     Btp,
+}
+
+/// Gekoppeltes badhub-Turnier (Quelle `badhub`, Paket L2).
+///
+/// Bewusst **ohne** das Gerätetoken: Das liegt verschlüsselt neben dem
+/// Turnierpaket unter `turniere/<uuid>/` (`quelle::badhub::ablage`). So reist
+/// es weder im Umzugs-Bündel mit, noch geht es verloren, wenn eine ältere
+/// Version die Konfiguration ohne diesen Block zurückschreibt.
+///
+/// Wird nur vom Kern gesetzt (Kopplung), nie vom Einrichtungsassistenten
+/// (`keep_host_managed_fields`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BadhubTurnierConfig {
+    /// UUID des Turniers in badhub (`torg_turniere.uuid`); benennt das
+    /// Verzeichnis `turniere/<uuid>/`. Leer = nicht gekoppelt.
+    #[serde(default)]
+    pub uuid: String,
+    /// Turnier-ID in badhub (nur zur Anzeige und für Logs).
+    #[serde(default)]
+    pub id: i64,
+    /// Turniername aus der Kopplung.
+    #[serde(default)]
+    pub name: String,
+    /// API-Basis zum Zeitpunkt der Kopplung, z. B.
+    /// `https://test.badhub.de/api/torg/v1`. Das Token gilt nur dort; ein
+    /// späterer Wechsel des Testsystem-Schalters schickt es nicht an das
+    /// andere System.
+    #[serde(default)]
+    pub basis: String,
+    /// Gerätename, unter dem dieser PC in badhub gekoppelt ist.
+    #[serde(default)]
+    pub geraet_name: String,
+}
+
+impl BadhubTurnierConfig {
+    /// Ist ein Turnier gekoppelt?
+    pub fn gekoppelt(&self) -> bool {
+        !self.uuid.trim().is_empty() && !self.basis.trim().is_empty()
+    }
 }
 
 /// Gesamte App-Konfiguration.
@@ -1201,6 +1245,9 @@ pub struct AppConfig {
     /// Fehlt der Eintrag — jede Konfiguration von vor Paket L1 —, gilt BTP.
     #[serde(default)]
     pub quelle: QuelleArt,
+    /// Gekoppeltes badhub-Turnier (nur bei `quelle = badhub` wirksam).
+    #[serde(default)]
+    pub badhub_turnier: BadhubTurnierConfig,
     pub btp: BtpConfig,
     pub badhub: BadhubConfig,
     /// Diagnose-Logs automatisch an badhub.de hochladen, damit Fehler über
@@ -2131,11 +2178,32 @@ mod tests {
     fn quelle_unbekannter_wert_ergibt_btp_statt_lesefehler() {
         // Downgrade nach einer Version mit weiterer Quelle: die Konfiguration
         // bleibt lesbar, es gilt BTP.
-        let q: QuelleArt = serde_json::from_str(r#""badhub""#).unwrap();
+        let q: QuelleArt = serde_json::from_str(r#""turnierkern2""#).unwrap();
         assert_eq!(q, QuelleArt::Btp);
         let q: QuelleArt = serde_json::from_str(r#""btp""#).unwrap();
         assert_eq!(q, QuelleArt::Btp);
         assert_eq!(serde_json::to_string(&QuelleArt::Btp).unwrap(), r#""btp""#);
+    }
+
+    #[test]
+    fn quelle_badhub_rundreise_und_turnierblock_optional() {
+        // Paket L2: die zweite Quelle wird gelesen und geschrieben.
+        let q: QuelleArt = serde_json::from_str(r#""badhub""#).unwrap();
+        assert_eq!(q, QuelleArt::Badhub);
+        assert_eq!(
+            serde_json::to_string(&QuelleArt::Badhub).unwrap(),
+            r#""badhub""#
+        );
+        // Eine Konfiguration ohne Turnierblock (jede vor L2) bleibt lesbar
+        // und gilt als nicht gekoppelt.
+        let mut alt = serde_json::to_value(AppConfig::default()).unwrap();
+        alt.as_object_mut().unwrap().remove("badhub_turnier");
+        let gelesen: AppConfig = serde_json::from_value(alt).unwrap();
+        assert!(!gelesen.badhub_turnier.gekoppelt());
+        assert_eq!(gelesen.quelle, QuelleArt::Btp);
+        // Das Token steht nie in der Konfiguration.
+        let text = serde_json::to_string(&AppConfig::default()).unwrap();
+        assert!(!text.contains("token"), "kein Token-Feld in config.json");
     }
 
     // ── Druckzeitpunkt des Autodrucks (Spec `zettel-druck-bei-aufruf`) ──
@@ -2840,6 +2908,7 @@ mod tests {
 
         let config = AppConfig {
             quelle: QuelleArt::Btp,
+            badhub_turnier: BadhubTurnierConfig::default(),
             btp: BtpConfig {
                 host: "192.168.1.50".to_string(),
                 port: 9901,

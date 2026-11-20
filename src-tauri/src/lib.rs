@@ -128,6 +128,8 @@ pub fn run() {
             commands::load_config,
             commands::save_config,
             commands::test_btp,
+            commands::badhub_koppeln,
+            commands::badhub_turnier_info,
             commands::azure_tts_speak,
             commands::tts_dienste_pruefen,
             commands::tts_verbrauch,

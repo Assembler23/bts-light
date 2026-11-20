@@ -49,6 +49,18 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # Turnierkern (privates Repo Assembler23/turnierkern, badhub ADR-0084):
+      # cargo holt ihn über HTTPS mit dem Lese-Token. Muss vor jedem
+      # cargo-Aufruf stehen — auch `-p bts-relay` löst den ganzen Workspace
+      # samt Git-Abhängigkeit auf. Dependabot-Läufe haben kein Secret.
+      - name: Zugang zum Turnierkern
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.TURNIERKERN_LESE_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/Assembler23/turnierkern".insteadOf "https://github.com/Assembler23/turnierkern"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
+
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: .
@@ -596,6 +608,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      # Turnierkern (privates Repo Assembler23/turnierkern, badhub ADR-0084):
+      # cargo holt ihn über HTTPS mit dem Lese-Token. Muss vor jedem
+      # cargo-Aufruf stehen — auch `-p bts-relay` löst den ganzen Workspace
+      # samt Git-Abhängigkeit auf. Dependabot-Läufe haben kein Secret.
+      - name: Zugang zum Turnierkern
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.TURNIERKERN_LESE_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/Assembler23/turnierkern".insteadOf "https://github.com/Assembler23/turnierkern"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
 
       - uses: swatinem/rust-cache@v2
         with:

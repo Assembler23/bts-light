@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.449
+
+- **Turniere aus badhub anzeigen.** In den Einstellungen gibt es den neuen
+  Abschnitt **Turnierquelle**: BTP wie bisher (vorausgewählt) oder
+  **badhub-Turnier**. Mit dem Kopplungscode aus badhub lädt bts-light das
+  Turnierpaket und zeigt das Turnier auf Tablets, Monitoren und im TL-Web —
+  auch ohne Internet mit dem zuletzt geladenen Stand. Neue Ergebnisse aus
+  badhub kommen online nach wenigen Sekunden an.
+- In dieser Version **nur anzeigen**: Ergebnisse, Feldvergabe und
+  Schiedsrichter trägt die Turnierleitung bei badhub-Turnieren noch in badhub
+  ein. BTP-Turniere laufen unverändert.
+- Braucht badhub mit der Gerätekopplung (`/api/torg/v1`).
+
 ## v0.9.446
 
 - **Tab-Titel nennt das Feld.** Das Zähl-Tablet heißt im Browser-Tab jetzt

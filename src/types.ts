@@ -6,6 +6,27 @@ export interface BtpConfig {
   password: string | null;
 }
 
+/** Turnierquelle (Rust `QuelleArt`): BTP oder ein badhub-Turnier (Paket L2). */
+export type QuelleArt = "btp" | "badhub";
+
+/** Gekoppeltes badhub-Turnier (Rust `BadhubTurnierConfig`). Setzt nur die
+ *  Kopplung im Kern; das Token steht nie in der Konfiguration. */
+export interface BadhubTurnierConfig {
+  uuid: string;
+  id: number;
+  name: string;
+  basis: string;
+  geraet_name: string;
+}
+
+/** Ergebnis von `badhub_koppeln` (Rust `quelle::badhub::Kopplung`). */
+export interface BadhubKopplung {
+  turnier: BadhubTurnierConfig;
+  konkurrenzen: number;
+  spiele: number;
+  kern_hinweis: string | null;
+}
+
 export interface BadhubConfig {
   url: string;
   password: string;
@@ -800,6 +821,10 @@ export type AnnounceJob = {
 );
 
 export interface AppConfig {
+  /** Turnierquelle; fehlt sie, gilt BTP. */
+  quelle?: QuelleArt;
+  /** Vom Kern gepflegt (Kopplung), vom Assistenten nur gelesen. */
+  badhub_turnier?: BadhubTurnierConfig;
   btp: BtpConfig;
   badhub: BadhubConfig;
   /** Diagnose-Logs automatisch an badhub.de hochladen. Bei einer
