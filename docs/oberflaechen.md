@@ -123,6 +123,40 @@ Was dahintersteckt, steht unter
 <!-- pruef: "keine Antwort innerhalb der Frist" in src-tauri/src/tts_text.rs -->
 <!-- pruef: "zurzeit nicht erreichbar, die Ersatzstimme spricht, bis der Dienst" in src-tauri/src/tts_text.rs -->
 
+### badhub-Abgleich (badhub-Turniere, seit v0.9.450)
+
+Steuert bts-light ein [badhub-Turnier](einstellungen.md), steht auf der Seite
+**Status** bei laufender Übertragung ein Kasten mit dem Abgleich:
+
+| Anzeige | Bedeutung |
+|---|---|
+| **„badhub: aktuell"** | Alles, was in der Halle eingegeben wurde, ist bei badhub angekommen. |
+| **„5 Ereignisse warten, letzter Kontakt 10:47"** | Ohne Internet: Die Halle läuft normal weiter, bts-light lädt nach, sobald Netz da ist. |
+| **„badhub: noch keine Steuerung — …"** | bts-light hat die Steuerung noch nicht übernommen (meist: beim allerersten Start kein Internet, oder ein anderes Gerät steuert). Eingaben sind solange gesperrt. |
+| rot: **„Die Steuerung wurde in badhub zurückgeholt. Eingaben am Turnier-PC gehen nicht mehr an badhub."** | Die Turnierleitung hat in badhub übernommen. Eingaben am Turnier-PC sind gesperrt. |
+<!-- pruef: "badhub: aktuell" in src-tauri/src/quelle/badhub/mod.rs -->
+<!-- pruef: "letzter Kontakt" in src-tauri/src/quelle/badhub/mod.rs -->
+<!-- pruef: "badhub: noch keine Steuerung" in src-tauri/src/quelle/badhub/mod.rs -->
+<!-- pruef: "Die Steuerung wurde in badhub zurückgeholt" in src-tauri/src/quelle/badhub/mod.rs -->
+
+Darunter zwei Knöpfe:
+
+- **Turnier beenden / Steuerung an badhub zurückgeben** — erst möglich, wenn
+  „badhub: aktuell" steht (braucht Internet). Danach sind Eingaben nur noch in
+  badhub möglich, und die Namen der Spielerinnen und Spieler werden von diesem
+  PC gelöscht — sonst spätestens 14 Tage nach dem letzten Turniertag.
+  <!-- pruef: "Turnier beenden / Steuerung an badhub zurückgeben" in src/components/BadhubAbgleichPanel.tsx -->
+  <!-- pruef: /FRIST_TAGE: i64 = 14/ in src-tauri/src/quelle/badhub/mod.rs -->
+- **Steuerung wieder übernehmen** — nach der Rückgabe oder wenn badhub die
+  Steuerung zurückgeholt hat. bts-light lädt den Stand aus badhub; Eingaben
+  dieses PCs, die nicht in badhub angekommen waren, werden verworfen (sie
+  bleiben in einer Datei im Turnierordner liegen).
+  <!-- pruef: "Steuerung wieder übernehmen" in src/components/BadhubAbgleichPanel.tsx -->
+
+Bei einem badhub-Turnier sagt die Statuszeile nie „BTP nicht erreichbar“,
+sondern **„badhub-Turnier: …“** mit dem Grund.
+<!-- pruef: "badhub-Turnier: {e}" in src-tauri/src/commands.rs -->
+
 ### Blaues Band: Verbesserung für Tablets und Anzeigen (seit v0.9.433)
 
 Manchmal lässt sich ein Fehler an einer Geräte-Seite — Zähl-Tablet, Monitor,

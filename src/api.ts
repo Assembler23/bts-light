@@ -11,6 +11,7 @@ import type {
   AnsageQuellen,
   AppConfig,
   BadhubKopplung,
+  BadhubAbgleich,
   BadhubTurnierConfig,
   CheckinView,
   CloudAnnounce,
@@ -68,6 +69,20 @@ export const badhubKoppeln = (
   geraetName: string,
 ): Promise<BadhubKopplung> =>
   invoke("badhub_koppeln", { code, geraetName });
+
+/** Abgleich mit badhub (Paket L3): Lease, wartende Ereignisse, Knöpfe.
+ *  `null` bei BTP oder ohne geladenes badhub-Turnier. */
+export const badhubAbgleich = (): Promise<BadhubAbgleich | null> =>
+  invoke("badhub_abgleich");
+
+/** „Turnier beenden / Steuerung an badhub zurückgeben" — nur mit leerer
+ *  Outbox; löscht danach den Personenauszug. */
+export const badhubTurnierBeenden = (): Promise<string> =>
+  invoke("badhub_turnier_beenden");
+
+/** „Steuerung wieder übernehmen" nach Rückgabe oder Rückholung. */
+export const badhubSteuerungUebernehmen = (): Promise<string> =>
+  invoke("badhub_steuerung_uebernehmen");
 
 /** Das gekoppelte badhub-Turnier, `null` ohne Kopplung. */
 export const badhubTurnierInfo = (): Promise<BadhubTurnierConfig | null> =>

@@ -2655,7 +2655,25 @@ pub enum TlAction {
         #[serde(rename = "profileId")]
         profile_id: String,
     },
+    /// Ein Befehl an den Turnierkern eines badhub-Turniers (badhub ADR-0084,
+    /// Paket L3): badhub leitet eine Eingabe aus dem Bereich „Spiele“ über
+    /// das Relay an den Turnier-PC, der die Lease hält. Der Relay reicht den
+    /// Befehl **unverändert** durch — geprüft wird ausschließlich am
+    /// Turnier-PC, mit demselben Schreibpfad wie eine Eingabe in der Halle.
+    ///
+    /// Bewusst roh (`serde_json::Value`): Das Befehlsschema gehört dem Kern
+    /// (`turnierkern::TurnierBefehl`), nicht diesem Crate. Nur das eigens
+    /// dafür ausgestellte Gerät [`TL_GERAET_KERN`] darf diese Aktion senden,
+    /// und dieses Gerät darf nichts anderes (Relay und Host prüfen beides).
+    KernBefehl { befehl: serde_json::Value },
 }
+
+/// Kennung des Turnierleitungs-Zugangs, den bts-light beim Nehmen der Lease
+/// eines badhub-Turniers für badhub ausstellt (Paket L3). Dieses Gerät darf
+/// **nur** [`TlAction::KernBefehl`] senden und keinen Zustand lesen — der
+/// Relay verweigert ihm alle übrigen TL-Routen, der Host alle übrigen
+/// Aktionen.
+pub const TL_GERAET_KERN: &str = "badhub-kern";
 
 /// Grund einer Ablehnung — **maschinenlesbar**, damit die Seite gezielt
 /// reagieren kann (Feld hervorheben, Auswahl zurücksetzen, neu laden), statt
@@ -2697,13 +2715,17 @@ pub enum TlErrorCode {
     /// Grundlage dafür, dass die Seite „bts-light ist nicht verbunden" sagen
     /// kann, statt einen leeren Stand als „alle Felder frei" zu zeigen.
     HostOffline,
+    /// Der Turnierkern eines badhub-Turniers hat den Befehl abgelehnt (z. B.
+    /// Feld belegt). Den maschinenlesbaren Grund des Kerns trägt
+    /// [`TlResponse::ablehnung`]. Nur bei Quelle badhub (Paket L3).
+    KernAbgelehnt,
 }
 
 impl TlErrorCode {
     /// Alle Codes — Grundlage des Wire-Roundtrip-Tests. Wächst das Enum,
     /// muss diese Liste mitwachsen (der Test erzwingt es nicht, aber der
     /// fehlende Eintrag fiele bei der nächsten Durchsicht auf).
-    pub const ALL: [TlErrorCode; 14] = [
+    pub const ALL: [TlErrorCode; 15] = [
         TlErrorCode::CourtTaken,
         TlErrorCode::CourtFree,
         TlErrorCode::CourtLocked,
@@ -2718,6 +2740,7 @@ impl TlErrorCode {
         TlErrorCode::NoAnnouncer,
         TlErrorCode::BtpError,
         TlErrorCode::HostOffline,
+        TlErrorCode::KernAbgelehnt,
     ];
 }
 
@@ -2737,6 +2760,12 @@ pub struct TlResponse {
     pub warning: Option<String>,
     #[serde(rename = "stateRev", default)]
     pub state_rev: u64,
+    /// Ablehnung des Turnierkerns im Wortlaut des Kerns (`{"grund":
+    /// "feld_belegt", …}`), nur zusammen mit [`TlErrorCode::KernAbgelehnt`].
+    /// Additiv: ältere Gegenstellen übergehen das Feld, BTP-Antworten tragen
+    /// es nie.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ablehnung: Option<serde_json::Value>,
 }
 
 impl TlResponse {
@@ -2748,6 +2777,7 @@ impl TlResponse {
             code: None,
             warning: None,
             state_rev,
+            ablehnung: None,
         }
     }
 
@@ -2759,6 +2789,16 @@ impl TlResponse {
             code: Some(code),
             warning: None,
             state_rev: 0,
+            ablehnung: None,
+        }
+    }
+
+    /// Ablehnung des Turnierkerns: Klartext für den Menschen, der Grund des
+    /// Kerns maschinenlesbar daneben.
+    pub fn kern_abgelehnt(error: impl Into<String>, ablehnung: serde_json::Value) -> Self {
+        Self {
+            ablehnung: Some(ablehnung),
+            ..Self::err(TlErrorCode::KernAbgelehnt, error)
         }
     }
 
@@ -6515,6 +6555,67 @@ mod tests {
         for code in TlErrorCode::ALL {
             roundtrip(&code);
         }
+    }
+
+    // ── Kernbefehl aus badhub (Paket L3) ───────────────────────────────
+
+    #[test]
+    fn kern_befehl_roundtrips_and_keeps_the_command_verbatim() {
+        // Der Befehl reist roh: Felder, die dieses Crate nicht kennt (das
+        // Schema gehört dem Turnierkern), müssen unverändert ankommen.
+        let text = r#"{"action":"kern_befehl","befehl":{"art":"spiel_aufrufen","id":"bh-17","konkurrenz":"HE-A","spiel":5,"feld":"H1 3","zukunft":[1,2]}}"#;
+        let action: TlAction = serde_json::from_str(text).unwrap();
+        let TlAction::KernBefehl { befehl } = &action else {
+            panic!("falsche Variante: {action:?}");
+        };
+        assert_eq!(befehl["art"], "spiel_aufrufen");
+        assert_eq!(befehl["zukunft"], serde_json::json!([1, 2]));
+        roundtrip(&action);
+        let zurueck: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&action).unwrap()).unwrap();
+        assert_eq!(
+            zurueck,
+            serde_json::from_str::<serde_json::Value>(text).unwrap()
+        );
+        // Ohne Befehl kein Kernbefehl — kein still ergänztes `null`.
+        assert!(serde_json::from_str::<TlAction>(r#"{"action":"kern_befehl"}"#).is_err());
+    }
+
+    #[test]
+    fn kern_befehl_travels_inside_a_tl_command_frame() {
+        roundtrip(&RelayFrame::TlCommand {
+            req_id: 3,
+            device_id: TL_GERAET_KERN.to_string(),
+            op_id: "bh-17".to_string(),
+            view_rev: 0,
+            action: TlAction::KernBefehl {
+                befehl: serde_json::json!({"art": "aufruf_zuruecknehmen", "id": "bh-17"}),
+            },
+        });
+    }
+
+    #[test]
+    fn kern_rejection_carries_the_kern_reason_and_old_answers_stay_unchanged() {
+        let resp = TlResponse::kern_abgelehnt(
+            "Feld belegt",
+            serde_json::json!({"grund": "feld_belegt", "feld": "1", "konkurrenz": "HE-A", "spiel": 3}),
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.code, Some(TlErrorCode::KernAbgelehnt));
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains(r#""code":"kern_abgelehnt""#), "{json}");
+        assert!(json.contains(r#""ablehnung":{"#), "{json}");
+        roundtrip(&resp);
+        // BTP-Antworten tragen das Feld nicht — Byte für Byte wie bisher.
+        let alt = serde_json::to_string(&TlResponse::ok(4)).unwrap();
+        assert_eq!(alt, r#"{"ok":true,"stateRev":4}"#);
+        let fehler = serde_json::to_string(&TlResponse::err(TlErrorCode::BtpError, "x")).unwrap();
+        assert!(!fehler.contains("ablehnung"), "{fehler}");
+        // Eine Antwort ohne das Feld (ältere Gegenstelle) liest sich weiter.
+        let gelesen: TlResponse =
+            serde_json::from_str(r#"{"ok":false,"error":"x","code":"court_taken","stateRev":0}"#)
+                .unwrap();
+        assert_eq!(gelesen.ablehnung, None);
     }
 
     #[test]

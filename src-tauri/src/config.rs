@@ -1189,8 +1189,8 @@ impl MeetingpointConfig {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum QuelleArt {
-    /// badhub-Turnier über das Turnierpaket (`badhub_turnier`); seit Paket L2
-    /// nur lesend, Schreiben folgt mit L3.
+    /// badhub-Turnier über das Turnierpaket (`badhub_turnier`); lesend seit
+    /// Paket L2, schreibend unter der Lease seit L3.
     Badhub,
     /// Badminton Tournament Planner über TP-Network (`config.btp`). Steht
     /// zuletzt, weil serde `other` nur an der letzten Variante erlaubt.

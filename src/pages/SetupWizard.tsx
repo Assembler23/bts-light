@@ -1675,10 +1675,27 @@ export function SetupWizard({
                   In badhub im Bereich <strong>Turniertag</strong> auf{" "}
                   <strong>„bts-light koppeln"</strong> klicken und den Code hier
                   eintragen. bts-light lädt dann das Turnierpaket und zeigt das
-                  Turnier auf Tablets, Monitoren und im TL-Web.{" "}
-                  <strong>Ergebnisse und Feldvergabe trägt die Turnierleitung in
-                  dieser Version noch in badhub ein.</strong>
+                  Turnier auf Tablets, Monitoren und im TL-Web. Beim Start der
+                  Übertragung übernimmt bts-light die <strong>Steuerung</strong>{" "}
+                  (Lease): Ergebnisse, Feldvergabe und Schiedsrichter gelten dann
+                  sofort in der Halle — auch ohne Internet — und gehen an badhub,
+                  sobald Netz da ist.
                 </p>
+                {slaveMode && (
+                  <>
+                    <p className="text-xs text-slate-500">
+                      Als Ansage-Slave übernimmt dieser PC keine Steuerung, sondern
+                      liest den Stand vom Turnier-PC. Diesen PC trotzdem mit einem
+                      eigenen Code koppeln (für Namen und Felder).
+                    </p>
+                    <Field
+                      label="Adresse des Turnier-PCs (Master)"
+                      value={host}
+                      onChange={setHost}
+                      placeholder="192.168.0.10"
+                    />
+                  </>
+                )}
                 <Field
                   label="Kopplungscode"
                   value={kopplungsCode}

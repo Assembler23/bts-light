@@ -97,6 +97,10 @@ pub enum SyncOutcome {
     SlaveActive,
     /// BTP nicht erreichbar oder Antwort unbrauchbar.
     BtpError(String),
+    /// Quelle badhub: Stand nicht lesbar (kein Turnier geladen, Master des
+    /// Slaves weg). Eigene Variante, damit die Statuszeile nicht „BTP nicht
+    /// erreichbar“ sagt, wo es kein BTP gibt (Paket L3).
+    QuelleFehler(String),
     /// Verdächtig leerer BTP-Snapshot verworfen (Leer-Snapshot-Guard);
     /// der Zyklus hat keinerlei Zustand verändert.
     SnapshotDiscarded,
@@ -890,6 +894,11 @@ impl SyncEngine {
         // Diff unten eine spätere Änderung IN BTP wieder zurück.
         officials_loslassen(tablet, snapshot);
         geschrieben_aufraeumen(&mut self.officials_written, snapshot);
+        // Bei badhub ohne Lease kein Schreibversuch (und keine Warnung je
+        // Takt); bei BTP immer `true`.
+        if !crate::quelle::schreiben_moeglich(config) {
+            return;
+        }
         let entries = officials_entries(tablet, snapshot, &self.officials_written, now_ms());
         if entries.is_empty() {
             return;
@@ -1107,7 +1116,7 @@ impl SyncEngine {
         // ruft dasselbe gleich nochmal.
         tablet
             .match_times_store()
-            .set_tournament(&snapshot.tournament_name);
+            .set_tournament(&tablet.turnier_schluessel(snapshot));
         // Halle je Feld einmal auflösen (ADR 0036), und zwar wirklich
         // linear: `court_location_name` würde das Feld selbst noch einmal
         // in `court_infos` suchen — über alle Felder wäre das quadratisch
@@ -1231,7 +1240,7 @@ impl SyncEngine {
         tablet: &TabletState,
     ) {
         let store = tablet.auto_hall_store();
-        store.set_tournament(&snapshot.tournament_name);
+        store.set_tournament(&tablet.turnier_schluessel(snapshot));
 
         let calls = tablet.preparation_calls();
         let called: HashSet<i64> = calls.iter().map(|c| c.match_id).collect();
@@ -1621,7 +1630,7 @@ impl SyncEngine {
         // Grund wie in `reconcile_match_times`, das im Zyklus erst später
         // kommt. Idempotent.
         let store = tablet.match_times_store();
-        store.set_tournament(&snapshot.tournament_name);
+        store.set_tournament(&tablet.turnier_schluessel(snapshot));
         let pause_ms = crate::tablet::assign::pflichtpause_ms(snapshot, config);
         for m in &mut snapshot.matches {
             if m.status == MatchStatus::Finished {
@@ -2426,8 +2435,15 @@ impl SyncEngine {
         // bisherige `client::fetch_snapshot`-Abruf samt Fehlertext.
         let mut snapshot = match crate::quelle::stand(config).await {
             Ok(snapshot) => snapshot,
+            Err(e) if config.quelle == crate::config::QuelleArt::Badhub => {
+                return SyncOutcome::QuelleFehler(e)
+            }
             Err(e) => return SyncOutcome::BtpError(e),
         };
+
+        // Schlüssel der lokalen Stores (Paket L3): bei badhub die Turnier-
+        // UUID statt des Namens, bei BTP unverändert der Name (`None`).
+        tablet.set_turnier_schluessel(crate::quelle::turnier_schluessel(config));
 
         // Leer-Snapshot-Guard: verdächtig leere Stände verwerfen, BEVOR
         // irgendetwas davon abgeleitet wird (Feld-Freigaben, Auto-Vergabe,
@@ -2519,7 +2535,7 @@ impl SyncEngine {
         // Pause der Automatik ans Turnier binden, BEVOR `auto_assign` sie
         // liest — `set_snapshot` läuft erst später im Poll, und sonst hielte
         // die Pause des alten Turniers den Wechsel-Poll noch an. Idempotent.
-        tablet.bind_auto_assign_pause(&snapshot.tournament_name);
+        tablet.bind_auto_assign_pause(&tablet.turnier_schluessel(&snapshot));
         // Vorbereitungs-Aufrufe ebenso VOR `auto_assign` binden (ADR 0071):
         // Sonst sähe die Vergabe im ersten Poll nach dem Start noch keinen
         // der gespeicherten Aufrufe, beim Turnierwechsel die alten.
@@ -2548,7 +2564,9 @@ impl SyncEngine {
             // Hallen im selben Poll (Auto ersetzt dort die Aufruf-Pflicht).
             self.reconcile_auto_halls(config, &snapshot, tablet);
             let (auto_courts, auto_matches) = self.auto_assign(config, &snapshot, tablet);
-            if !auto_courts.is_empty() {
+            // Bei badhub ohne Lease schweigt die Vergabe, statt jeden Takt zu
+            // warnen (bei BTP immer `true`, Verhalten unverändert).
+            if !auto_courts.is_empty() && crate::quelle::schreiben_moeglich(config) {
                 match crate::tablet::server::write_courts_to_btp(
                     config,
                     &auto_courts,

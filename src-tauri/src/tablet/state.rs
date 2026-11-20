@@ -514,6 +514,10 @@ struct LanLage {
 #[derive(Default)]
 pub struct TabletState {
     snapshot: RwLock<Option<BtpSnapshot>>,
+    /// Schlüssel der turniergebundenen Stores, wenn er nicht der
+    /// Turniername ist: bei badhub-Turnieren die UUID (Paket L3). `None` =
+    /// wie bisher `snapshot.tournament_name` (BTP).
+    turnier_schluessel: RwLock<Option<String>>,
     /// CourtID → laufende Tablet-Session des Felds.
     courts: RwLock<HashMap<i64, CourtSession>>,
     /// CourtID → (Token, Geräte-ID) des aktuell schiedsenden Tablets
@@ -1484,56 +1488,73 @@ impl From<PersistedBtpEntry> for PendingBtpWrite {
 }
 
 impl TabletState {
+    /// Schlüssel der Stores setzen (vom Sync-Loop je Abruf, aus der Quelle).
+    pub fn set_turnier_schluessel(&self, schluessel: Option<String>) {
+        *self
+            .turnier_schluessel
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = schluessel;
+    }
+
+    /// Der Schlüssel, an den die turniergebundenen Stores binden: bei BTP
+    /// der Turniername (unverändert), bei badhub die Turnier-UUID.
+    pub fn turnier_schluessel(&self, snapshot: &BtpSnapshot) -> String {
+        self.turnier_schluessel
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| snapshot.tournament_name.clone())
+    }
+
     /// Den neuesten BTP-Snapshot ablegen (vom Sync-Loop aufgerufen).
     pub fn set_snapshot(&self, snapshot: BtpSnapshot) {
+        let schluessel = self.turnier_schluessel(&snapshot);
         // Das Zeilenfarben-Echo (Spec `tl-zeilenfarbe`) legt `run_once`
         // EINMAL über den Stand, bevor er hierher und an den P1-Abgleich
         // geht — nicht hier, sonst sähe der Abgleich einen anderen Stand
         // als die Anzeige.
         // Punktverlauf folgt dem Turnier des Snapshots (öffnet/lädt bei
         // Wechsel die zugehörige Datei) — ein leerer Name ändert nichts.
-        self.timeline.set_tournament(&snapshot.tournament_name);
+        self.timeline.set_tournament(&schluessel);
         // Die Zettel-Ereignisse folgen demselben Turnier — eigene Datei,
         // eigener Wechsel (ADR 0037).
-        self.sheet.set_tournament(&snapshot.tournament_name);
+        self.sheet.set_tournament(&schluessel);
         // Schiedsrichter-Roster ebenso (ADR 0022) — und danach die
         // BTP-Officials-Liste in die Rotationsreihenfolge aufnehmen: neue
         // hinten dran, bekannte auf ihrem Platz. Reihenfolge der beiden
         // Aufrufe zählt: erst binden/verwerfen, dann füllen.
-        self.officials.set_tournament(&snapshot.tournament_name);
+        self.officials.set_tournament(&schluessel);
         let official_ids: Vec<i64> = snapshot.officials.iter().map(|o| o.id).collect();
         self.officials.sync_roster(&official_ids);
         // Ausnahmeliste der Auto-Vergabe ebenso turniergebunden (Muster
         // ADR 0022, Spec `feldvergabe-ausnahme`).
-        self.auto_assign_exclusions
-            .set_tournament(&snapshot.tournament_name);
+        self.auto_assign_exclusions.set_tournament(&schluessel);
         // Wunschfelder ebenso turniergebunden (Spec `tl-wunschfeld`):
         // Match- UND CourtIDs gelten nur innerhalb eines Turniers.
-        self.wish_courts.set_tournament(&snapshot.tournament_name);
+        self.wish_courts.set_tournament(&schluessel);
         // Vorbereitungs-Aufrufe ebenso (ADR 0071).
-        self.preparation_calls
-            .set_tournament(&snapshot.tournament_name);
+        self.preparation_calls.set_tournament(&schluessel);
         // Manuelle Spielreihenfolge ebenso turniergebunden (ADR 0023).
-        self.queue_order.set_tournament(&snapshot.tournament_name);
+        self.queue_order.set_tournament(&schluessel);
         // Gesperrte Felder ebenso (ADR 0044). Sie liegen zwar in der Config
         // und nicht in einem eigenen Store, gelten aber genauso nur für EIN
         // Turnier: CourtIDs vergibt BTP je Turnier neu.
-        self.bind_locked_courts(&snapshot.tournament_name);
+        self.bind_locked_courts(&schluessel);
         // Die Pause der automatischen Vergabe ebenso — sie gilt nur für das
         // Turnier, in dem sie gesetzt wurde.
-        self.bind_auto_assign_pause(&snapshot.tournament_name);
+        self.bind_auto_assign_pause(&schluessel);
         // Druck-Gedächtnis ebenso turniergebunden (Spec
         // `schiedsrichterzettel-autodruck`): Match-IDs gelten nur
         // innerhalb eines Turniers, ein Wechsel beginnt frisch.
-        self.print_log.set_tournament(&snapshot.tournament_name);
+        self.print_log.set_tournament(&schluessel);
         // Spielzeiten-Messung ebenso turniergebunden (Spec
         // `spielzeiten-prognose`, Muster ADR 0022).
-        self.match_times.set_tournament(&snapshot.tournament_name);
+        self.match_times.set_tournament(&schluessel);
         // Auto-Hallen ebenso turniergebunden (Spec `hallen-vorverteilung`).
-        self.auto_halls.set_tournament(&snapshot.tournament_name);
+        self.auto_halls.set_tournament(&schluessel);
         // Turnier-Guard der persistenten Nachschub-Queue mitführen (ADR 0018):
         // dieselbe Identität wie der Punktverlauf-Speicher (`tournament_name`).
-        *self.btp_retry_tournament.write().unwrap() = snapshot.tournament_name.clone();
+        *self.btp_retry_tournament.write().unwrap() = schluessel.clone();
         // Beim ERSTEN Snapshot ist der Guard verfügbar → die Queue genau
         // einmal (CAS) von Platte laden (Merge, nicht Replace). Spätere
         // Snapshots aktualisieren nur den Guard.
@@ -4827,13 +4848,13 @@ impl TabletState {
     /// Vergabe-Schlüssel (ADR 0077) — vor `reconcile_queue_order`, solange
     /// der Präfix der Gerufenen noch steht.
     pub fn binde_meetingpoint(&self, snapshot: &BtpSnapshot) {
-        self.preparation_calls
-            .set_tournament(&snapshot.tournament_name);
+        let schluessel = self.turnier_schluessel(snapshot);
+        self.preparation_calls.set_tournament(&schluessel);
         // Den Präfix VOR der Ordnung laden: Im ersten Abruf nach dem Start
         // läuft `set_snapshot` erst später — ohne das sähe die Migration
         // keinen einzigen Präfix-Rang und ordnete still falsch
         // (Review-Fund 08.11.2026). Idempotent.
-        self.queue_order.set_tournament(&snapshot.tournament_name);
+        self.queue_order.set_tournament(&schluessel);
         self.preparation_calls.ordne_einmalig(|id| {
             snapshot
                 .matches

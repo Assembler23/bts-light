@@ -705,6 +705,12 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         // gültigen Zugang antworten beide Routen abweisend — die Prüfung
         // sitzt in `tl::authorize` und liest die Konfiguration frisch, damit
         // ein Widerruf ohne Neustart greift.
+        // LAN-Ansage-Slave eines badhub-Turniers (Paket L3): Kern-Ereignisse
+        // (nur Nummern, keine Namen) gegen die Turnier-UUID. Bei BTP 404.
+        .route(
+            crate::quelle::badhub::slave::PFAD,
+            get(quelle_ereignisse_fuer_slave),
+        )
         .route("/tl", get(tl_page))
         .route("/tl/api/state", get(tl_state))
         .route("/tl/api/command", post(tl_command))
@@ -2898,6 +2904,23 @@ fn tl_device(ctx: &ServerCtx, headers: &axum::http::HeaderMap) -> Option<crate::
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or_default();
     crate::tablet::tl::authorize(&ctx.app_config_arc(), token)
+}
+
+/// Kern-Ereignisse für den LAN-Ansage-Slave eines badhub-Turniers (Paket
+/// L3) — nur bei Quelle badhub und mit passender Turnier-UUID im Kopf.
+async fn quelle_ereignisse_fuer_slave(
+    State(ctx): State<Arc<ServerCtx>>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
+    let uuid = headers
+        .get(crate::quelle::badhub::slave::KOPF_TURNIER)
+        .and_then(|v| v.to_str().ok());
+    match crate::quelle::badhub::slave::fuer_slave(&ctx.app_config_arc(), uuid) {
+        Ok(m) => ([(header::CACHE_CONTROL, "no-store")], Json(m)).into_response(),
+        Err(code) => StatusCode::from_u16(code)
+            .unwrap_or(StatusCode::NOT_FOUND)
+            .into_response(),
+    }
 }
 
 /// Die Turnierleitungs-Oberfläche.
@@ -7241,6 +7264,45 @@ mod tests {
             hall: String::new(),
             profile_id: String::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn kernbefehl_nur_vom_kern_zugang_und_der_kern_zugang_nur_kernbefehle() {
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2]));
+        let ctx = Arc::new(ctx);
+        let kern = relay_proto::TlAction::KernBefehl {
+            befehl: serde_json::json!({"art": "aufruf_zuruecknehmen", "id": "bh-1", "konkurrenz": "HE", "spiel": 1}),
+        };
+        // Ein normales TL-Gerät darf keinen Kernbefehl senden.
+        let r = crate::tablet::tl::execute(&ctx, &tl_device("a"), "op-1", 1, 0, kern.clone()).await;
+        assert_eq!(r.code, Some(relay_proto::TlErrorCode::NotAllowed), "{r:?}");
+        // Der Kern-Zugang darf nichts anderes — auch keinen Fernbefehl.
+        let kern_geraet = crate::config::TlDevice {
+            id: relay_proto::TL_GERAET_KERN.into(),
+            token: "t".into(),
+            ..Default::default()
+        };
+        for a in [
+            relay_proto::TlAction::ReloadTablets,
+            relay_proto::TlAction::ClearOfficialCall { court_id: 1 },
+            relay_proto::TlAction::FreeCourt {
+                court_id: 1,
+                expect: relay_proto::CourtExpectation::Any,
+            },
+        ] {
+            let r = crate::tablet::tl::execute(&ctx, &kern_geraet, "op-2", 1, 0, a).await;
+            assert_eq!(r.code, Some(relay_proto::TlErrorCode::NotAllowed), "{r:?}");
+        }
+        // Bei einem BTP-Turnier gibt es keinen Kern: abgelehnt, nichts geschrieben.
+        let r = crate::tablet::tl::execute(&ctx, &kern_geraet, "op-3", 1, 0, kern).await;
+        assert_eq!(r.code, Some(relay_proto::TlErrorCode::NotAllowed), "{r:?}");
+        // Und bei BTP kennt weder die Geräteliste noch der Relay-Spiegel den Kern-Zugang.
+        let cfg = ctx.app_config();
+        assert!(crate::tablet::tl::device_by_id(&cfg, relay_proto::TL_GERAET_KERN).is_none());
+        assert!(crate::tablet::tl::auth_devices(&cfg)
+            .iter()
+            .all(|d| d.id != relay_proto::TL_GERAET_KERN));
     }
 
     #[tokio::test]

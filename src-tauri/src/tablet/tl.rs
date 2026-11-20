@@ -54,6 +54,12 @@ pub fn authorize(config: &AppConfig, token: &str) -> Option<crate::config::TlDev
 /// Nachvollziehbarkeit allein am Relay, und ein Protokolleintrag benennte
 /// womöglich ein Gerät, das dieser Rechner nie gekoppelt hat.
 pub(crate) fn device_by_id(config: &AppConfig, device_id: &str) -> Option<crate::config::TlDevice> {
+    // Der Kern-Zugang für badhub (Paket L3) steht nicht in der Geräteliste
+    // und hängt nicht am TL-Web-Schalter: Er gilt genau so lange wie die
+    // Lease eines badhub-Turniers.
+    if device_id.trim() == relay_proto::TL_GERAET_KERN {
+        return kern_zugang(config);
+    }
     if !config.tl_web.enabled {
         return None;
     }
@@ -71,6 +77,42 @@ pub(crate) fn device_by_id(config: &AppConfig, device_id: &str) -> Option<crate:
 /// Oberfläche abgeschaltet, ist die Liste leer, und das heißt beim Relay
 /// ausdrücklich „kein Gerät zugelassen".
 pub(crate) fn auth_devices(config: &AppConfig) -> Vec<relay_proto::TlAuthDevice> {
+    let mut geraete = auth_devices_tl_web(config);
+    // Kern-Zugang für badhub (Paket L3) — bei BTP nie vorhanden.
+    if let Some(k) = kern_zugang(config) {
+        geraete.push(relay_proto::TlAuthDevice {
+            id: k.id,
+            token: k.token,
+            profile_id: String::new(),
+        });
+    }
+    geraete
+}
+
+/// Abgleich-Lage für die TL-Sicht — nur bei Quelle badhub am Master.
+fn badhub_abgleich(config: &AppConfig) -> Option<crate::quelle::badhub::Abgleich> {
+    if config.quelle != crate::config::QuelleArt::Badhub || config.slave_mode {
+        return None;
+    }
+    crate::quelle::badhub::abgleich_lage()
+}
+
+/// Der TL-Zugang, den bts-light beim Nehmen der Lease für badhub ausgestellt
+/// hat — nur bei Quelle badhub, am Master, mit aktiver Lease.
+fn kern_zugang(config: &AppConfig) -> Option<crate::config::TlDevice> {
+    if config.quelle != crate::config::QuelleArt::Badhub || config.slave_mode {
+        return None;
+    }
+    let token = crate::quelle::badhub::tl_zugang()?;
+    Some(crate::config::TlDevice {
+        id: relay_proto::TL_GERAET_KERN.to_string(),
+        token,
+        label: "badhub".to_string(),
+        ..Default::default()
+    })
+}
+
+fn auth_devices_tl_web(config: &AppConfig) -> Vec<relay_proto::TlAuthDevice> {
     if !config.tl_web.enabled {
         return Vec::new();
     }
@@ -1848,6 +1890,23 @@ pub(crate) async fn execute(
         action_label(&action)
     );
 
+    // Kernbefehl aus badhub (Paket L3): nur vom Kern-Zugang, und der darf
+    // nichts anderes. Ganz vorn — vor jedem anderen Weg, auch vor dem
+    // Fernbefehl an die Tablets.
+    let ist_kern_zugang = device.id == relay_proto::TL_GERAET_KERN;
+    if let relay_proto::TlAction::KernBefehl { befehl } = &action {
+        if !ist_kern_zugang {
+            return TlResponse::err(
+                C::NotAllowed,
+                "Kernbefehle nimmt der Turnier-PC nur von badhub an.",
+            );
+        }
+        return execute_kern_befehl(ctx, befehl.clone());
+    }
+    if ist_kern_zugang {
+        return TlResponse::err(C::NotAllowed, "Dieser Zugang darf nur Kernbefehle senden.");
+    }
+
     // Wiederholung? Dann die gespeicherte Antwort, ohne erneut zu schreiben.
     // Ein Doppeltipp bei träger Verbindung schickt dieselbe Aktion zweimal;
     // ohne diese Prüfung landete sie zweimal in BTP. Der Fingerabdruck stellt
@@ -2110,8 +2169,35 @@ pub(crate) async fn execute(
             );
             // Fehlgeschlagene Schreibvorgänge werden NICHT gemerkt: Ein
             // erneuter Versuch soll es wirklich noch einmal versuchen.
-            TlResponse::err(C::BtpError, format!("BTP hat abgelehnt: {e}"))
+            crate::quelle::schreib_ablehnung(&config, &e)
         }
+    }
+}
+
+/// Ein Kernbefehl aus badhub: derselbe Schreibpfad wie eine Eingabe in der
+/// Halle (Lease, Prüfung im Kern, Protokoll). Antwort „übernommen“ oder die
+/// Ablehnung des Kerns mit Code und Text.
+fn execute_kern_befehl(
+    ctx: &crate::tablet::server::ServerCtx,
+    befehl: serde_json::Value,
+) -> relay_proto::TlResponse {
+    use crate::quelle::badhub::SchreibFehler as F;
+    use relay_proto::{TlErrorCode as C, TlResponse};
+    let config = ctx.app_config();
+    if config.quelle != crate::config::QuelleArt::Badhub || config.slave_mode {
+        return TlResponse::err(C::NotAllowed, "Dieser PC steuert kein badhub-Turnier.");
+    }
+    match crate::quelle::badhub::befehl_von_badhub(befehl) {
+        Ok(_) => {
+            tracing::info!("TL-Web [badhub]: Kernbefehl übernommen");
+            TlResponse::ok(0)
+        }
+        Err(F::Kern { text, grund }) => {
+            tracing::info!("TL-Web [badhub]: Kernbefehl abgelehnt ({text})");
+            TlResponse::kern_abgelehnt(text, grund)
+        }
+        Err(F::Gesperrt(t)) => TlResponse::err(C::NotAllowed, t),
+        Err(F::Ungueltig(t)) => TlResponse::err(C::Unsupported, t),
     }
 }
 
@@ -2425,7 +2511,11 @@ async fn execute_result_action(
                 written += 1;
             }
             Err(e) => {
-                ctx.tablet.queue_btp_retry(update, now_ms);
+                // Bei badhub kein Nachschub: dort scheitert ein Write nur
+                // am Kern oder an der Lease, nie am Netz.
+                if crate::quelle::nachschub_moeglich(config) {
+                    ctx.tablet.queue_btp_retry(update, now_ms);
+                }
                 errors.push(e);
             }
         }
@@ -2460,6 +2550,15 @@ async fn execute_result_action(
     }
     Some(if errors.is_empty() {
         TlResponse::ok(0)
+    } else if !crate::quelle::nachschub_moeglich(config) {
+        if written > 0 {
+            TlResponse::ok(0).with_warning(format!(
+                "{written} gewertet, abgelehnt: {}",
+                errors.join(" | ")
+            ))
+        } else {
+            crate::quelle::schreib_ablehnung(config, &errors.join(" | "))
+        }
     } else if written > 0 {
         // Teilweise durchgekommen: Das ist kein Fehlschlag, aber die
         // Turnierleitung muss wissen, dass noch etwas unterwegs ist.
@@ -2666,6 +2765,11 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         A::ProfileDelete { profile_id } => format!("profile-delete:{profile_id}"),
         A::ProfileSelect { profile_id } => format!("profile-select:{profile_id}"),
         A::ProfileSetDefault { profile_id } => format!("profile-default:{profile_id}"),
+        // Die Befehls-ID trägt die Identität; der Kern ist ohnehin idempotent.
+        A::KernBefehl { befehl } => format!(
+            "kern:{}",
+            befehl.get("id").and_then(|i| i.as_str()).unwrap_or("")
+        ),
         // Der Zielzustand gehört in den Fingerabdruck: Sperren und Freigeben
         // desselben Felds sind zwei verschiedene Absichten und dürfen sich
         // nicht gegenseitig als „schon erledigt" gelten.
@@ -2812,6 +2916,25 @@ fn action_label(action: &relay_proto::TlAction) -> String {
         A::ProfileSetDefault { profile_id } => {
             format!("Profil {profile_id} als Standard gesetzt")
         }
+        // Nur Art und Kennung: der Befehl selbst trägt keine Namen, aber
+        // kurz bleibt das Protokoll lesbar.
+        A::KernBefehl { befehl } => format!(
+            "Kernbefehl {} ({})",
+            befehl
+                .get("art")
+                .and_then(|a| a.as_str())
+                .unwrap_or("?")
+                .chars()
+                .take(40)
+                .collect::<String>(),
+            befehl
+                .get("id")
+                .and_then(|i| i.as_str())
+                .unwrap_or("")
+                .chars()
+                .take(64)
+                .collect::<String>()
+        ),
         A::ReloadTablets => "Alle Tablets laden neu".to_string(),
         A::ClearOfficialCall { court_id } => {
             format!("Ruf nach der Turnierleitung an Feld {court_id} zurückgenommen")
@@ -3143,6 +3266,12 @@ pub struct TlState {
     /// dem sie kommt). Siehe [`badhub_links`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub badhub: Option<TlBadhubLinks>,
+    /// Abgleich mit badhub bei einem badhub-Turnier (Paket L3): „badhub:
+    /// aktuell“ / „5 Ereignisse warten …“, bei zurückgeholter Steuerung als
+    /// roter Hinweis. Bei BTP-Turnieren nie gesetzt — der Zustand bleibt
+    /// Byte für Byte wie bisher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub badhub_abgleich: Option<crate::quelle::badhub::Abgleich>,
     /// Nach wie vielen Sekunden ein „fertig aussehendes" Spiel gemeldet wird
     /// (`0` = Warnung aus). Kommt aus der Konfiguration; die Seite rechnet
     /// damit gegen [`TlCourt::decided_since_ms`].
@@ -4608,6 +4737,7 @@ pub(crate) fn build_state_limited(
             tournament: String::new(),
             multi_hall: false,
             badhub: badhub_links(config),
+            badhub_abgleich: badhub_abgleich(config),
             can_set_wish_court: true,
             can_set_highlight: true,
             can_repeat_prep_call: true,
@@ -5005,6 +5135,7 @@ pub(crate) fn build_state_limited(
         can_clear_official_call: true,
         can_search: true,
         badhub: badhub_links(config),
+        badhub_abgleich: badhub_abgleich(config),
         finished_warning_seconds: config.finished_warning_seconds,
         shuttle_counter: config.shuttle_counter,
         injury_guide_seconds: config.richtzeit_s(),

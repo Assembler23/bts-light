@@ -25,7 +25,9 @@ use std::path::{Path, PathBuf};
 const DATEIEN: &[&str] = &[
     "config.rs",
     "quelle/badhub/ablage.rs",
+    "quelle/badhub/lease.rs",
     "quelle/badhub/paket.rs",
+    "quelle/badhub/protokoll.rs",
     "rueckweg.rs",
     "seiten_paket.rs",
     "tablet/exclusion.rs",
@@ -57,6 +59,8 @@ const NICHT_GESPEICHERT: &[&str] = &[
     "commands.rs",
     "kern_tausch.rs",
     "quelle/badhub/api.rs",
+    "quelle/badhub/mod.rs",
+    "quelle/badhub/slave.rs",
     "seiten_angebot.rs",
     "tablet/assign.rs",
     "tablet/server.rs",

@@ -123,6 +123,33 @@ impl Ablage {
         )
     }
 
+    /// Legt ein Geheimnis (z. B. den Relay-Zugang für badhub) verschlüsselt
+    /// unter `name` ab.
+    pub fn geheimnis_speichern(&self, name: &str, wert: &str) -> Result<(), String> {
+        std::fs::create_dir_all(&self.dir).map_err(|e| format!("Turnierordner: {e}"))?;
+        let k = self.schluessel()?;
+        schluessel::schreiben_privat(
+            &self.dir.join(name),
+            &schluessel::verschluesseln(&k, wert.as_bytes())?,
+        )
+    }
+
+    /// Liest ein mit [`Self::geheimnis_speichern`] abgelegtes Geheimnis.
+    pub fn geheimnis_laden(&self, name: &str) -> Option<String> {
+        let daten = std::fs::read(self.dir.join(name)).ok()?;
+        let k = self.schluessel().ok()?;
+        String::from_utf8(schluessel::entschluesseln(&k, &daten).ok()?).ok()
+    }
+
+    /// Löscht den Personenauszug (nach der Rückgabe bzw. nach der Frist).
+    pub fn personen_loeschen(&self) {
+        match std::fs::remove_file(self.dir.join("personen.bin")) {
+            Ok(()) => tracing::info!("badhub-Turnier: Personenauszug gelöscht"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!("badhub-Turnier: Personenauszug nicht gelöscht ({e})"),
+        }
+    }
+
     /// Liest das Gerätetoken; `None`, wenn keins (lesbar) da ist.
     pub fn token_laden(&self) -> Option<String> {
         let daten = std::fs::read(self.dir.join("geraet.bin")).ok()?;
@@ -147,6 +174,7 @@ mod tests {
                 uuid: UUID.into(),
                 name: "Testturnier".into(),
                 beginn: None,
+                ende: None,
             },
             meldungen: vec![PaketMeldung {
                 meldung: 1,

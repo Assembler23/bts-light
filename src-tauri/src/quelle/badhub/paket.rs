@@ -56,6 +56,10 @@ pub struct PaketTurnier {
     pub name: String,
     #[serde(default)]
     pub beginn: Option<String>,
+    /// Letzter Turniertag (`JJJJ-MM-TT`), Grundlage der Löschfrist des
+    /// Personenauszugs (14 Tage danach).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ende: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -117,6 +121,11 @@ pub struct PaketSchiedsrichter {
     pub id: u32,
     #[serde(default)]
     pub name: String,
+    /// Meldeperson, falls die Person auch spielt — gehört in
+    /// `offizielle_setzen` (badhub prüft ID **und** Person gegen die
+    /// Schiedsrichterliste). Fehlt sie im Paket, geht der Befehl ohne Person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person: Option<u32>,
 }
 
 /// Der verschlüsselt abgelegte Teil des Pakets.

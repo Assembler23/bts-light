@@ -119,6 +119,10 @@ header {
    „hängt hinterher" und „ist weg" sind für die Turnierleitung drei
    verschiedene Lagen. */
 .conn { display: flex; align-items: center; gap: 7px; font-size: .9rem; font-weight: 600; }
+/* Abgleich mit badhub bei einem badhub-Turnier (Paket L3): Statuszeile im
+   Kopf, bei zurückgeholter Steuerung ein rotes Band über allem. */
+.bh-abgleich { font-size: .85rem; color: var(--muted, #64748b); white-space: nowrap; }
+.bh-abgleich-rot { background: #b91c1c; color: #fff; padding: 8px 12px; font-weight: 600; text-align: center; }
 .conn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
 .conn.delayed { color: var(--warn); } .conn.delayed .dot { background: var(--warn); }
 .conn.offline { color: var(--alarm); } .conn.offline .dot { background: var(--alarm); }
@@ -1739,6 +1743,7 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
            placeholder="Spieler oder SR suchen" aria-label="Spieler oder Schiedsrichter suchen"
            autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" maxlength="64" />
     <button type="button" class="auto" id="auto-toggle" hidden></button>
+    <span class="bh-abgleich" id="bh-abgleich" hidden></span>
     <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">verbinde …</span></span>
     <!-- Profile (Spec tl-web-panelsystem) ersetzen das frühere
          Anzeige-Klappmenü — Panel-Sichtbarkeit/-Reihenfolge/-Höhe UND die
@@ -10467,6 +10472,35 @@ async function clearAutoHalls() {
   );
 }
 
+// Abgleich mit badhub (Paket L3): Zeile im Kopf („badhub: aktuell" /
+// „5 Ereignisse warten, letzter Kontakt 10:47"), rotes Band, wenn badhub
+// die Steuerung zurückgeholt hat. Bei BTP fehlt `badhub_abgleich` — nichts
+// erscheint.
+function renderBadhubAbgleich() {
+  const a = state && state.badhub_abgleich;
+  const zeile = $("bh-abgleich");
+  let band = document.getElementById("bh-abgleich-band");
+  if (!a) {
+    zeile.hidden = true;
+    if (band) band.remove();
+    return;
+  }
+  zeile.hidden = !!a.rot;
+  zeile.textContent = a.text;
+  if (a.rot) {
+    if (!band) {
+      band = document.createElement("div");
+      band.id = "bh-abgleich-band";
+      band.className = "bh-abgleich-rot";
+      band.setAttribute("role", "alert");
+      document.body.prepend(band);
+    }
+    band.textContent = a.text;
+  } else if (band) {
+    band.remove();
+  }
+}
+
 function render() {
   if (!state) return;
   // Ein gewähltes Spiel, das es so nicht mehr gibt, verschwindet aus der
@@ -10482,6 +10516,7 @@ function render() {
   if (picked && !pickIsStillValid()) picked = null;
   renderTurnierKopf();
   renderConnection();
+  renderBadhubAbgleich();
   renderHalls();
   renderAutoToggle();
   renderTabletsReload();

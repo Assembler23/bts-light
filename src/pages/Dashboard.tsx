@@ -21,6 +21,7 @@ import {
 import { extractTournamentGuid } from "../tournamentGuid";
 import { AushangOverlay } from "../components/AushangOverlay";
 import { SlaveDevicesPanel } from "../components/SlaveDevicesPanel";
+import { BadhubAbgleichPanel } from "../components/BadhubAbgleichPanel";
 import type { NavView, SettingsFocus } from "../components/SideNav";
 import type {
   AppConfig,
@@ -364,6 +365,9 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
             : "Turnier-Übersicht & Liveticker-Status"}
         </p>
       </header>
+
+      {/* badhub-Turnier (Paket L3): Abgleich, Rückgabe, Übernahme. Bei BTP leer. */}
+      {running && config.quelle === "badhub" && !config.slave_mode && <BadhubAbgleichPanel />}
 
       {/* Ferne Halle (Cloud-Slave): Hallen-Auswahl + Tablet-QR + Monitor-Links
           der eigenen Halle. Rendert nur, wenn dieser PC als Cloud-Slave läuft. */}

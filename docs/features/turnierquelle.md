@@ -2,6 +2,8 @@
 
 > **Status (20.11.2026):** Paket L1 umgesetzt (v0.9.448): BTP liegt hinter der Turnierquelle, ohne Verhaltensänderung.
 > Paket L2 umgesetzt (v0.9.449): Quelle `badhub` lesend — Kopplung, Turnierpaket, Kern-Faltung, Wizard-Schritt.
+> Paket L3 umgesetzt (v0.9.450): Schreibpfad über Kernbefehle, lokales Protokoll, Lease, Outbox, Relay-Aktion
+> `KernBefehl` für Eingaben aus badhub, LAN-Slave liest vom Master, Stores an der Turnier-UUID.
 > Ziel und Gesamtplan: badhub `docs/features/bts_light_steuerung.md`, Entscheidung badhub ADR-0084 (bts-light hält am
 > Turniertag die Lease eines badhub-Turniers).
 
@@ -69,8 +71,9 @@ nicht die eingestellte Quelle.
   zusätzlich `badhub_turnier`) und geht nicht verloren, wenn eine ältere Version die Konfiguration zurückschreibt.
 - Die UUID kommt aus dem Netz und wird vor jedem Pfadbau geprüft (nur Hex und `-`, 8–64 Zeichen).
 - Keine Namen in Logs: Meldungen nennen Turnier-ID, Zahlen und Statuscodes; Formatfehler nur Zeile/Spalte.
-- **Offen (L3):** Löschen des Personenauszugs nach Lease-Rückgabe und leerer Outbox bzw. spätestens 14 Tage nach
-  Turnierende (Spec „Personendaten auf dem Hallen-PC“). In L2 bleibt er liegen, bis neu gekoppelt wird.
+- **Löschen (L3):** Der Personenauszug (`personen.bin`) wird nach der Rückgabe der Lease (nur mit leerer Outbox
+  möglich) gelöscht, sonst spätestens 14 Tage nach Turnierende (`turnier.ende`, sonst `beginn`; `aufraeumen` beim Start
+  der Übertragung). Ordner alter Kopplungen ohne wartende Ereignisse werden dabei ganz gelöscht.
 
 ### Abbildung Kern-Stand → `BtpSnapshot` (`quelle/badhub/abbildung.rs`)
 
@@ -94,31 +97,39 @@ nicht die eingestellte Quelle.
 | `events`, `entries` | `konkurrenzen`, Personenauszug | |
 | `highlight`, `shuttles` | 0 | nur BTP; bei Kern-Turnieren gilt der lokale Aufrufzustand |
 | `member_id` | `None` | das Paket trägt keine Lizenznummer |
-| `tournament_name` | `turnier.name` | schützt wie bei BTP die lokalen Stores; Umstellung auf die UUID mit L3 |
+| `tournament_name` | `turnier.name` | nur Anzeige; die lokalen Stores binden seit L3 an `badhub:<uuid>` (`TabletState::turnier_schluessel`) |
 
 ### Schreiben und BTP-Berührpunkte bei Quelle badhub
 
 | Berührpunkt | Bei badhub |
 |---|---|
-| `write_result_to_btp`, `write_result_settled`, `write_courts_to_btp`, `write_officials_to_btp`, `write_highlight_to_btp` (Tablet, TL-Web, Desktop, Auto-Vergabe, Farben, Schiedsrichter, Nachschub-Flush) | Weichen in `quelle/mod.rs` statt Re-Export: `Err(SCHREIBEN_FOLGT)`, kein BTP-Kontakt, kein Schreib-Gate, keine `eigene_writes`-Merker |
-| Nachschub-Queue (`btp-retry.json`) | `process_result` reiht nur ein, wenn `quelle::nachschub_moeglich`; bei badhub wiederholbare Ablehnung an das Tablet (es behält das Ergebnis). Der Flush erreicht badhub nie, weil kein Eintrag entsteht |
-| `quelle::stand` (Sync-Takt) | badhub-Zweig, kein BTP-Abruf |
-| LAN-/Ansage-Slave (liest sonst BTP direkt) | Fehlertext „folgt“, kein BTP-Abruf, kein Abgleich (Stand vom Master kommt mit L3) |
+| `write_result_to_btp`, `write_result_settled`, `write_courts_to_btp`, `write_officials_to_btp`, `write_highlight_to_btp` (Tablet, TL-Web, Desktop, Auto-Vergabe, Farben, Schiedsrichter, Nachschub-Flush) | Weichen in `quelle/mod.rs`: seit L3 Kernbefehle (siehe unten), kein BTP-Kontakt, kein Schreib-Gate, keine `eigene_writes`-Merker; Zeilenfarbe nur lokal (`Ok`) |
+| Nachschub-Queue (`btp-retry.json`) | eingereiht wird nur, wenn `quelle::nachschub_moeglich` (Tablet, TL-Web, Desktop-Ergebnis/Walkover/Disqualifikation); bei badhub geht die Ablehnung des Kerns zurück, das Tablet behält sein Ergebnis |
+| `quelle::stand` (Sync-Takt) | badhub-Zweig, kein BTP-Abruf; Fehler als `SyncOutcome::QuelleFehler` („badhub-Turnier: …“, nie „BTP nicht erreichbar“) |
+| LAN-/Ansage-Slave (liest sonst BTP direkt) | seit L3 `badhub::slave`: Ereignisse vom Master (`GET :8088/quelle/ereignisse`, Kopf `X-Bts-Turnier`), gefaltet mit dem eigenen Paket; kein BTP, keine Lease |
+| Auto-Vergabe, Schiedsrichter-Abgleich | schreiben nur, wenn `quelle::schreiben_moeglich` (BTP: immer; badhub: Lease) — keine Warnung je Takt ohne Lease |
+| TL-Antwort bei Schreibfehler | `quelle::schreib_ablehnung`: BTP wortgleich „BTP hat abgelehnt: …“ (`btp_error`), badhub die Kern-Ablehnung (`kern_abgelehnt`) |
 | TP-Takt, TP-Datei-Suche (`tp_takt.rs`, `tp_finden`) | starten nicht (`QuellenStart.btp_dienste`) |
 | TP-Upload per Knopf (`tp_upload_now`) | `pruefe_upload_bedingungen` lehnt ab |
 | Schreib-Gate (`btp::write_gate`) | unberührt — nur BTP-Writes und TP-Upload nutzen es, beide laufen nicht |
 | `test_btp` im Assistenten | bleibt; der BTP-Abschnitt ist bei badhub ausgeblendet |
 | Ansage-Freitext des LAN-Slaves (`config.btp.host` als Master-Adresse) | unverändert, kein BTP |
 
-Laufen Auto-Vergabe, Schiedsrichter-Rotation oder Farben bei einem badhub-Turnier, scheitert ihr Write mit der
-Meldung im Log (Warnung je Takt); die Turnierleitung schaltet sie bis L3 am besten aus.
 
 ### Datenformat (ADR 0101)
 
 Neue gespeicherte Variante `quelle = "badhub"`, neuer Block `badhub_turnier`, neue Dateien unter `turniere/`. Die Grenze
 `rueckwaerts_lesbar_ab` bleibt: v0.9.448 liest `"badhub"` als BTP, ältere übergehen das Feld, `turniere/` liest keine
 ältere Version. Ein Rückweg während eines badhub-Turniers schaltet die Halle auf BTP — bewusst in Kauf genommen, weil L2
-nur liest und nichts verloren geht. Mit L3 (lokales Protokoll und Outbox) ist die Grenze neu zu entscheiden.
+nur liest und nichts verloren geht.
+
+**L3 (v0.9.450), neu entschieden:** neue Dateien `protokoll.jsonl`, `lease.json`, `relay.bin`, `verworfen-*.jsonl`;
+`paket.json` optional mit `turnier.ende` und `schiedsrichter[].person`. Die Grenze **bleibt**: `config.json` ist
+unverändert, BTP-Installationen haben keine dieser Dateien, für BTP-Turniere bleibt der Rückweg fachlich richtig — und
+„BTP unverändert“ verbietet, ihnen den Rückweg zu nehmen. In Kauf genommen: Ein Rückweg auf v0.9.449 **während** eines
+badhub-Turniers unter der Lease zeigt nur den von badhub bestätigten Stand und nimmt keine Eingaben an; Protokoll und
+Lease bleiben liegen, nach dem erneuten Update lädt die Outbox mit derselben Epoche weiter. badhub-Turniere laufen bis
+zur Generalprobe E1 nicht produktiv.
 
 ### Abstimmung mit badhub (B1)
 
@@ -130,7 +141,72 @@ nur liest und nichts verloren geht. Mit L3 (lokales Protokoll und Outbox) ist di
 - Liveticker-GUID: bleibt Pflicht im Assistenten (`tournament_uuid`); ob badhub dort die Turnier-UUID annimmt
   (GUID-Brücke ADR-0080), ist mit B1 zu klären.
 
-## Nächste Pakete (Plan, badhub-Spec)
+## Paket L3 (umgesetzt, schreibend)
 
-- **L3:** Schreibpfad über neutrale Befehle hinter der Quelle, eigenes Protokoll auf der Platte, Outbox an badhub,
-  Relay-Aktion `KernBefehl` für Eingaben aus badhub.
+### Weiche → Kernbefehl (`quelle/badhub/schreiben.rs`)
+
+| Weiche | Kernbefehl |
+|---|---|
+| Feld zuweisen (`write_courts_to_btp`, Court mit Spiel) | `spiel_aufrufen {konkurrenz, spiel, feld, jetzt}` — Feld = Kern-Schreibweise aus dem Paket-Rahmen (`abbildung::feld_kern_name`) |
+| Umhängen (Court ohne Spiel + Court mit demselben Spiel) | nur `spiel_aufrufen` auf das neue Feld (der Kern behält den Beginn) |
+| Feld räumen ohne Ergebnis | `aufruf_zuruecknehmen` für das dort aufgerufene Spiel |
+| Ergebnis / Walkover / Aufgabe / Disqualifikation (`write_result_*`, ScoreStatus 0/1/2/3) | `ergebnis_melden {saetze, ende, jetzt, beginn, bis}`; kampflos = `ende: kampflos{sieger}` ohne Sätze, Aufgabe = `aufgabe{aufgebend: Verlierer}`, Disqualifikation (kennt der Kern nicht) mit Sätzen als Aufgabe, ohne als kampflos; `bis` = Spielende, `beginn` = Ende − gemessene Dauer |
+| Schiedsrichter (`write_officials_to_btp`) | je Spiel `offizielle_setzen {schiedsrichter, aufschlagrichter}` mit IDs aus `paket.schiedsrichter` und `person` von dort (`0` = kein Dienst) |
+| Zeilenfarbe (`write_highlight_to_btp`) | keiner — nur lokal |
+
+Zeiten: lokale Wandzeit des Hallen-PCs `JJJJ-MM-TTTHH:MM:SS` (`schreiben::wandzeit`). Ein Befehl, der nichts ändern würde
+(dasselbe Ergebnis zweimal vom Tablet, derselbe Aufruf, dieselbe Besetzung), entsteht nicht. Team 1 = oben.
+
+### Ausführen (`KernQuelle::ausfuehren`)
+
+1. Schreibrecht: aktive Lease und `paket.kern_version` = `KERN_VERSION` (sonst `SchreibFehler::Gesperrt`).
+2. Jeder Befehl bekommt eine Kennung `bts-<Lauf>-<ms hex>-<Zähler>` (nur `[A-Za-z0-9-]`, ≤ 64 — was badhub annimmt).
+3. `pruefen_turnier` der Reihe nach auf den fortgeschriebenen Stand — **alle oder keiner** (wie ein BTP-Schreibvorgang).
+   Ablehnung → `SchreibFehler::Kern {text, grund}` (Text ohne Namen, `grund` im Wortlaut des Kerns) an Tablet/TL.
+   Bekannte Kennung → wirkungslos (Idempotenz des Kerns).
+4. Posten (Befehl + Ereignisse + lokal Akteur/Zeit) per `write_all` + `sync_data` an `turniere/<uuid>/protokoll.jsonl`;
+   beim Laden wird eine angefangene letzte Zeile verworfen und abgeschnitten.
+5. Stand = Paket-Ereignisse (von badhub bestätigt) + eigene darüber hinaus, neu gefaltet.
+
+### Lease (`lease.rs`, Abgleich-Task)
+
+- `POST turnier/lease {n, relay?, uebernehmen: false}` mit `n` = lokalem Stand; ohne gespeicherte Lease sofort, mit
+  aktiver Lease einmal je Lauf und **nur bei leerer Outbox** (sonst stimmte `n` nicht — die Outbox läuft dann mit der
+  gespeicherten Epoche). Vor der Lease holt der Abgleich Ereignisse nach (`n_veraltet` heilt so im nächsten Takt);
+  unter der Lease holt er keine Ereignisse, nur alle 60 s die Stammdaten.
+- `relay: {ns: install_id, tl_token}` nur mit Cloud-Weg. Der Kern-Zugang bleibt über Neustarts gleich.
+- Offline beim Start: gespeicherte Lease (Epoche) gilt weiter, kein Ablauf. Ohne gespeicherte Lease: Eingaben gesperrt.
+- `lease_belegt`: Hinweis „ein anderes Gerät steuert das Turnier“, Eingaben gesperrt.
+- Rückgabe (Knopf **Turnier beenden / Steuerung an badhub zurückgeben**, Tauri `badhub_turnier_beenden`): nur mit leerer
+  Outbox, `DELETE turnier/lease {epoche, n}`, danach Zustand `zurueckgegeben`, Kern-Zugang weg, Personenauszug gelöscht.
+  Kein automatisches Neunehmen nach Neustart.
+- **Steuerung wieder übernehmen** (`badhub_steuerung_uebernehmen`, nach Rückgabe oder Rückholung): eigene, nicht
+  bestätigte Posten wandern nach `verworfen-<ms>.jsonl`, Paket frisch von badhub, Lease weg — der Abgleich nimmt sie neu.
+
+### Outbox (`outbox_schleife`, eigener Task)
+
+- Lädt die Posten nach `basis_n` (= bestätigtes `n`) hoch: höchstens 200 Posten und 1000 Ereignisse je Aufruf.
+- `200 {bis_n}` → bestätigt; eigene Ereignisse bis dort wandern ins Paket (`paket.json`), `lease.json` trägt `bis_n`.
+- `409 luecke {erwartet_n}` → ab dort fortsetzen (liegt `erwartet_n` außerhalb des eigenen Bereichs: angehalten).
+- `409 epoche_veraltet` oder `401/403` (Widerruf beendet in badhub die Lease) → `entzogen`: Outbox steht, Eingaben
+  gesperrt, rotes Band im TL-Web und im Hauptfenster.
+- `422 abweichung` → angehalten (rot, „Abgleich mit badhub angehalten“); sollte bei gleicher Kern-Version nie vorkommen.
+- Netz, 429, 5xx → Neuversuch nach 5, 10, 20, 40, 60 s, danach alle 60 s.
+- Lage (`Abgleich`): „badhub: aktuell“ / „N Ereignisse warten, letzter Kontakt HH:MM“ — Tauri `badhub_abgleich`
+  (Dashboard `BadhubAbgleichPanel`) und `TlState.badhub_abgleich` (TL-Web, nur bei badhub gesetzt).
+
+### Eingaben aus badhub über das Relay
+
+`TlAction::KernBefehl { befehl }` vom Kern-Zugang `badhub-kern` (Wire-Ebene: [cloud-relay.md](../cloud-relay.md),
+„Kernbefehle aus badhub“). `KernQuelle::befehl_von_badhub`: nur die sechs Durchführungs-Befehle, Kennung wie oben
+geprüft, `jetzt` setzt der Knoten; danach derselbe Weg wie eine Eingabe in der Halle (Akteur `badhub` im Protokoll).
+Antwort `ok`, `kern_abgelehnt` (+ `ablehnung`), `not_allowed` (keine Lease) oder `unsupported`.
+
+### Abstimmung mit badhub (B2)
+
+- **`paket.schiedsrichter[].person` fehlt in B1.** badhub prüft beim Hochladen `person` gegen die Schiedsrichterliste;
+  bts-light schickt sie nur, wenn das Paket sie trägt. B2 sollte `person` ins Paket aufnehmen (sonst
+  `offizieller_unbekannt` für Offizielle, die auch spielen).
+- B2 schickt Kernbefehle mit `op_id` = Befehls-ID; `jetzt` darf fehlen. Erwartete Antworten wie oben; `host_offline`
+  bzw. Zeitüberschreitung → Hinweis „Halle nicht erreichbar“.
+- Befehle aus bts-light tragen kein Feld `geraet`: Wer in der Halle gehandelt hat, steht nur lokal im Protokoll.

@@ -12,11 +12,11 @@ use super::paket::*;
 use super::*;
 use crate::btp::model::{Discipline, MatchResult, MatchStatus};
 
-const UUID: &str = "0f8b2c1e-1111-4222-8333-444455556666";
+pub(super) const UUID: &str = "0f8b2c1e-1111-4222-8333-444455556666";
 const VOR: &str = "2026-12-01T12:00:00";
 const SCHLUSS: &str = "2026-12-05T23:59:59";
-const T1: &str = "2026-12-06T10:00:00";
-const T2: &str = "2026-12-06T10:25:00";
+pub(super) const T1: &str = "2026-12-06T10:00:00";
+pub(super) const T2: &str = "2026-12-06T10:25:00";
 
 fn k(key: &str) -> Konkurrenz {
     Konkurrenz {
@@ -30,7 +30,10 @@ fn k(key: &str) -> Konkurrenz {
 }
 
 /// Wie badhub: jeder Befehl über JSON (Lehre aus Kern v0.9.0).
-fn befehl(log: &mut Vec<TurnierEreignis>, b: TurnierBefehl) -> Result<(), TurnierAblehnung> {
+pub(super) fn befehl(
+    log: &mut Vec<TurnierEreignis>,
+    b: TurnierBefehl,
+) -> Result<(), TurnierAblehnung> {
     let b: TurnierBefehl = serde_json::from_str(&serde_json::to_string(&b).unwrap()).unwrap();
     let neu = pruefen_turnier(&falten_turnier(log), &b)?;
     log.extend(neu);
@@ -39,7 +42,7 @@ fn befehl(log: &mut Vec<TurnierEreignis>, b: TurnierBefehl) -> Result<(), Turnie
 
 /// Turnier mit HE (`n` Meldungen, System `s`), ausgelost und freigegeben,
 /// Zeitplan auf den Hallen `hallen` (Kennung, Feldzahl) gerechnet.
-fn turnier(n: u32, s: System, hallen: &[(&str, u32)]) -> Vec<TurnierEreignis> {
+pub(super) fn turnier(n: u32, s: System, hallen: &[(&str, u32)]) -> Vec<TurnierEreignis> {
     let wege: BTreeSet<Weg> = [Weg::Veranstalter].into();
     let mut log = vec![];
     befehl(
@@ -147,7 +150,7 @@ fn turnier(n: u32, s: System, hallen: &[(&str, u32)]) -> Vec<TurnierEreignis> {
     log
 }
 
-fn paket_fuer(log: Vec<TurnierEreignis>, n: u32, hallen: Vec<PaketHalle>) -> Paket {
+pub(super) fn paket_fuer(log: Vec<TurnierEreignis>, n: u32, hallen: Vec<PaketHalle>) -> Paket {
     Paket {
         schema: SCHEMA,
         kern_version: KERN_VERSION.into(),
@@ -156,6 +159,7 @@ fn paket_fuer(log: Vec<TurnierEreignis>, n: u32, hallen: Vec<PaketHalle>) -> Pak
             uuid: UUID.into(),
             name: "Wintercup".into(),
             beginn: Some("2026-12-06".into()),
+            ende: None,
         },
         ereignisse: log,
         konkurrenzen: vec![PaketKonkurrenz {
@@ -185,12 +189,13 @@ fn paket_fuer(log: Vec<TurnierEreignis>, n: u32, hallen: Vec<PaketHalle>) -> Pak
         schiedsrichter: vec![PaketSchiedsrichter {
             id: 4,
             name: "Sabine Pfiff".into(),
+            person: None,
         }],
         stammdaten_etag: Some("\"s1\"".into()),
     }
 }
 
-fn eine_halle() -> Vec<PaketHalle> {
+pub(super) fn eine_halle() -> Vec<PaketHalle> {
     vec![PaketHalle {
         id: "H1".into(),
         name: "Halle 1".into(),
@@ -198,7 +203,7 @@ fn eine_halle() -> Vec<PaketHalle> {
     }]
 }
 
-fn melden(
+pub(super) fn melden(
     log: &mut Vec<TurnierEreignis>,
     id: &str,
     spiel: u32,
@@ -221,7 +226,7 @@ fn melden(
     .unwrap();
 }
 
-fn aufrufen(
+pub(super) fn aufrufen(
     log: &mut Vec<TurnierEreignis>,
     id: &str,
     spiel: u32,
@@ -239,7 +244,7 @@ fn aufrufen(
     )
 }
 
-const OBEN: &[(u16, u16)] = &[(21, 10), (21, 10)];
+pub(super) const OBEN: &[(u16, u16)] = &[(21, 10), (21, 10)];
 
 #[test]
 fn ko_mit_fortschreiben_bildet_ids_kanten_und_namen_ab() {

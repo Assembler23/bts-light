@@ -4,6 +4,27 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.450
+
+- **badhub-Turniere aus der Halle steuern.** Beim Start der Übertragung
+  übernimmt bts-light die Steuerung eines gekoppelten badhub-Turniers.
+  Ergebnisse vom Tablet, Walkover, Aufgabe und Disqualifikation, Feldvergabe
+  (von Hand und automatisch) und Schiedsrichter gelten sofort in der Halle —
+  auch ganz ohne Internet — und gehen an badhub, sobald Netz da ist.
+- Im Dashboard und im TL-Web steht der Abgleich: „badhub: aktuell" oder
+  „5 Ereignisse warten, letzter Kontakt 10:47". Holt die Turnierleitung die
+  Steuerung in badhub zurück, erscheint ein roter Hinweis und Eingaben am
+  Turnier-PC sind gesperrt.
+- Neuer Knopf **Turnier beenden / Steuerung an badhub zurückgeben** (erst,
+  wenn alles bei badhub angekommen ist); danach werden die Namen vom PC
+  gelöscht, spätestens 14 Tage nach Turnierende ohnehin.
+- Eingaben in badhub während des Turniers kommen über die Cloud-Verbindung in
+  der Halle an (badhub-Seite folgt).
+- Ein Ansage-Slave liest ein badhub-Turnier jetzt vom Turnier-PC.
+- BTP-Turniere laufen unverändert.
+- Braucht das aktualisierte Relay auf badhub.de (wird vor dem Release
+  eingespielt).
+
 ## v0.9.449
 
 - **Turniere aus badhub anzeigen.** In den Einstellungen gibt es den neuen
