@@ -104,6 +104,15 @@ fn badhub_abgleich(config: &AppConfig) -> Option<crate::quelle::badhub::Abgleich
     crate::quelle::badhub::abgleich_lage()
 }
 
+/// Meldungen für den Rückzug — nur bei Quelle badhub am Master mit
+/// Schreibrecht.
+fn badhub_meldungen(config: &AppConfig) -> Option<Vec<crate::quelle::badhub::RueckzugMeldung>> {
+    if config.quelle != crate::config::QuelleArt::Badhub || config.slave_mode {
+        return None;
+    }
+    crate::quelle::badhub::rueckzug_liste()
+}
+
 /// Der TL-Zugang, den bts-light beim Nehmen der Lease für badhub ausgestellt
 /// hat — nur bei Quelle badhub, am Master, mit aktiver Lease.
 fn kern_zugang(config: &AppConfig) -> Option<crate::config::TlDevice> {
@@ -1970,6 +1979,18 @@ pub(crate) async fn execute(
         return response;
     }
 
+    // Rückzug einer Meldung (badhub-Turnier, Kern 0.13.0): ein Kernbefehl
+    // aus der Halle. Mit Wiederholungs-Speicher — ein Doppeltipp erzeugte
+    // sonst einen zweiten Befehl mit neuer Kennung, und der Kern sagte
+    // „schon zurückgezogen“.
+    if let Some(response) = execute_rueckzug_action(ctx, &action) {
+        if response.ok {
+            ctx.tablet
+                .remember_result(op_id, &fingerprint, response.clone(), now_ms);
+        }
+        return response;
+    }
+
     // Panel-Profile: eigener Weg wie Wertungen unten, weil sie `AppConfig`/
     // `config.json` ändern statt Turnier-Zustand — `apply_state_action`
     // bleibt auf reine `TabletState`-Änderungen ohne Datei-I/O beschränkt
@@ -2255,6 +2276,47 @@ fn execute_kern_befehl(
         Err(F::Gesperrt(t)) => TlResponse::err(C::NotAllowed, t),
         Err(F::Ungueltig(t)) => TlResponse::err(C::Unsupported, t),
     }
+}
+
+/// Rückzug bzw. dessen Rücknahme aus dem TL-Web (badhub-Turnier, Kern
+/// 0.13.0). `None` heißt: keine Rückzugs-Aktion. Nur bei Quelle badhub am
+/// Master; den Kern-Zugang hat `execute` schon vorher abgewiesen.
+fn execute_rueckzug_action(
+    ctx: &crate::tablet::server::ServerCtx,
+    action: &relay_proto::TlAction,
+) -> Option<relay_proto::TlResponse> {
+    use crate::quelle::badhub::SchreibFehler as F;
+    use relay_proto::{TlErrorCode as C, TlResponse};
+    let (entry_id, ergebnisse) = match action {
+        relay_proto::TlAction::BadhubRueckzug {
+            entry_id,
+            ergebnisse,
+        } => (
+            *entry_id,
+            Some(match ergebnisse {
+                relay_proto::TlRueckzugErgebnisse::Behalten => turnierkern::Rueckzug::Behalten,
+                relay_proto::TlRueckzugErgebnisse::Streichen => turnierkern::Rueckzug::Streichen,
+            }),
+        ),
+        relay_proto::TlAction::BadhubRueckzugZuruecknehmen { entry_id } => (*entry_id, None),
+        _ => return None,
+    };
+    let config = ctx.app_config();
+    if config.quelle != crate::config::QuelleArt::Badhub || config.slave_mode {
+        return Some(TlResponse::err(
+            C::NotAllowed,
+            "Rückzüge gibt es nur bei einem badhub-Turnier am Turnier-PC.",
+        ));
+    }
+    let Ok(meldung) = u32::try_from(entry_id) else {
+        return Some(TlResponse::err(C::Unsupported, "Ungültige Meldung."));
+    };
+    Some(match crate::quelle::badhub::rueckzug(meldung, ergebnisse) {
+        Ok(_) => TlResponse::ok(0),
+        Err(F::Kern { text, grund }) => TlResponse::kern_abgelehnt(text, grund),
+        Err(F::Gesperrt(t)) => TlResponse::err(C::NotAllowed, t),
+        Err(F::Ungueltig(t)) => TlResponse::err(C::Unsupported, t),
+    })
 }
 
 /// Hält die automatische Feldvergabe an oder lässt sie weiterlaufen.
@@ -2824,6 +2886,13 @@ fn action_fingerprint(action: &relay_proto::TlAction) -> String {
         // Ohne Nutzlast: Die Idempotenz hängt an der Vorgangs-Kennung (die
         // Seite vergibt sie je Druck neu).
         A::BadhubZurueckgeben => "badhub-zurueck".to_string(),
+        // Ziel und Wahl gehören in den Fingerabdruck: „behalten“ und
+        // „streichen“ sind zwei verschiedene Absichten.
+        A::BadhubRueckzug {
+            entry_id,
+            ergebnisse,
+        } => format!("rueckzug:{entry_id}:{ergebnisse:?}"),
+        A::BadhubRueckzugZuruecknehmen { entry_id } => format!("rueckzug-zurueck:{entry_id}"),
         // Die Befehls-ID trägt die Identität; der Kern ist ohnehin idempotent.
         A::KernBefehl { befehl } => format!(
             "kern:{}",
@@ -2976,6 +3045,13 @@ fn action_label(action: &relay_proto::TlAction) -> String {
             format!("Profil {profile_id} als Standard gesetzt")
         }
         A::BadhubZurueckgeben => "Steuerung an badhub zurückgeben".to_string(),
+        A::BadhubRueckzug {
+            entry_id,
+            ergebnisse,
+        } => format!("Rückzug Meldung {entry_id} ({ergebnisse:?})"),
+        A::BadhubRueckzugZuruecknehmen { entry_id } => {
+            format!("Rückzug Meldung {entry_id} zurücknehmen")
+        }
         // Nur Art und Kennung: der Befehl selbst trägt keine Namen, aber
         // kurz bleibt das Protokoll lesbar.
         A::KernBefehl { befehl } => format!(
@@ -3339,6 +3415,12 @@ pub struct TlState {
     /// Byte für Byte wie bisher.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub badhub_abgleich: Option<crate::quelle::badhub::Abgleich>,
+    /// Ausgeloste Meldungen eines badhub-Turniers für den Rückzug im TL-Web
+    /// ([`relay_proto::TlAction::BadhubRueckzug`], Kern 0.13.0) — nur, solange
+    /// dieser PC schreiben darf. Bei BTP-Turnieren nie gesetzt. Namen wie in
+    /// der Warteliste, ohne Lizenznummer, Verein oder Nation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub badhub_meldungen: Option<Vec<crate::quelle::badhub::RueckzugMeldung>>,
     /// Nach wie vielen Sekunden ein „fertig aussehendes" Spiel gemeldet wird
     /// (`0` = Warnung aus). Kommt aus der Konfiguration; die Seite rechnet
     /// damit gegen [`TlCourt::decided_since_ms`].
@@ -4805,6 +4887,7 @@ pub(crate) fn build_state_limited(
             multi_hall: false,
             badhub: badhub_links(config),
             badhub_abgleich: badhub_abgleich(config),
+            badhub_meldungen: badhub_meldungen(config),
             can_set_wish_court: true,
             can_set_highlight: true,
             can_repeat_prep_call: true,
@@ -5205,6 +5288,7 @@ pub(crate) fn build_state_limited(
         can_return_badhub: true,
         badhub: badhub_links(config),
         badhub_abgleich: badhub_abgleich(config),
+        badhub_meldungen: badhub_meldungen(config),
         finished_warning_seconds: config.finished_warning_seconds,
         shuttle_counter: config.shuttle_counter,
         injury_guide_seconds: config.richtzeit_s(),

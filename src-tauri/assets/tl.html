@@ -1446,6 +1446,12 @@ body.offline .fin-row button { opacity: .45; }
 .gate h1 { font-size: 1.3rem; margin: 0 0 10px; }
 .gate p { color: var(--ink-soft); }
 
+/* Rückzug-Dialog (badhub-Turnier) */
+.rz-dlg { max-width: 34rem; width: 92vw; }
+.rz-dlg form { display: flex; flex-direction: column; gap: .5rem; }
+.rz-dlg select { width: 100%; }
+.rz-hinweis { font-size: .85em; opacity: .8; margin: 0; }
+.rz-wahl, .rz-knoepfe { display: flex; gap: .75rem; flex-wrap: wrap; }
 /* Ergebnis-Dialog: natives <dialog>, bewusst ohne Polyfill — Escape und
    der Klick auf den Hintergrund kommen dadurch vom Browser mit, auf jedem
    Gerät gleich. Hell und in denselben Formen wie der Rest der Seite, damit
@@ -1750,6 +1756,11 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
          sagt die Seite, wie viele Ereignisse noch warten. -->
     <button type="button" class="profiles-btn" id="bh-beenden" hidden
             title="Turnier beenden / Steuerung an badhub zurückgeben">Turnier beenden</button>
+    <!-- Rückzug einer Meldung (badhub-Turnier, Kern 0.13.0): nur, wenn der
+         Turnier-PC die Meldungsliste schickt (`badhub_meldungen`, nur unter
+         der Lease). Mit Wahl behalten/streichen und Rückfrage. -->
+    <button type="button" class="profiles-btn" id="bh-rueckzug" hidden
+            title="Eine Meldung während des Turniers zurückziehen">Rückzug</button>
     <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">verbinde …</span></span>
     <!-- Profile (Spec tl-web-panelsystem) ersetzen das frühere
          Anzeige-Klappmenü — Panel-Sichtbarkeit/-Reihenfolge/-Höhe UND die
@@ -1786,6 +1797,27 @@ dialog#res-dlg .meta { margin: 0; color: var(--ink-soft); font-size: .9rem; }
 <!-- Außerhalb von #app, wie der Toast: Weder #courts noch #queue noch
      #fin-list dürfen den offenen Dialog beim nächsten Abruf aus dem DOM
      reißen — sie werden alle zwei Sekunden per innerHTML neu gezeichnet. -->
+<!-- Rückzug während des Turniers (badhub-Turnier): Meldung wählen, in der
+     Gruppe „behalten“ oder „streichen“, zurückgezogene wieder zurücknehmen. -->
+<dialog id="rz-dlg" class="rz-dlg">
+  <form method="dialog">
+    <h3>Rückzug während des Turniers</h3>
+    <p class="rz-hinweis">KO: offene Spiele gehen kampflos an die Gegner. Gruppe:
+      <strong>behalten</strong> = Gespieltes zählt, offene Spiele kampflos an die
+      Gegner; <strong>streichen</strong> = keines ihrer Spiele zählt, offene entfallen.</p>
+    <input type="search" id="rz-suche" placeholder="Name suchen" autocomplete="off" maxlength="64" />
+    <select id="rz-meldung" size="8"></select>
+    <div class="rz-wahl">
+      <label><input type="radio" name="rz-ergebnisse" value="behalten" /> Ergebnisse behalten</label>
+      <label><input type="radio" name="rz-ergebnisse" value="streichen" /> Ergebnisse streichen</label>
+    </div>
+    <div class="rz-knoepfe">
+      <button type="button" id="rz-ziehen">Zurückziehen</button>
+      <button type="button" id="rz-zuruecknehmen" hidden>Rückzug zurücknehmen</button>
+      <button value="abbrechen">Schließen</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="res-dlg">
   <form method="dialog" id="res-form">
     <h3 id="res-title">Ergebnis eintragen</h3>
@@ -9365,6 +9397,11 @@ function wireProfileEditorEvents() {
 
 $("tablets-reload").addEventListener("click", reloadTablets);
 $("bh-beenden").addEventListener("click", badhubZurueckgeben);
+$("bh-rueckzug").addEventListener("click", rueckzugOeffnen);
+$("rz-suche").addEventListener("input", rueckzugListe);
+$("rz-meldung").addEventListener("change", rueckzugAuswahl);
+$("rz-ziehen").addEventListener("click", () => rueckzugSenden(false));
+$("rz-zuruecknehmen").addEventListener("click", () => rueckzugSenden(true));
 verdrahteSuche();
 $("profiles-open").addEventListener("click", openProfilesOverlay);
 $("profiles-close").addEventListener("click", closeProfilesOverlay);
@@ -10491,6 +10528,8 @@ function renderBadhubAbgleich() {
   // Rückholung oder ohne Lease gibt es nichts zurückzugeben.
   $("bh-beenden").hidden = !(state && state.can_return_badhub && a
     && (a.zustand === "aktuell" || a.zustand === "wartet"));
+  $("bh-rueckzug").hidden = !(state && Array.isArray(state.badhub_meldungen)
+    && state.badhub_meldungen.length > 0);
   if (!a) {
     zeile.hidden = true;
     if (band) band.remove();
@@ -10539,6 +10578,63 @@ async function badhubZurueckgeben() {
     { action: "badhub_zurueckgeben" },
     "Steuerung an badhub zurückgegeben. Die Namen sind vom Turnier-PC gelöscht.",
   );
+}
+
+// Rückzug während des Turniers (badhub-Turnier, Kern 0.13.0). Die Liste
+// kommt vom Turnier-PC nur unter der Lease; entscheiden tut der Kern — seine
+// Ablehnung (z. B. „lässt sich nicht zurücknehmen: Spiel 5 hat schon ein
+// Ergebnis") zeigt `send` als Fehler.
+function rueckzugMeldungen() {
+  return (state && state.badhub_meldungen) || [];
+}
+
+function rueckzugOeffnen() {
+  $("rz-suche").value = "";
+  document.querySelectorAll('input[name="rz-ergebnisse"]').forEach((r) => { r.checked = false; });
+  rueckzugListe();
+  $("rz-dlg").showModal();
+}
+
+function rueckzugListe() {
+  const sel = $("rz-meldung");
+  const alt = sel.value;
+  const q = $("rz-suche").value.trim().toLowerCase();
+  sel.innerHTML = rueckzugMeldungen()
+    .filter((m) => !q || m.label.toLowerCase().includes(q) || m.konkurrenz.toLowerCase().includes(q))
+    .map((m) => `<option value="${m.entry_id}">${esc(m.konkurrenz)} — ${esc(m.label)}`
+      + `${m.zurueckgezogen ? ` (zurückgezogen, ${m.ergebnisse === "streichen" ? "gestrichen" : "behalten"})` : ""}</option>`)
+    .join("");
+  if (alt) sel.value = alt;
+  rueckzugAuswahl();
+}
+
+function rueckzugAuswahl() {
+  const id = Number($("rz-meldung").value);
+  const m = rueckzugMeldungen().find((x) => x.entry_id === id);
+  $("rz-ziehen").hidden = !!(m && m.zurueckgezogen);
+  $("rz-zuruecknehmen").hidden = !(m && m.zurueckgezogen);
+}
+
+async function rueckzugSenden(zuruecknehmen) {
+  const id = Number($("rz-meldung").value);
+  const m = rueckzugMeldungen().find((x) => x.entry_id === id);
+  if (!m) { toast("Bitte eine Meldung wählen.", true); return; }
+  if (zuruecknehmen) {
+    if (!confirm(`Rückzug von ${m.label} (${m.konkurrenz}) zurücknehmen?`)) return;
+    $("rz-dlg").close();
+    await send(`rueckzug-zurueck-${id}-${Date.now()}`,
+      { action: "badhub_rueckzug_zuruecknehmen", entryId: id },
+      "Rückzug zurückgenommen.");
+    return;
+  }
+  const wahl = document.querySelector('input[name="rz-ergebnisse"]:checked');
+  if (!wahl) { toast("Bitte wählen: Ergebnisse behalten oder streichen.", true); return; }
+  if (!confirm(`${m.label} (${m.konkurrenz}) zurückziehen — Ergebnisse ${wahl.value}?\n\n`
+    + "Offene Spiele gehen kampflos an die Gegner bzw. entfallen.")) return;
+  $("rz-dlg").close();
+  await send(`rueckzug-${id}-${Date.now()}`,
+    { action: "badhub_rueckzug", entryId: id, ergebnisse: wahl.value },
+    "Meldung zurückgezogen.");
 }
 
 function render() {

@@ -294,20 +294,48 @@ pub fn mit_id(befehl: TurnierBefehl, neu: String) -> TurnierBefehl {
             schiedsrichter,
             aufschlagrichter,
         },
+        B::Rueckzug {
+            konkurrenz,
+            meldung,
+            ergebnisse,
+            jetzt,
+            ..
+        } => B::Rueckzug {
+            id: neu,
+            konkurrenz,
+            meldung,
+            ergebnisse,
+            jetzt,
+        },
+        B::RueckzugZuruecknehmen {
+            konkurrenz,
+            meldung,
+            ..
+        } => B::RueckzugZuruecknehmen {
+            id: neu,
+            konkurrenz,
+            meldung,
+        },
         // Andere Befehle entstehen hier nicht; sie behalten ihre Kennung.
         andere => andere,
     }
 }
 
-/// Die Befehle, die badhub unter der Lease annimmt (badhub `Lease::BEFEHLE`).
-pub const ERLAUBTE_ARTEN: [&str; 6] = [
+/// Die Befehle, die badhub unter der Lease annimmt (badhub `Lease::BEFEHLE`);
+/// seit Kern 0.13.0 auch der Rückzug während des Turniers und seine Rücknahme.
+pub const ERLAUBTE_ARTEN: [&str; 8] = [
     "ergebnis_melden",
     "ergebnis_loeschen",
     "spiel_aufrufen",
     "aufruf_zuruecknehmen",
     "offizielle_setzen",
     "gruppenrang_entscheiden",
+    "rueckzug",
+    "rueckzug_zuruecknehmen",
 ];
+
+/// Befehle, deren `jetzt` dieser PC setzt (ADR-0084: die Zeit der Halle).
+pub const ARTEN_MIT_JETZT: [&str; 3] = ["spiel_aufrufen", "ergebnis_melden", "rueckzug"];
 
 /// Höchstgröße eines Kernbefehls aus badhub (serialisiert, Security-Review L3).
 pub const BEFEHL_MAX_BYTES: usize = 4096;
@@ -391,6 +419,25 @@ pub fn ablehnung_text(a: &TurnierAblehnung) -> String {
         A::AuslosungNichtFreigegeben { .. } => "Die Auslosung ist noch nicht freigegeben.".into(),
         A::GruppeNichtFertig { .. } => "Die Gruppe ist noch nicht fertig gespielt.".into(),
         A::RangEntscheidUngueltig { .. } => "Ungültige Reihenfolge für den Gruppenrang.".into(),
+        A::SchonZurueckgezogen { meldung, .. } => {
+            format!("Meldung {meldung} ist in dieser Konkurrenz schon zurückgezogen.")
+        }
+        A::NichtZurueckgezogen { meldung, .. } => {
+            format!("Meldung {meldung} ist nicht zurückgezogen — es gibt nichts zurückzunehmen.")
+        }
+        A::NichtZuruecknehmbar { meldung, spiel, .. } => format!(
+            "Der Rückzug von Meldung {meldung} lässt sich nicht zurücknehmen: Spiel {spiel} hat \
+             schon ein Ergebnis, das darauf aufbaut. Erst dort das Ergebnis löschen."
+        ),
+        A::MeldungZurueckgezogen { spiel, .. } => format!(
+            "Spiel {spiel} ist durch einen Rückzug entschieden oder entfällt — erst den Rückzug \
+             zurücknehmen."
+        ),
+        A::UnbekannteMeldung { meldung } => format!("Meldung {meldung} gibt es nicht."),
+        A::MeldungNichtInKonkurrenz { meldung, .. } => {
+            format!("Meldung {meldung} gehört nicht zu dieser Konkurrenz.")
+        }
+        A::NichtAusgelost { meldung } => format!("Meldung {meldung} ist nicht ausgelost."),
         andere => {
             let grund = serde_json::to_value(andere)
                 .ok()

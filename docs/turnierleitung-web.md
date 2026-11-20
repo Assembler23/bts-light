@@ -550,6 +550,33 @@ danach nur noch in badhub.
 
 Bei BTP-Turnieren erscheint nichts davon.
 
+**Rückzug während des Turniers (seit v0.9.452).** Zieht ein Spieler oder ein
+Paar während eines badhub-Turniers zurück, trägt die Turnierleitung das mit dem
+Knopf **Rückzug** im Kopf ein — statt jedes Spiel einzeln als kampflos.
+<!-- pruef: "Rückzug" in src-tauri/assets/tl.html -->
+<!-- pruef: "Rückzug während des Turniers" in src-tauri/assets/tl.html -->
+
+- Meldung in der Liste wählen (das Suchfeld filtert nach Name oder
+  Konkurrenz), dann für eine Gruppe wählen: **Ergebnisse behalten** (Gespieltes
+  zählt, offene Spiele gehen kampflos an die Gegner) oder **Ergebnisse
+  streichen** (keines ihrer Spiele zählt, offene Spiele entfallen). Im KO gehen
+  offene Spiele immer kampflos an die Gegner — auch, wenn der Gegner erst später
+  feststeht. Dann **Zurückziehen** und die Rückfrage bestätigen.
+  <!-- pruef: "Ergebnisse behalten" in src-tauri/assets/tl.html -->
+  <!-- pruef: "Ergebnisse streichen" in src-tauri/assets/tl.html -->
+  <!-- pruef: "Zurückziehen" in src-tauri/assets/tl.html -->
+- Ein durch Rückzug entschiedenes Spiel erscheint wie ein Walkover
+  („kampflos"); ein entfallenes Spiel verschwindet aus Warteliste und
+  Automatik.
+- Versehen? Die zurückgezogene Meldung wählen und **Rückzug zurücknehmen** —
+  das geht nur, solange kein schon gemeldetes Ergebnis darauf aufbaut. Sonst
+  sagt die Seite, in welchem Spiel erst das Ergebnis zu löschen ist.
+  <!-- pruef: "Rückzug zurücknehmen" in src-tauri/assets/tl.html -->
+  <!-- pruef: "lässt sich nicht zurücknehmen" in src-tauri/src/quelle/badhub/schreiben.rs -->
+- Der Knopf erscheint nur bei einem badhub-Turnier, solange der Turnier-PC die
+  Steuerung hält. Einen Rückzug aus badhub selbst nimmt der Turnier-PC als
+  Kernbefehl an.
+
 ### Links zu badhub (seit v0.9.445)
 
 Die Seite verlinkt an mehreren Stellen auf die öffentlichen badhub-Seiten

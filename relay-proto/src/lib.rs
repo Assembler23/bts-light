@@ -2678,6 +2678,39 @@ pub enum TlAction {
     /// prüfen beides). Ein älterer Host kennt die Aktion nicht; die Seite
     /// zeigt den Knopf nur bei `can_return_badhub`.
     BadhubZurueckgeben,
+    /// Rückzug einer Meldung während eines badhub-Turniers (Turnierkern
+    /// 0.13.0): KO-Spiele gehen kampflos an die Gegner, in der Gruppe nach
+    /// `ergebnisse`. Der Turnier-PC macht daraus den Kernbefehl `rueckzug`
+    /// (Konkurrenz aus dem Kern-Stand, `jetzt` = seine Uhr).
+    ///
+    /// Nur bei Quelle badhub mit Lease; der Kern-Zugang [`TL_GERAET_KERN`]
+    /// darf sie **nicht** senden — badhub schickt den Rückzug als
+    /// [`TlAction::KernBefehl`] (Relay und Host prüfen beides). Ein älterer
+    /// Host kennt die Aktion nicht; die Seite zeigt sie nur, wenn der Zustand
+    /// `badhub_meldungen` trägt.
+    BadhubRueckzug {
+        /// Meldungsnummer (= `entry_id` im Modell).
+        #[serde(rename = "entryId")]
+        entry_id: i64,
+        ergebnisse: TlRueckzugErgebnisse,
+    },
+    /// Einen Rückzug zurücknehmen (Fehleingabe) — der Kern lehnt ab, sobald
+    /// ein gemeldetes Ergebnis darauf aufbaut (`nicht_zuruecknehmbar`).
+    BadhubRueckzugZuruecknehmen {
+        #[serde(rename = "entryId")]
+        entry_id: i64,
+    },
+}
+
+/// Was in der Gruppe mit den Spielen einer zurückgezogenen Meldung geschieht
+/// (Turnierkern `Rueckzug`): `behalten` = Gespieltes zählt, offene Spiele
+/// gehen kampflos an die Gegner; `streichen` = keines ihrer Spiele zählt.
+/// Ohne Vorgabe — die Seite fragt ausdrücklich.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlRueckzugErgebnisse {
+    Behalten,
+    Streichen,
 }
 
 /// Kennung des Turnierleitungs-Zugangs, den bts-light beim Nehmen der Lease
@@ -6610,6 +6643,30 @@ mod tests {
             view_rev: 4,
             action,
         });
+    }
+
+    #[test]
+    fn badhub_rueckzug_roundtrips_and_demands_the_choice() {
+        let action = TlAction::BadhubRueckzug {
+            entry_id: 7,
+            ergebnisse: TlRueckzugErgebnisse::Streichen,
+        };
+        let json = serde_json::to_string(&action).unwrap();
+        assert_eq!(
+            json,
+            r#"{"action":"badhub_rueckzug","entryId":7,"ergebnisse":"streichen"}"#
+        );
+        roundtrip(&action);
+        roundtrip(&TlAction::BadhubRueckzugZuruecknehmen { entry_id: 7 });
+        // Ohne Wahl kein Rückzug — keine still ergänzte Vorgabe.
+        assert!(
+            serde_json::from_str::<TlAction>(r#"{"action":"badhub_rueckzug","entryId":7}"#)
+                .is_err()
+        );
+        assert!(serde_json::from_str::<TlAction>(
+            r#"{"action":"badhub_rueckzug","entryId":7,"ergebnisse":"loeschen"}"#
+        )
+        .is_err());
     }
 
     #[test]

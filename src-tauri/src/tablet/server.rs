@@ -7319,6 +7319,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rueckzug_aus_dem_tl_web_nicht_vom_kern_zugang_und_nicht_bei_btp() {
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2]));
+        let ctx = Arc::new(ctx);
+        let kern_geraet = crate::config::TlDevice {
+            id: relay_proto::TL_GERAET_KERN.into(),
+            token: "t".into(),
+            ..Default::default()
+        };
+        for aktion in [
+            relay_proto::TlAction::BadhubRueckzug {
+                entry_id: 1,
+                ergebnisse: relay_proto::TlRueckzugErgebnisse::Behalten,
+            },
+            relay_proto::TlAction::BadhubRueckzugZuruecknehmen { entry_id: 1 },
+        ] {
+            // Der Kern-Zugang darf nur Kernbefehle — badhub schickt den
+            // Rückzug als `kern_befehl`, nicht als TL-Aktion.
+            let r =
+                crate::tablet::tl::execute(&ctx, &kern_geraet, "op-1", 1, 0, aktion.clone()).await;
+            assert_eq!(r.code, Some(relay_proto::TlErrorCode::NotAllowed), "{r:?}");
+            assert!(
+                r.error.as_deref().unwrap().contains("nur Kernbefehle"),
+                "{r:?}"
+            );
+            // Bei BTP: abgelehnt, nichts geschrieben.
+            let r = crate::tablet::tl::execute(&ctx, &tl_device("a"), "op-2", 1, 0, aktion).await;
+            assert_eq!(r.code, Some(relay_proto::TlErrorCode::NotAllowed), "{r:?}");
+            assert!(
+                r.error.as_deref().unwrap().contains("badhub-Turnier"),
+                "{r:?}"
+            );
+        }
+        // Bei BTP reist keine Meldungsliste im TL-Zustand.
+        let state = crate::tablet::tl::build_state(&ctx.tablet, &ctx.app_config(), 3, 0);
+        assert!(state.badhub_meldungen.is_none());
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(!json.contains("badhub_meldungen"));
+    }
+
+    #[tokio::test]
     async fn rueckgabe_an_badhub_nicht_vom_kern_zugang_und_nicht_bei_btp() {
         let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
         ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2]));

@@ -16,8 +16,9 @@
 //! | `court_id` | 1 + laufender Index über `rahmen.hallen[].felder`; Halle = Location (1 + Index) |
 //! | `planned_time`, `display_order`, `location_id` | `planung.zeiten` (Beginn, Reihenfolge, Halle) |
 //! | `round_name` | `runden[konkurrenz][spiel]` aus dem Paket, sonst eigener Text |
-//! | `scoring` | Zählweise der Konkurrenz (Vorgabe Badminton) |
+//! | `scoring` | Zählweise des Spiels (`Spiel::zaehlweise`, Kern 0.14.0: Spiel → Phase/Konkurrenz → Turnier → Badminton) |
 //! | `highlight`, `shuttles` | 0 — gibt es nur in BTP |
+//! | Rückzug (Kern 0.13.0) | `entfaellt` → nicht im Modell; `durch_rueckzug` → Finished + Walkover; `gestrichen` ändert nichts (Tabellen rechnet bts-light nicht) |
 
 use std::collections::BTreeMap;
 
@@ -296,11 +297,19 @@ pub fn abbilden(stand: &TurnierStand, paket: &Paket) -> BtpSnapshot {
             .map(|s| s.runde)
             .max()
             .unwrap_or(0);
-        let scoring = zaehlformat(&d.regeln().zaehlweise);
         let discipline = disziplin(&k.disziplin);
         let klasse = class_label(&k.name, &k.key);
         for s in &d.spiele {
             if s.nr >= ID_FAKTOR as u32 {
+                continue;
+            }
+            // Entfällt wegen eines Rückzugs (Kern 0.13.0: Gruppe mit
+            // „streichen“ oder beide Seiten zurückgezogen): Das Spiel findet
+            // nicht statt. Es erscheint gar nicht erst im Modell — so ist es
+            // weder aufrufbar noch in der Auto-Vergabe, und kein Store hält
+            // ein Feld dafür fest. Gruppenspiele sind nie Vorspiel eines
+            // KO-Spiels (`from1/from2` zeigt nur auf Sieger/Verlierer).
+            if s.status == SpielStatus::Entfaellt {
                 continue;
             }
             let (from1, from2) = herkunft(s.nr);
@@ -321,10 +330,18 @@ pub fn abbilden(stand: &TurnierStand, paket: &Paket) -> BtpSnapshot {
                 Seite::Oben => 1u8,
                 Seite::Unten => 2u8,
             });
+            // Erschöpfend, ohne Platzhalter: Ein neuer Status im Kern soll
+            // hier am Compiler scheitern, nicht still „eingeplant“ werden.
+            // Ein durch Rückzug entschiedenes Spiel (`durch_rueckzug`) ist
+            // `beendet` mit `ende: kampflos` und erscheint wie ein Walkover.
             let status = match s.status {
                 SpielStatus::Beendet => MatchStatus::Finished,
                 SpielStatus::Aufgerufen if feld.is_some() => MatchStatus::OnCourt,
-                _ => MatchStatus::Scheduled,
+                SpielStatus::Aufgerufen | SpielStatus::Wartet | SpielStatus::Bereit => {
+                    MatchStatus::Scheduled
+                }
+                // oben schon übergangen
+                SpielStatus::Entfaellt => continue,
             };
             let result = match s.ergebnis.as_ref().and_then(|e| e.ende) {
                 Some(Spielende::Kampflos { .. }) => MatchResult::Walkover,
@@ -382,7 +399,10 @@ pub fn abbilden(stand: &TurnierStand, paket: &Paket) -> BtpSnapshot {
                 preparation_call_ts: None,
                 preparation_hall: None,
                 preparation_call_rank: None,
-                scoring: scoring.clone(),
+                // Zählweise je Spiel (Kern 0.14.0: Spiel → KO-Phase/Konkurrenz →
+                // Turnier → Badminton) — Tablets, Plausibilität (R5) und Ansage
+                // lesen sie am Spiel.
+                scoring: zaehlformat(&s.zaehlweise),
             });
         }
     }

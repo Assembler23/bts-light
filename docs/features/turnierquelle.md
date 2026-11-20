@@ -6,6 +6,8 @@
 > `KernBefehl` für Eingaben aus badhub, LAN-Slave liest vom Master, Stores an der Turnier-UUID.
 > v0.9.451: Rückgabe der Steuerung auch aus dem TL-Web (`TlAction::BadhubZurueckgeben`); Turnierpaket in Teilen
 > (badhub kappt auf 2000 Ereignisse, bts-light lädt seitenweise nach).
+> v0.9.452: Turnierkern **0.14.0** (gleich badhub): Rückzug während des Turniers (Kern 0.13.0) als Kernbefehl aus badhub
+> und als Aktion im TL-Web, Zählweise je Spiel (Kern 0.14.0) in der Abbildung.
 > Ziel und Gesamtplan: badhub `docs/features/bts_light_steuerung.md`, Entscheidung badhub ADR-0084 (bts-light hält am
 > Turniertag die Lease eines badhub-Turniers).
 
@@ -53,7 +55,7 @@ nicht die eingestellte Quelle.
 | Kopplung | Tauri-Command `badhub_koppeln(code, geraet_name)` → `POST koppeln {code, install_id, name}` → `GET turnier/paket` → Ablage → `config.badhub_turnier`. `badhub_turnier_info` für den Assistenten |
 | Abgleich | alle 5 s `GET turnier/ereignisse?ab=<n>&max=500` (seitenweise bis zum Kopf, siehe „Paket in Teilen“), alle 60 s `GET turnier/paket` mit `If-None-Match` (ETag-Header, sonst `stammdaten_etag`). Offline bleibt der letzte Stand; 401/403 hält den Abgleich bis zum nächsten Start an |
 | API-Basis | aus der Push-Adresse (`badhub.url`, folgt damit dem Testsystem-Schalter) + `/api/torg/v1`, beim Koppeln in `badhub_turnier.basis` festgehalten — das Token geht nie an das andere System. Nur `https://` (Ausnahme `localhost`/`127.0.0.1` für Tests) |
-| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.12.0`), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht trotzdem (das Ereignisschema wächst nur additiv), Schreiben (L3) verlangt Gleichstand |
+| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.14.0` seit v0.9.452, vorher `v0.12.0`), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht trotzdem (das Ereignisschema wächst nur additiv), Schreiben (L3) verlangt Gleichstand |
 
 ### Ablage und Verschlüsselung
 
@@ -94,7 +96,10 @@ nicht die eingestellte Quelle.
 | `draw_name`, `class_label`, `discipline` | Konkurrenz-Schlüssel, Klasse aus Name/Schlüssel, Disziplin-Kürzel | |
 | `match_num` | Spielnummer der Konkurrenz | „aus Spiel 3“ gilt innerhalb der Konkurrenz |
 | `official1_id`/`official2_id`, `officials` | Kern-Offizielle, Namen aus `schiedsrichter` | |
-| `scoring` | Zählweise der Konkurrenz (Vorgabe Badminton) | ohne Deckel `cap_score` 999 |
+| `scoring` | Zählweise **des Spiels** (`Spiel::zaehlweise`, Kern 0.14.0: Spiel → KO-Phase/Konkurrenz → Turnier → Badminton) | ohne Deckel `cap_score` 999; Tablets, Plausibilität (R5) und Ansage lesen sie am Spiel |
+| Status `entfaellt` (Kern 0.13.0) | Rückzug: Gruppe mit `streichen` oder beide Seiten zurückgezogen | Spiel erscheint **nicht** im Modell — nicht aufrufbar, nicht in der Auto-Vergabe; Gruppenspiele sind nie Vorspiel |
+| `durch_rueckzug` | kampfloses Ergebnis aus einem Rückzug | Finished + Walkover wie ein gemeldetes kampflos |
+| `gestrichen`, `Zeile.zurueckgezogen` | Tabellenwirkung | bts-light rechnet keine Tabellen; der Rückzugs-Stand reist als `badhub_meldungen[].zurueckgezogen` ins TL-Web |
 | `rest_minutes` | `rahmen.mindestpause_min`, sonst `planung.rahmen.pause` | |
 | `events`, `entries` | `konkurrenzen`, Personenauszug | |
 | `highlight`, `shuttles` | 0 | nur BTP; bei Kern-Turnieren gilt der lokale Aufrufzustand |
@@ -222,6 +227,21 @@ Antwort `ok`, `kern_abgelehnt` (+ `ablehnung`), `not_allowed` (keine Lease) oder
 - B2 schickt Kernbefehle mit `op_id` = Befehls-ID; `jetzt` darf fehlen. Erwartete Antworten wie oben; `host_offline`
   bzw. Zeitüberschreitung → Hinweis „Halle nicht erreichbar“.
 - Befehle aus bts-light tragen kein Feld `geraet`: Wer in der Halle gehandelt hat, steht nur lokal im Protokoll.
+
+## Rückzug während des Turniers (v0.9.452, Kern 0.13.0)
+
+| Was | Wo |
+|---|---|
+| Kernbefehl aus badhub | `schreiben::ERLAUBTE_ARTEN` um `rueckzug`, `rueckzug_zuruecknehmen` erweitert (= badhub `Lease::BEFEHLE`); `jetzt` setzt der Knoten (`ARTEN_MIT_JETZT`); Größen-/Feldprüfung wie bisher (`befehl_begrenzt`, serde lehnt unbekannte `ergebnisse` und Meldung als Text ab) |
+| TL-Web | `relay-proto` `TlAction::BadhubRueckzug {entry_id, ergebnisse}` / `BadhubRueckzugZuruecknehmen {entry_id}`, `TlRueckzugErgebnisse`; Host `tablet/tl.rs` `execute_rueckzug_action` (nach dem Kern-Zugang-Riegel, mit Wiederholungs-Speicher) → `KernQuelle::rueckzug` (Konkurrenz aus `stand.meldung`, Kennung + `jetzt` vom Knoten, Akteur `bts-light`); Zustand `TlState.badhub_meldungen` aus `KernQuelle::rueckzug_meldungen` (nur unter Lease); Dialog `#rz-dlg` in `assets/tl.html` |
+| Ablehnungen | `schreiben::ablehnung_text`: `schon_zurueckgezogen`, `nicht_zurueckgezogen`, `nicht_zuruecknehmbar {spiel}`, `meldung_zurueckgezogen {spiel}`, `unbekannte_meldung`, `meldung_nicht_in_konkurrenz`, `nicht_ausgelost` |
+| Rechte | Kern-Zugang darf nur `kern_befehl` (Relay `kern_zugang_passt` + Host); jedes TL-Gerät darf zurückziehen (gleiche Vertrauensstufe wie Ergebnisse) |
+| Tests | `tests_rueckzug.rs` (Abbildung `entfaellt`/`durch_rueckzug`, Zählweise je Spiel, Kernbefehl, TL-Weg, Texte), `server.rs` `rueckzug_aus_dem_tl_web_nicht_vom_kern_zugang_und_nicht_bei_btp`, Relay `der_rueckzug_aus_dem_tl_web_kommt_nur_von_tl_geraeten_durch`, `relay-proto` `badhub_rueckzug_roundtrips_and_demands_the_choice` |
+
+**Datenformat:** Protokoll und Paket können neue Befehle/Ereignisse (`rueckzug`, `zurueckgezogen`,
+`zaehlweise_festlegen`) tragen, die v0.9.451 (Kern 0.12.0) nicht lesen kann. Das ist der schon in L3 entschiedene Fall
+„Kern-Version muss gleich sein“: Schreiben verlangt Gleichstand mit badhub, ein Rückweg während eines badhub-Turniers
+nimmt keine Eingaben an. `config.json` und BTP-Dateien sind unverändert — die Grenze bleibt.
 
 ## Rückgabe aus dem TL-Web (v0.9.451)
 
