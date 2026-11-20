@@ -129,6 +129,27 @@ fn uhrzeit(ms: u64) -> String {
         .to_string()
 }
 
+/// Ablehnung von `POST turnier/lease` in Worten (badhub B1/B2).
+pub fn lease_ablehnung_text(code: &str) -> String {
+    match code {
+        "uebernahme_nicht_freigegeben" => {
+            "Übernahme in badhub im Bereich Turniertag freigeben (gilt 10 Minuten)".into()
+        }
+        "uebernehmen_nicht_verfuegbar" => {
+            "ein anderes Gerät steuert das Turnier — Übernahme in badhub freigeben".into()
+        }
+        "relay_ungueltig" => "badhub lehnt die Relay-Angaben ab".into(),
+        andere => {
+            let c: String = andere
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .take(40)
+                .collect();
+            format!("badhub lehnt ab ({c})")
+        }
+    }
+}
+
 /// Ergebnis eines Outbox-Schritts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutboxSchritt {
@@ -642,7 +663,7 @@ impl KernQuelle {
                 ));
             }
             Ok(api::LeaseAntwort::Abgelehnt(code)) => {
-                self.lease_hinweis = Some(format!("badhub lehnt ab ({code})"));
+                self.lease_hinweis = Some(lease_ablehnung_text(&code));
             }
             Err(api::ApiFehler::Zugang) => {
                 // 401/403 ist kein Beweis für eine Rückholung (das wäre

@@ -177,6 +177,11 @@ Zeiten: lokale Wandzeit des Hallen-PCs `JJJJ-MM-TTTHH:MM:SS` (`schreiben::wandze
 - `relay: {ns: install_id, tl_token}` nur mit Cloud-Weg. Der Kern-Zugang bleibt über Neustarts gleich.
 - Offline beim Start: gespeicherte Lease (Epoche) gilt weiter, kein Ablauf. Ohne gespeicherte Lease: Eingaben gesperrt.
 - `lease_belegt`: Hinweis „ein anderes Gerät steuert das Turnier“, Eingaben gesperrt.
+- `409 uebernahme_nicht_freigegeben` (badhub B2: Übernahme ohne Freigabe im Web): Hinweis „Übernahme in badhub im
+  Bereich Turniertag freigeben (gilt 10 Minuten)“. bts-light sendet heute stets `uebernehmen: false`; die Meldung ist
+  für den Übernahme-Weg vorbereitet (`lease_ablehnung_text`).
+- Weiterleitung aus badhub B2 (`{"opId", "viewRev": 0, "action": {"action": "kern_befehl", "befehl": {"id", "art", …}}}`
+  ohne `jetzt`) wird genau so angenommen (Test `weiterleitung_von_badhub_b2_genau_so_wie_gesendet`).
 - Rückgabe (Knopf **Turnier beenden / Steuerung an badhub zurückgeben**, Tauri `badhub_turnier_beenden`): nur mit leerer
   Outbox, `DELETE turnier/lease {epoche, n}`, danach Zustand `zurueckgegeben`, Kern-Zugang weg, Personenauszug gelöscht.
   Kein automatisches Neunehmen nach Neustart.

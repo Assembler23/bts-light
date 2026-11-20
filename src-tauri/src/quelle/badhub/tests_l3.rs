@@ -1126,3 +1126,35 @@ fn slave_schluessel_wird_abgelegt_und_geladen() {
     assert!(!roh.windows(k.len()).any(|w| w == k.as_bytes()));
     assert!(!format!("{q:?}").contains(&k));
 }
+
+#[tokio::test]
+async fn weiterleitung_von_badhub_b2_genau_so_wie_gesendet() {
+    // Body von badhub B2 (#1388), ohne `jetzt`, `id` vor `art`.
+    let body = r#"{"opId":"bh-4711","viewRev":0,"action":{"action":"kern_befehl","befehl":{"id":"bh-4711","art":"spiel_aufrufen","konkurrenz":"HE","spiel":1,"feld":"2"}}}"#;
+    let v: serde_json::Value = serde_json::from_str(body).unwrap();
+    let action: relay_proto::TlAction = serde_json::from_value(v["action"].clone()).unwrap();
+    let relay_proto::TlAction::KernBefehl { befehl } = action else {
+        panic!("KernBefehl erwartet")
+    };
+    let (_d, _b, _c, z) = gekoppelt().await;
+    lease_schritt(&z, Some("ns")).await;
+    assert_eq!(mit(&z, |q| q.befehl_von_badhub(befehl.clone())), Ok(1));
+    mit(&z, |q| {
+        assert_eq!(q.stand().matches[0].court_id, Some(2));
+        let TurnierBefehl::SpielAufrufen { jetzt, .. } =
+            &q.protokoll.posten().last().unwrap().befehl
+        else {
+            panic!()
+        };
+        assert_eq!(jetzt.len(), 19, "jetzt setzt der Knoten");
+    });
+    // Ergebnis und Rücknahme in derselben Form.
+    let ergebnis = serde_json::json!({"id": "bh-4712", "art": "ergebnis_melden", "konkurrenz": "HE", "spiel": 1, "saetze": [[21, 10], [21, 12]]});
+    assert_eq!(mit(&z, |q| q.befehl_von_badhub(ergebnis)), Ok(1));
+}
+
+#[test]
+fn uebernahme_nicht_freigegeben_wird_verstaendlich() {
+    assert!(lease_ablehnung_text("uebernahme_nicht_freigegeben").contains("Turniertag freigeben"));
+    assert_eq!(lease_ablehnung_text("x<y"), "badhub lehnt ab (xy)");
+}
