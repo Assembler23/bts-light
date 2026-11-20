@@ -826,7 +826,7 @@ Authorization: Bearer <TL-Gerät>
   `badhub_zurueckgeben` nicht und wiese das Kommando ab. Für BTP-Turniere ändert
   sich nichts.
 
-### Rückzug aus dem TL-Web (seit v0.9.452, Turnierkern 0.13.0)
+### Rückzug aus dem TL-Web (seit v0.9.454, Turnierkern 0.13.0)
 
 ```http
 POST /bts-relay/tl/api/command

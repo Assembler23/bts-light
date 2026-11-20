@@ -547,6 +547,9 @@ pub fn bewerte_config(alt: &AppConfig, neu: &AppConfig) -> ConfigWechsel {
     let wiederanlauf = alt.tp_upload.path != neu.tp_upload.path
         || alt.tp_upload.tournament_uuid != neu.tp_upload.tournament_uuid
         || alt.tournament_uuid != neu.tournament_uuid
+        // Wirksame GUID (Quelle badhub: aus der Kopplung) — eine neue
+        // Kopplung ändert das Rohfeld nicht.
+        || alt.tournament_uuid_kanonisch() != neu.tournament_uuid_kanonisch()
         || alt.badhub.live_url != neu.badhub.live_url
         || alt.badhub.url != neu.badhub.url
         || alt.badhub.password != neu.badhub.password;
@@ -1133,6 +1136,12 @@ mod tests {
             Box::new(|c| c.badhub.live_url = "x".into()),
             Box::new(|c| c.badhub.url = "x".into()),
             Box::new(|c| c.badhub.password = "x".into()),
+            // Neue badhub-Kopplung: Rohfeld gleich, wirksame GUID neu.
+            Box::new(|c| {
+                c.quelle = crate::config::QuelleArt::Badhub;
+                c.badhub_turnier.uuid = "0ea5fd86-a64f-4445-a8de-bae3dbf762ba".into();
+                c.badhub_turnier.basis = "https://badhub.de/api/torg/v1".into();
+            }),
         ];
         for (i, f) in felder.iter().enumerate() {
             let mut c = basis.clone();

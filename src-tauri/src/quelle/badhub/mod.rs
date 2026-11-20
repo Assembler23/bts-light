@@ -1936,6 +1936,14 @@ pub async fn koppeln(
             name: antwort.turnier.name,
             basis: basis.to_string(),
             geraet_name: name.to_string(),
+            // Nur eine gültige GUID übernehmen; sonst bleibt es bei der UUID
+            // (`BadhubTurnierConfig::turnier_guid`).
+            guid: paket
+                .turnier
+                .guid
+                .as_deref()
+                .and_then(crate::config::kanonische_guid)
+                .unwrap_or_default(),
         },
         konkurrenzen: paket.konkurrenzen.len(),
         spiele,

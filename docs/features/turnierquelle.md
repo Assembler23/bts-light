@@ -6,8 +6,8 @@
 > `KernBefehl` für Eingaben aus badhub, LAN-Slave liest vom Master, Stores an der Turnier-UUID.
 > v0.9.451: Rückgabe der Steuerung auch aus dem TL-Web (`TlAction::BadhubZurueckgeben`); Turnierpaket in Teilen
 > (badhub kappt auf 2000 Ereignisse, bts-light lädt seitenweise nach).
-> v0.9.452: Turnierkern **0.14.0** (gleich badhub): Rückzug während des Turniers (Kern 0.13.0) als Kernbefehl aus badhub
-> und als Aktion im TL-Web, Zählweise je Spiel (Kern 0.14.0) in der Abbildung.
+> v0.9.454: Rückzug während des Turniers (Kern 0.13.0) als Kernbefehl aus badhub und als Aktion im TL-Web; `entfaellt`
+> in der Abbildung (Kern 0.14.0 und Zählweise je Spiel kamen mit v0.9.452).
 > Ziel und Gesamtplan: badhub `docs/features/bts_light_steuerung.md`, Entscheidung badhub ADR-0084 (bts-light hält am
 > Turniertag die Lease eines badhub-Turniers).
 
@@ -55,7 +55,7 @@ nicht die eingestellte Quelle.
 | Kopplung | Tauri-Command `badhub_koppeln(code, geraet_name)` → `POST koppeln {code, install_id, name}` → `GET turnier/paket` → Ablage → `config.badhub_turnier`. `badhub_turnier_info` für den Assistenten |
 | Abgleich | alle 5 s `GET turnier/ereignisse?ab=<n>&max=500` (seitenweise bis zum Kopf, siehe „Paket in Teilen“), alle 60 s `GET turnier/paket` mit `If-None-Match` (ETag-Header, sonst `stammdaten_etag`). Offline bleibt der letzte Stand; 401/403 hält den Abgleich bis zum nächsten Start an |
 | API-Basis | aus der Push-Adresse (`badhub.url`, folgt damit dem Testsystem-Schalter) + `/api/torg/v1`, beim Koppeln in `badhub_turnier.basis` festgehalten — das Token geht nie an das andere System. Nur `https://` (Ausnahme `localhost`/`127.0.0.1` für Tests) |
-| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.14.0` seit v0.9.452, vorher `v0.12.0`), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht trotzdem (das Ereignisschema wächst nur additiv), Schreiben (L3) verlangt Gleichstand |
+| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.14.0`), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht, solange das Protokoll keine Ereignisarten enthält, die diese Version nicht kennt (neue Befehle eines neueren Kerns, z. B. `zaehlweise_festlegen` ab 0.14.0, lassen das Falten scheitern — deshalb bts-light zusammen mit dem Kern in badhub aktualisieren), Schreiben (L3) verlangt Gleichstand |
 
 ### Ablage und Verschlüsselung
 
@@ -96,7 +96,7 @@ nicht die eingestellte Quelle.
 | `draw_name`, `class_label`, `discipline` | Konkurrenz-Schlüssel, Klasse aus Name/Schlüssel, Disziplin-Kürzel | |
 | `match_num` | Spielnummer der Konkurrenz | „aus Spiel 3“ gilt innerhalb der Konkurrenz |
 | `official1_id`/`official2_id`, `officials` | Kern-Offizielle, Namen aus `schiedsrichter` | |
-| `scoring` | Zählweise **des Spiels** (`Spiel::zaehlweise`, Kern 0.14.0: Spiel → KO-Phase/Konkurrenz → Turnier → Badminton) | ohne Deckel `cap_score` 999; Tablets, Plausibilität (R5) und Ansage lesen sie am Spiel |
+| `scoring` | Zählweise **je Spiel** (`spiele[].zaehlweise`, Kern ab 0.14.0: Spiel → Konkurrenz/KO-Phase → Turnier → 3×21); `best_of` = 2 × Gewinnsätze − 1, Pause bei 11 (bis 21) bzw. 8 (bis 15), bei 11er-Sätzen (5×11, Bundesliga) keine | ohne Deckel `cap_score` 999 |
 | Status `entfaellt` (Kern 0.13.0) | Rückzug: Gruppe mit `streichen` oder beide Seiten zurückgezogen | Spiel erscheint **nicht** im Modell — nicht aufrufbar, nicht in der Auto-Vergabe; Gruppenspiele sind nie Vorspiel |
 | `durch_rueckzug` | kampfloses Ergebnis aus einem Rückzug | Finished + Walkover wie ein gemeldetes kampflos |
 | `gestrichen`, `Zeile.zurueckgezogen` | Tabellenwirkung | bts-light rechnet keine Tabellen; der Rückzugs-Stand reist als `badhub_meldungen[].zurueckgezogen` ins TL-Web |
@@ -146,8 +146,17 @@ zur Generalprobe E1 nicht produktiv.
 - `runden`: Schlüssel = Spielnummer (als Text).
 - Feldnamen in `rahmen.hallen[].felder`: mit oder ohne Hallenpräfix; maßgeblich ist das Kern-Feld aus `spiel_aufrufen`.
 - `POST koppeln`: 400/401/403/404/409/410/422 gelten als „Code ungültig“, 429 als Drossel.
-- Liveticker-GUID: bleibt Pflicht im Assistenten (`tournament_uuid`); ob badhub dort die Turnier-UUID annimmt
-  (GUID-Brücke ADR-0080), ist mit B1 zu klären.
+- Liveticker-GUID (geklärt v0.9.453, 21.11.2026): Bei Quelle badhub mit gekoppeltem Turnier gilt die GUID aus der
+  Kopplung — `turnier.guid` aus dem Turnierpaket (turnier.de-GUID des Turniers, sonst seine `public_guid`, wie
+  `tournaments.tournament_uuid` der Turnierseite), gespeichert als `BadhubTurnierConfig.guid`; fehlt sie (Kopplung
+  vor v0.9.453, älteres badhub), die `uuid`. `AppConfig::tournament_uuid_kanonisch` (Liveticker, Aushang, Logo) und
+  `checkin_guid`/`checkin_bereit` (Meldeliste, Check-In-Stand, Punktverlauf, Zettel) lesen sie; das Feld
+  `tournament_uuid` bleibt unangetastet und gilt bei BTP unverändert. Der Assistent zeigt die GUID statt des Felds
+  und verlangt es nicht. Anlass: Köpi-Cup 2027 auf Test lief unter der GUID eines älteren Testturniers, die noch im
+  Feld stand — der Stand landete auf dessen Turnierseite. Ändert sich die turnier.de-GUID in badhub nach der
+  Kopplung, gilt sie erst nach erneutem Koppeln. Die Oberfläche liest dieselbe GUID über `wirksameTurnierGuid()`
+  (`src/tournamentGuid.ts`). Bei Quelle badhub gibt es keine TP-Datei: `tp_datei_fuer_turnier` liefert `None`, die
+  TP-Automatik (`tp_finden::entscheide`) bleibt still.
 
 ## Paket L3 (umgesetzt, schreibend)
 
@@ -228,7 +237,7 @@ Antwort `ok`, `kern_abgelehnt` (+ `ablehnung`), `not_allowed` (keine Lease) oder
   bzw. Zeitüberschreitung → Hinweis „Halle nicht erreichbar“.
 - Befehle aus bts-light tragen kein Feld `geraet`: Wer in der Halle gehandelt hat, steht nur lokal im Protokoll.
 
-## Rückzug während des Turniers (v0.9.452, Kern 0.13.0)
+## Rückzug während des Turniers (v0.9.454, Kern 0.13.0)
 
 | Was | Wo |
 |---|---|

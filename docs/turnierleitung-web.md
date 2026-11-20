@@ -550,7 +550,7 @@ danach nur noch in badhub.
 
 Bei BTP-Turnieren erscheint nichts davon.
 
-**Rückzug während des Turniers (seit v0.9.452).** Zieht ein Spieler oder ein
+**Rückzug während des Turniers (seit v0.9.454).** Zieht ein Spieler oder ein
 Paar während eines badhub-Turniers zurück, trägt die Turnierleitung das mit dem
 Knopf **Rückzug** im Kopf ein — statt jedes Spiel einzeln als kampflos.
 <!-- pruef: "Rückzug" in src-tauri/assets/tl.html -->

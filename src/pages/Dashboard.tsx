@@ -18,7 +18,7 @@ import {
   tpUploadNow,
   tpUploadStatus,
 } from "../api";
-import { extractTournamentGuid } from "../tournamentGuid";
+import { extractTournamentGuid, wirksameTurnierGuid } from "../tournamentGuid";
 import { AushangOverlay } from "../components/AushangOverlay";
 import { SlaveDevicesPanel } from "../components/SlaveDevicesPanel";
 import { BadhubAbgleichPanel } from "../components/BadhubAbgleichPanel";
@@ -185,7 +185,7 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
   // wird nur der Stand gepollt, solange der Upload läuft.
   const tpPfad = config.tp_upload.path;
   const tpGuidGebunden = extractTournamentGuid(config.tp_upload.tournament_uuid);
-  const tpGuidAktuell = extractTournamentGuid(config.tournament_uuid);
+  const tpGuidAktuell = wirksameTurnierGuid(config);
   // Drei Hindernisse, je mit eigenem Hinweis: kein Pfad / keine Kennung / Kennung weicht ab.
   const tpHindernis =
     tpPfad === ""

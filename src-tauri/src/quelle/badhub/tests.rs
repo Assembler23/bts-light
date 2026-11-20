@@ -157,6 +157,7 @@ pub(super) fn paket_fuer(log: Vec<TurnierEreignis>, n: u32, hallen: Vec<PaketHal
         turnier: PaketTurnier {
             id: 17,
             uuid: UUID.into(),
+            guid: None,
             name: "Wintercup".into(),
             beginn: Some("2026-12-06".into()),
             ende: None,
@@ -373,6 +374,92 @@ fn gruppe_mit_eigenen_rundentexten_und_aufgabe() {
     assert_eq!(snap.entries[0].event_id, 3);
     assert_eq!(snap.events[0].name, "Herreneinzel A");
     assert_eq!(snap.officials[0].display_name(), "Sabine Pfiff");
+}
+
+/// Zählweise je Spiel (Kern 0.14.0): Turnier 3×15, KO-Phase der Konkurrenz 3×21, Finale 5×11 —
+/// jedes Spiel bekommt sein eigenes Zählformat (Tablet: Satzziel, Deckel, Pause).
+#[test]
+fn zaehlweise_je_spiel_turnier_phase_spiel() {
+    let mut log = turnier(
+        6,
+        System::GruppenKo {
+            gruppengroesse: 3,
+            aufsteiger: 2,
+            platz3: false,
+        },
+        &[("H1", 2)],
+    );
+    let regeln = |z: Zaehlweise, ko: Option<Zaehlweise>| Regeln {
+        zaehlweise: z,
+        gruppenregeln: Gruppenregeln::untereinander(),
+        zaehlweise_ko: ko,
+    };
+    befehl(
+        &mut log,
+        TurnierBefehl::TurnierRegelnFestlegen {
+            id: "zt".into(),
+            regeln: Some(regeln(Zaehlweise::badminton_15(), None)),
+        },
+    )
+    .unwrap();
+    let st = falten_turnier(&log);
+    let ko: Vec<u32> = st.durchfuehrung["HE"]
+        .spiele
+        .iter()
+        .filter(|s| s.phase == Phase::Ko)
+        .map(|s| s.nr)
+        .collect();
+    let finale = *ko.last().unwrap();
+    befehl(
+        &mut log,
+        TurnierBefehl::RegelnFestlegen {
+            id: "zk".into(),
+            konkurrenz: "HE".into(),
+            regeln: Some(regeln(
+                Zaehlweise::badminton_15(),
+                Some(Zaehlweise::badminton()),
+            )),
+        },
+    )
+    .unwrap();
+    befehl(
+        &mut log,
+        TurnierBefehl::ZaehlweiseFestlegen {
+            id: "zs".into(),
+            konkurrenz: "HE".into(),
+            spiel: finale,
+            zaehlweise: Some(Zaehlweise::badminton_11()),
+        },
+    )
+    .unwrap();
+    let st = falten_turnier(&log);
+    let snap = abbilden(&st, &paket_fuer(log.clone(), 6, eine_halle()));
+    let fmt = |nr: u32| {
+        let m = snap
+            .matches
+            .iter()
+            .find(|m| m.id % super::abbildung::ID_FAKTOR == i64::from(nr))
+            .unwrap();
+        (
+            m.scoring.best_of,
+            m.scoring.target_score,
+            m.scoring.cap_score,
+            m.scoring.interval_at,
+        )
+    };
+    let gruppe = st.durchfuehrung["HE"]
+        .spiele
+        .iter()
+        .find(|s| s.phase == Phase::Gruppe)
+        .unwrap()
+        .nr;
+    assert_eq!(fmt(gruppe), (3, 15, 21, Some(8)), "Gruppe 3×15");
+    assert_eq!(fmt(ko[0]), (3, 21, 30, Some(11)), "KO 3×21");
+    assert_eq!(
+        fmt(finale),
+        (5, 11, 15, None),
+        "Finale 5×11 ohne Pause im Satz"
+    );
 }
 
 #[test]
@@ -623,6 +710,8 @@ async fn kopplung_paket_etag_ereignisse_und_widerruf() {
         .await
         .unwrap();
     assert_eq!(k.turnier.uuid, UUID);
+    // Paket ohne `guid` (älteres badhub) → leer, es gilt die UUID.
+    assert_eq!(k.turnier.guid, "");
     assert_eq!(k.turnier.name, "Wintercup");
     assert_eq!(k.turnier.basis, basis);
     assert_eq!(k.spiele, 3);
@@ -679,13 +768,18 @@ async fn kopplung_paket_etag_ereignisse_und_widerruf() {
 async fn offline_bleibt_der_letzte_stand() {
     let (basis_log, _) = mit_nachzuegler();
     let a = Arc::new(Attrappe::default());
-    *a.paket.lock().unwrap() = Some(paket_fuer(basis_log, 4, eine_halle()));
+    // badhub nennt die GUID der Turnierseite (hier eine turnier.de-GUID in
+    // BTP-Schreibweise) → kanonisch in der Kopplung, für den Liveticker.
+    let mut p = paket_fuer(basis_log, 4, eine_halle());
+    p.turnier.guid = Some("{6b2352e2-2231-45a2-a338-5ed0cb2e1a5c}".into());
+    *a.paket.lock().unwrap() = Some(p);
     let basis = attrappe_starten(a).await;
     let daten = tempfile::tempdir().unwrap();
     let mut k = koppeln(&basis, daten.path(), "ABCD2345", "inst-1", "")
         .await
         .unwrap();
     assert_eq!(k.turnier.geraet_name, "bts-light");
+    assert_eq!(k.turnier.guid, "6B2352E2-2231-45A2-A338-5ED0CB2E1A5C");
     // Netz weg: ein Port, an dem niemand lauscht.
     let tot = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = tot.local_addr().unwrap().port();
@@ -714,6 +808,7 @@ fn fremdes_turnier_im_paket_wird_verworfen() {
         name: "Wintercup".into(),
         basis: "https://badhub.de/api/torg/v1".into(),
         geraet_name: "PC".into(),
+        guid: String::new(),
     };
     let mut q = KernQuelle::laden(daten.path(), &cfg).unwrap();
     let mut fremd = p.clone();

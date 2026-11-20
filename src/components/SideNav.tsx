@@ -17,6 +17,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { AppConfig } from "../types";
+import { wirksameTurnierGuid } from "../tournamentGuid";
 
 /** Bereiche, die über die Seitenleiste erreichbar sind. */
 export type NavView =
@@ -73,7 +74,7 @@ function items(config: AppConfig): NavItem[] {
       view: "checkin",
       label: "Check-In",
       icon: UserCheck,
-      enabled: config.checkin.enabled && config.checkin.tournament_uuid !== "",
+      enabled: config.checkin.enabled && wirksameTurnierGuid(config) !== "",
       focus: "check-in",
     },
     // Ausgegraut, solange ohne Schiedsrichter gespielt wird — der Klick
