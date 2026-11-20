@@ -7319,6 +7319,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rueckgabe_an_badhub_nicht_vom_kern_zugang_und_nicht_bei_btp() {
+        let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a")]);
+        ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2]));
+        let ctx = Arc::new(ctx);
+        let aktion = relay_proto::TlAction::BadhubZurueckgeben;
+        // Der Kern-Zugang darf die Steuerung nicht über den Turnier-PC
+        // zurückgeben.
+        let kern_geraet = crate::config::TlDevice {
+            id: relay_proto::TL_GERAET_KERN.into(),
+            token: "t".into(),
+            ..Default::default()
+        };
+        let r = crate::tablet::tl::execute(&ctx, &kern_geraet, "op-1", 1, 0, aktion.clone()).await;
+        assert_eq!(r.code, Some(relay_proto::TlErrorCode::NotAllowed), "{r:?}");
+        assert!(
+            r.error.as_deref().unwrap().contains("nur Kernbefehle"),
+            "{r:?}"
+        );
+        // Ein TL-Gerät bei einem BTP-Turnier: abgelehnt, kein badhub-Kontakt.
+        let r = crate::tablet::tl::execute(&ctx, &tl_device("a"), "op-2", 1, 0, aktion).await;
+        assert_eq!(r.code, Some(relay_proto::TlErrorCode::NotAllowed), "{r:?}");
+        assert!(
+            r.error.as_deref().unwrap().contains("kein badhub-Turnier"),
+            "{r:?}"
+        );
+        // Die Seite erfährt, dass der Turnier-PC die Aktion kennt; den Knopf
+        // zeigt sie trotzdem nur mit `badhub_abgleich` (bei BTP nie gesetzt).
+        let state = crate::tablet::tl::build_state(&ctx.tablet, &ctx.app_config(), 3, 0);
+        assert!(state.can_return_badhub);
+        assert!(state.badhub_abgleich.is_none());
+    }
+
+    #[tokio::test]
     async fn turnierleitung_nimmt_den_ruf_eines_felds_zurueck() {
         let (ctx, _shared, _dir) = make_tl_ctx(vec![tl_device("a"), tl_device("b")]);
         ctx.tablet.set_snapshot(snap_mit_feldern("", &[1, 2, 3]));

@@ -307,6 +307,11 @@ struct Badhub {
     hochladen_aufrufe: AtomicUsize,
     paket: StdMutex<Option<Paket>>,
     letzter_body: StdMutex<Option<serde_json::Value>>,
+    /// `GET turnier/ereignisse`: höchstens so viele je Seite (0 = `max`).
+    seite: AtomicUsize,
+    /// Nach so vielen Seiten 503 (Netz bricht ab); `None` = nie.
+    ausfall_nach: StdMutex<Option<usize>>,
+    lease_aufrufe: AtomicUsize,
 }
 
 impl Badhub {
@@ -343,6 +348,7 @@ async fn badhub_starten(b: Arc<Badhub>) -> String {
         if !ok(&h) {
             return StatusCode::UNAUTHORIZED.into_response();
         }
+        b.lease_aufrufe.fetch_add(1, Ordering::SeqCst);
         let n = body["n"].as_u64().unwrap();
         if n != b.n() {
             return (
@@ -443,6 +449,35 @@ async fn badhub_starten(b: Arc<Badhub>) -> String {
         }
         Json(serde_json::json!({"bis_n": b.n()})).into_response()
     }
+    async fn ereignisse_lesen(
+        State(b): State<Arc<Badhub>>,
+        axum::extract::Query(q): axum::extract::Query<std::collections::BTreeMap<String, String>>,
+    ) -> axum::response::Response {
+        {
+            let mut ausfall = b.ausfall_nach.lock().unwrap();
+            match *ausfall {
+                Some(0) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+                Some(k) => *ausfall = Some(k - 1),
+                None => {}
+            }
+        }
+        let ab: u64 = q.get("ab").and_then(|v| v.parse().ok()).unwrap_or(0);
+        let max: usize = q.get("max").and_then(|v| v.parse().ok()).unwrap_or(500);
+        let seite = match b.seite.load(Ordering::SeqCst) {
+            0 => max,
+            s => s.min(max),
+        };
+        let neu: Vec<TurnierEreignis> = b
+            .ereignisse
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e.n() > ab)
+            .take(seite)
+            .cloned()
+            .collect();
+        Json(serde_json::json!({"ab": ab, "n": b.n(), "ereignisse": neu})).into_response()
+    }
     async fn paket(State(b): State<Arc<Badhub>>) -> axum::response::Response {
         let mut p = b.paket.lock().unwrap().clone().unwrap();
         p.ereignisse = b.ereignisse.lock().unwrap().clone();
@@ -454,7 +489,10 @@ async fn badhub_starten(b: Arc<Badhub>) -> String {
             "/api/torg/v1/turnier/lease",
             post(lease_nehmen).delete(lease_zurueck),
         )
-        .route("/api/torg/v1/turnier/ereignisse", post(hochladen))
+        .route(
+            "/api/torg/v1/turnier/ereignisse",
+            post(hochladen).get(ereignisse_lesen),
+        )
         .with_state(b);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -472,6 +510,19 @@ async fn gekoppelt() -> (
     BadhubTurnierConfig,
     StdMutex<Option<KernQuelle>>,
 ) {
+    gekoppelt_mit(usize::MAX).await
+}
+
+/// Wie [`gekoppelt`], aber auf der Platte nur die ersten `teil` Ereignisse
+/// (Kopplung mit gekapptem Paket, Nachladen abgebrochen).
+async fn gekoppelt_mit(
+    teil: usize,
+) -> (
+    tempfile::TempDir,
+    Arc<Badhub>,
+    BadhubTurnierConfig,
+    StdMutex<Option<KernQuelle>>,
+) {
     let (log, p) = ko4();
     let b = Arc::new(Badhub::default());
     *b.ereignisse.lock().unwrap() = log;
@@ -479,6 +530,8 @@ async fn gekoppelt() -> (
     let basis = badhub_starten(b.clone()).await;
     let daten = tempfile::tempdir().unwrap();
     let a = Ablage::neu(daten.path(), UUID).unwrap();
+    let mut p = p;
+    p.ereignisse.truncate(teil);
     a.paket_speichern(&p, Some("\"s1\"")).unwrap();
     a.token_speichern(TOKEN).unwrap();
     let cfg = BadhubTurnierConfig {
@@ -885,7 +938,7 @@ async fn lease_zurueckgeben_nur_mit_leerer_outbox_danach_ohne_personenauszug() {
     lease_schritt(&z, None).await;
     mit(&z, |q| q.ausfuehren(vec![aufruf(1, "1")], AKTEUR_HALLE)).unwrap();
     let e = zurueckgeben_in(&z).await.unwrap_err();
-    assert!(e.contains("warten noch 1"), "{e}");
+    assert!(e.starts_with("1 Ereignis wartet noch"), "{e}");
     assert!(b.lease.lock().unwrap().is_some());
     assert_eq!(outbox_schritt(&z).await, OutboxSchritt::Weiter);
     let ok = zurueckgeben_in(&z).await.unwrap();
@@ -1157,4 +1210,31 @@ async fn weiterleitung_von_badhub_b2_genau_so_wie_gesendet() {
 fn uebernahme_nicht_freigegeben_wird_verstaendlich() {
     assert!(lease_ablehnung_text("uebernahme_nicht_freigegeben").contains("Turniertag freigeben"));
     assert_eq!(lease_ablehnung_text("x<y"), "badhub lehnt ab (xy)");
+}
+
+#[tokio::test]
+async fn lease_erst_wenn_der_stand_bis_zum_kopf_nachgeladen_ist() {
+    let (_daten, b, _cfg, z) = gekoppelt_mit(4).await;
+    let kopf = b.n();
+    assert!(kopf > 10, "mehrere Seiten nötig: {kopf}");
+    b.seite.store(3, Ordering::SeqCst);
+    // Netz bricht nach der ersten Seite ab: kein `POST turnier/lease` mit
+    // einem `n`, das nicht passt.
+    *b.ausfall_nach.lock().unwrap() = Some(1);
+    abgleich_schritt_in(&z, false, None).await;
+    assert_eq!(mit(&z, |q| q.n_lokal()), 7, "die erste Seite ist abgelegt");
+    assert_eq!(b.lease_aufrufe.load(Ordering::SeqCst), 0);
+    assert!(b.lease.lock().unwrap().is_none());
+    mit(&z, |q| assert_eq!(q.abgleich().zustand, "keine_lease"));
+
+    // Netz wieder da: Seite um Seite bis zum Kopf, dann genau eine Lease.
+    *b.ausfall_nach.lock().unwrap() = None;
+    abgleich_schritt_in(&z, false, None).await;
+    assert_eq!(mit(&z, |q| q.n_lokal()), kopf);
+    assert_eq!(b.lease_aufrufe.load(Ordering::SeqCst), 1);
+    assert!(
+        b.lease.lock().unwrap().is_some(),
+        "n passte beim ersten Versuch"
+    );
+    mit(&z, |q| assert_eq!(q.abgleich().zustand, "aktuell"));
 }

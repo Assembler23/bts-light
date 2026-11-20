@@ -798,6 +798,34 @@ Authorization: Bearer <Kern-Zugang>
   `kern_befehl` und `kern_abgelehnt` nicht). BTP-Turniere sehen keinen
   neuen Frame; ein älteres Relay bleibt für sie nutzbar.
 
+### Steuerung an badhub zurückgeben (seit v0.9.451)
+
+Der Knopf **Turnier beenden** im TL-Web schickt eine Aktion ohne Felder:
+
+```http
+POST /bts-relay/tl/api/command
+Authorization: Bearer <TL-Gerät>
+{"opId": "badhub-zurueck-<ms>", "viewRev": 17, "action": {"action": "badhub_zurueckgeben"}}
+```
+
+- **`TlAction::BadhubZurueckgeben`** — der Relay reicht sie unverändert durch.
+  Der **Kern-Zugang** `badhub-kern` darf sie nicht (`kern_zugang_passt`:
+  Kern-Zugang ⇔ `KernBefehl`, also `403`); der Host lehnt sie für ihn in
+  `tl::execute` noch einmal ab.
+- **Host:** nur bei Quelle badhub am Master, dann derselbe Weg wie der Knopf im
+  Hauptfenster (`quelle::badhub::turnier_beenden`): aktive Lease, **leere
+  Outbox**, `DELETE /api/torg/v1/turnier/lease {epoche, n}`, Personenauszug
+  löschen. Antwort `{"ok": true}` oder `not_allowed` mit Klartext — bei offener
+  Outbox „N Ereignisse warten noch auf den Abgleich mit badhub …“, ohne Lease
+  „bts-light hält die Steuerung dieses Turniers nicht.“, offline „… Rückgabe
+  braucht Internet.“
+- **Merkmal:** `TlState.can_return_badhub` (`#[serde(default)]`); die Seite
+  zeigt den Knopf nur damit **und** mit `badhub_abgleich.zustand` `aktuell`
+  bzw. `wartet`.
+- **Deploy-Reihenfolge:** Relay **vor** dem App-Tag — ein älterer Relay kennt
+  `badhub_zurueckgeben` nicht und wiese das Kommando ab. Für BTP-Turniere ändert
+  sich nichts.
+
 ### Erneute Aufrufe — je Partei
 
 Beide Aufruf-Aktionen können auf **eine Partei** eingegrenzt werden; die
