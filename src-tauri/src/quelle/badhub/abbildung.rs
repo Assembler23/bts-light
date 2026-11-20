@@ -107,6 +107,29 @@ fn felder(paket: &Paket, stand: &TurnierStand) -> (Vec<BtpLocation>, Vec<FeldInf
     (locations, infos)
 }
 
+/// Rückweg der Feld-ID (Paket L3): die Schreibweise des Felds im Kern, wie
+/// sie `spiel_aufrufen` braucht. `None` für eine unbekannte ID.
+pub fn feld_kern_name(paket: &Paket, stand: &TurnierStand, court_id: i64) -> Option<String> {
+    let (_, infos) = felder(paket, stand);
+    infos.into_iter().find(|f| f.id == court_id).map(|f| f.kern)
+}
+
+/// Rückweg der Spiel-ID (Paket L3): Konkurrenz-Schlüssel und Spielnummer.
+pub fn spiel_zu_id(paket: &Paket, match_id: i64) -> Option<(String, u32)> {
+    if match_id <= 0 {
+        return None;
+    }
+    let nr = match_id / ID_FAKTOR;
+    let spiel = u32::try_from(match_id % ID_FAKTOR)
+        .ok()
+        .filter(|s| *s > 0)?;
+    paket
+        .konkurrenzen
+        .iter()
+        .find(|k| k.nr == nr)
+        .map(|k| (k.key.clone(), spiel))
+}
+
 /// Feld zu einer Kern-Feldbezeichnung. Bei einer Halle zählt der Name; bei
 /// mehreren die Schreibweise „<Halle> n“, ersatzweise ein eindeutiger
 /// Anzeigename.

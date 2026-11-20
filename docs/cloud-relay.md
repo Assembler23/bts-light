@@ -752,6 +752,52 @@ damit tut: [tablet.md](tablet.md) („der weitere Stand gilt"). Der Relay
 selbst rechnet `authoritative` unverändert; das Tablet folgt dem Bit nur
 noch, wo es keinen eigenen Stand zum Vergleichen hat.
 
+### Kernbefehle aus badhub (seit v0.9.450, badhub ADR-0084, Paket L3)
+
+Bei einem **badhub-Turnier** hält der Turnier-PC die Lease
+([features/turnierquelle.md](features/turnierquelle.md)). Gibt die
+Turnierleitung in badhub (Bereich „Spiele“) etwas ein, leitet badhub es über
+denselben Weg wie ein TL-Gerät an den Turnier-PC:
+
+```http
+POST /bts-relay/tl/api/command
+Authorization: Bearer <Kern-Zugang>
+{"opId": "<befehl_id>", "viewRev": 0,
+ "action": {"action": "kern_befehl", "befehl": {"art": "ergebnis_melden", "id": "…", …}}}
+```
+
+- **`TlAction::KernBefehl { befehl: serde_json::Value }`** — der Relay reicht
+  den Befehl **unverändert** durch (Schema gehört `turnierkern::TurnierBefehl`).
+- **Kern-Zugang:** bts-light stellt ihn beim Nehmen der Lease aus (32
+  Zufallsbytes, hex), schickt ihn mit `POST /api/torg/v1/turnier/lease` als
+  `relay: {ns, tl_token}` an badhub und spiegelt ihn per `TlAuth` als Gerät
+  **`badhub-kern`** (`relay_proto::TL_GERAET_KERN`) an den Relay — unabhängig
+  vom TL-Web-Schalter, nur bei Quelle badhub, nur am Master, nur mit aktiver
+  Lease und Cloud-Weg. Er erlischt mit Rückgabe oder Rückholung (der nächste
+  `TlAuth` trägt ihn nicht mehr) und steht verschlüsselt in
+  `turniere/<uuid>/relay.bin`.
+- **Nur Kernbefehle:** Der Relay behandelt den Kern-Zugang auf allen
+  lesenden TL-Routen (`/tl/api/state`, Punktverlauf, Zettel, Suche,
+  Offiziellen-Detail, `/tl-ws`) als unbekannt und antwortet auf
+  `/tl/api/command` mit `403`, wenn Zugang und Aktion nicht zusammenpassen
+  (`kern_zugang_passt`: Kern-Zugang ⇔ `KernBefehl`). Der Host prüft dasselbe
+  noch einmal ganz vorn in `tl::execute`.
+- **Antwort:** „übernommen“ = `{"ok": true}`. Lehnt der Kern ab:
+  `{"ok": false, "code": "kern_abgelehnt", "error": "Feld 2 ist belegt …",
+  "ablehnung": {"grund": "feld_belegt", …}}` — `ablehnung` im Wortlaut des
+  Kerns, additiv (`TlResponse.ablehnung`, nur bei `kern_abgelehnt`). Ohne
+  Lease oder nach der Rückholung `not_allowed`, für Befehle außerhalb der
+  Durchführung oder mit ungültiger Kennung `unsupported`. `host_offline`
+  vergibt wie immer nur der Relay.
+- **Grenzen:** `/tl/api/command` nimmt höchstens 32 KiB (`TL_COMMAND_BODY_MAX`; die größte bestehende Aktion,
+  `ProfileSave`, bleibt auch mit 64 Panels weit darunter — Test `tl_kommando_grenze_traegt_jede_bestehende_aktion`).
+  Der Turnier-PC begrenzt einen Kernbefehl zusätzlich auf 4096 Byte, höchstens 5 Sätze und 64 Zeichen je Angabe.
+  Der Kern-Zugang belegt keinen der Geräteplätze (`claim_tl_slot`), und die Kennung `badhub-kern` ist für normale
+  TL-Geräte reserviert (Koppeln lehnt sie ab, ein von Hand eingetragenes Gerät dieses Namens bekommt keinen Zugang).
+- **Deploy-Reihenfolge:** Relay **vor** dem App-Tag (ein älterer Relay kennt
+  `kern_befehl` und `kern_abgelehnt` nicht). BTP-Turniere sehen keinen
+  neuen Frame; ein älteres Relay bleibt für sie nutzbar.
+
 ### Erneute Aufrufe — je Partei
 
 Beide Aufruf-Aktionen können auf **eine Partei** eingegrenzt werden; die

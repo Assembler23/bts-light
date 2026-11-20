@@ -179,14 +179,29 @@ gekoppeltem Turnier.
   <!-- pruef: /PAKET_TAKT: Duration = Duration::from_secs\(60\)/ in src-tauri/src/quelle/badhub/mod.rs -->
 - Namen und Vereine liegen **verschlüsselt** auf der Platte, gebunden an das
   Windows-Benutzerkonto.
-- **In dieser Version nur anzeigen:** Ergebnisse vom Tablet, Feldvergabe,
-  Schiedsrichter und Farben gehen noch nicht von bts-light an badhub — die
-  Turnierleitung trägt sie in badhub ein. Ein Tablet bekommt beim Abschließen
-  den Hinweis „Schreiben über badhub folgt“ und behält sein Ergebnis.
-  <!-- pruef: "Schreiben über badhub folgt" in src-tauri/src/quelle/mod.rs -->
+- **Steuerung (Lease):** Beim Start der Übertragung übernimmt bts-light die
+  Steuerung des Turniers von badhub. Ab dann gelten Ergebnisse vom Tablet,
+  Feldvergabe (auch die automatische) und Schiedsrichter **sofort in der Halle**
+  — auch ganz ohne Internet. bts-light hält sie auf der Platte fest und lädt sie
+  zu badhub hoch, sobald Netz da ist. Den Stand zeigt das Dashboard, siehe
+  [Oberflächen](oberflaechen.md) („badhub-Abgleich“).
+  <!-- pruef: "badhub: aktuell" in src-tauri/src/quelle/badhub/mod.rs -->
+- Fehlt beim allerersten Start das Internet, übernimmt bts-light die Steuerung
+  noch nicht — Eingaben sind dann gesperrt, bis badhub einmal erreichbar war.
+  Danach gilt die Steuerung auch ohne Netz weiter (auch nach einem Neustart).
+- Zeilenfarben gibt es nur bei BTP; bei einem badhub-Turnier bleiben sie in
+  bts-light.
 - Die Kopplung gilt für diesen PC. Beim Umzug auf einen neuen PC (Identität
-  übernehmen) wird dort neu gekoppelt.
-- Ein **Ansage-Slave** kann badhub-Turniere noch nicht lesen.
+  übernehmen) wird dort neu gekoppelt. Neu koppeln geht nicht, solange noch
+  Eingaben auf den Abgleich warten.
+- Ein **Ansage-Slave** wird ebenfalls mit einem eigenen Code gekoppelt (für
+  Namen und Felder), übernimmt aber keine Steuerung: Er liest den Stand vom
+  Turnier-PC, dessen Adresse im Feld **Adresse des Turnier-PCs (Master)** steht.
+  <!-- pruef: "Adresse des Turnier-PCs (Master)" in src/pages/SetupWizard.tsx -->
+  Dazu gehört der **Slave-Schlüssel**: Er steht am Turnier-PC auf der Seite Status im Kasten „badhub-Abgleich“ und
+  wird am Slave eingetragen und mit **Schlüssel übernehmen** gespeichert. Ohne ihn gibt der Turnier-PC keinen Stand
+  heraus.
+  <!-- pruef: "Schlüssel übernehmen" in src/pages/SetupWizard.tsx -->
 
 ### 2 · BTP-Verbindung
 

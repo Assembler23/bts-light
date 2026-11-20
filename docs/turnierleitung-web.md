@@ -505,6 +505,25 @@ Wähler: Die Regel bindet auch die Vergabe, eine abweichende Handzuweisung
 käme nie aufs Feld. Die Festlegung gilt für den laufenden Betrieb und
 endet mit dem Stoppen der Übertragung.
 
+### Abgleich mit badhub (badhub-Turniere, seit v0.9.450)
+
+Steuert bts-light ein badhub-Turnier, steht im Kopf neben der
+Verbindungsanzeige der Abgleich mit badhub — **„badhub: aktuell"** oder etwa
+**„5 Ereignisse warten, letzter Kontakt 10:47"**. Alles, was hier eingegeben
+wird (Feld vergeben, Ergebnis, Schiedsrichter), gilt sofort, auch ohne
+Internet; der Turnier-PC reicht es an badhub nach.
+<!-- pruef: "bh-abgleich" in src-tauri/assets/tl.html -->
+
+Holt die Turnierleitung die Steuerung in badhub zurück, erscheint oben ein
+**rotes Band**: „Die Steuerung wurde in badhub zurückgeholt. Eingaben am
+Turnier-PC gehen nicht mehr an badhub." Eingaben werden dann abgelehnt. Zurück
+geht es nur am Turnier-PC mit **Steuerung wieder übernehmen**
+([Oberflächen](oberflaechen.md)). Lehnt der Turnierkern eine Eingabe ab (zum
+Beispiel „Feld 2 ist belegt"), steht der Grund wie gewohnt an der Aktion.
+<!-- pruef: "bh-abgleich-rot" in src-tauri/assets/tl.html -->
+
+Bei BTP-Turnieren erscheint nichts davon.
+
 ### Links zu badhub (seit v0.9.445)
 
 Die Seite verlinkt an mehreren Stellen auf die öffentlichen badhub-Seiten

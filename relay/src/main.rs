@@ -1714,7 +1714,10 @@ fn router(broker: Broker, tl_an: bool) -> Router {
     let app = if tl_an {
         app.route("/tl", get(tl_page))
             .route("/tl/api/state", get(tl_state_route))
-            .route("/tl/api/command", post(tl_command_route))
+            .route(
+                "/tl/api/command",
+                post(tl_command_route).layer(DefaultBodyLimit::max(TL_COMMAND_BODY_MAX)),
+            )
             // Punktverlauf on-demand (Spec punktverlauf-graph, AK-5) —
             // gleicher Pfad wie am LAN-Server, damit tl.html in beiden
             // Modi identisch abruft.
@@ -6050,6 +6053,21 @@ enum TlAccess {
 /// jedem Netzwackler seinen Zugang weg und müsste mitten im Turnier neu
 /// gekoppelt werden — vom Turnier-PC aus, quer durch die Halle.
 async fn tl_access_state(broker: &Broker, token: &str) -> TlAccess {
+    // Der Zugang, den bts-light für badhub ausstellt (Paket L3), darf
+    // ausschließlich Kernbefehle senden — keinen Turnierstand lesen, keinen
+    // Punktverlauf, keine Suche, keinen Push-Kanal. Für alle lesenden Routen
+    // ist er deshalb schlicht unbekannt.
+    match tl_access_roh(broker, token).await {
+        TlAccess::Ok { device_id, .. } if device_id == relay_proto::TL_GERAET_KERN => {
+            TlAccess::Unknown
+        }
+        andere => andere,
+    }
+}
+
+/// [`tl_access_state`] ohne die Sperre des Kern-Zugangs — nur für die
+/// Kommando-Route, die die Aktion selbst prüft.
+async fn tl_access_roh(broker: &Broker, token: &str) -> TlAccess {
     if token.is_empty() {
         return TlAccess::HostOffline;
     }
@@ -6650,6 +6668,13 @@ async fn tl_timeline_route(
 /// Höchstgröße des Rumpfs einer Suchanfrage.
 const TL_SEARCH_BODY_MAX: usize = 1024;
 
+/// Obergrenze eines TL-Kommandos (Security-Review L3: `KernBefehl` trägt
+/// rohes JSON). Die größte bestehende Aktion ist `ProfileSave`; selbst ein
+/// Profil mit 64 Panels und langen Namen bleibt weit darunter
+/// (`tl_kommando_grenze_traegt_jede_bestehende_aktion`). Ein Kernbefehl ist
+/// am Turnier-PC zusätzlich auf 4 KiB begrenzt.
+const TL_COMMAND_BODY_MAX: usize = 32 * 1024;
+
 /// Rumpf einer Suchanfrage.
 #[derive(serde::Deserialize)]
 struct TlSearchBody {
@@ -6929,7 +6954,7 @@ async fn tl_command_route(
     // Die Kennung des Geräts kommt vom Turnier-PC und reist zu ihm zurück —
     // sein Protokoll soll benennen können, wer gehandelt hat. Der Zugang
     // selbst bleibt hier; in Protokollen hat er nichts verloren.
-    let (ns, device_id) = match tl_access_state(&broker, &token).await {
+    let (ns, device_id) = match tl_access_roh(&broker, &token).await {
         TlAccess::Ok { ns, device_id } => (ns, device_id),
         TlAccess::HostOffline => {
             return (
@@ -6944,6 +6969,20 @@ async fn tl_command_route(
         }
         TlAccess::Unknown => return (StatusCode::UNAUTHORIZED, "Kein Zugang").into_response(),
     };
+    // Kernbefehle (Paket L3) nur vom Kern-Zugang, und der nur Kernbefehle.
+    // Der Turnier-PC prüft dasselbe noch einmal; hier fällt es schon vor
+    // dem Weiterleiten auf und belegt keinen Platz beim Host.
+    if !kern_zugang_passt(&device_id, &body.action) {
+        return (
+            StatusCode::FORBIDDEN,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(TlResponse::err(
+                TlErrorCode::NotAllowed,
+                "Dieser Zugang darf diese Aktion nicht ausführen.",
+            )),
+        )
+            .into_response();
+    }
     {
         let mut map = broker.namespaces.lock().await;
         let Some(namespace) = map.get_mut(&ns) else {
@@ -6957,7 +6996,9 @@ async fn tl_command_route(
             )
                 .into_response();
         };
-        if !claim_tl_slot(namespace, &token, now) {
+        // Der Kern-Zugang (badhub) belegt keinen der Geräteplätze: Er ist
+        // kein Browser der Turnierleitung und darf sie nicht verdrängen.
+        if device_id != relay_proto::TL_GERAET_KERN && !claim_tl_slot(namespace, &token, now) {
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
@@ -6973,6 +7014,14 @@ async fn tl_command_route(
         Json(antwort),
     )
         .into_response()
+}
+
+/// Passen Zugang und Aktion zusammen? Der Kern-Zugang (`TL_GERAET_KERN`)
+/// darf nur `KernBefehl`, jeder andere Zugang alles außer `KernBefehl`.
+fn kern_zugang_passt(device_id: &str, action: &TlAction) -> bool {
+    let ist_kern_zugang = device_id == relay_proto::TL_GERAET_KERN;
+    let ist_kern_befehl = matches!(action, TlAction::KernBefehl { .. });
+    ist_kern_zugang == ist_kern_befehl
 }
 
 /// Verarbeitet ein Frame vom Host: an das passende Tablet weiterleiten bzw.
@@ -11273,6 +11322,203 @@ mod tests {
             "der Zugang darf nie mitreisen: {}",
             t.as_str()
         );
+    }
+
+    // ── Kern-Zugang für badhub (Paket L3) ──────────────────────────────
+
+    /// Namespace mit Host und zwei Zugängen: einem normalen TL-Gerät und
+    /// dem Kern-Zugang, den bts-light für badhub ausstellt.
+    async fn broker_mit_kern_zugang() -> (Broker, mpsc::Receiver<Message>, Tx) {
+        let (broker, rx, host) = broker_with_tl_device("token-tl").await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            map.get_mut("ns1").unwrap().tl_tokens.insert(
+                "token-kern".to_string(),
+                relay_proto::TL_GERAET_KERN.to_string(),
+            );
+        }
+        broker
+            .tl_index
+            .lock()
+            .await
+            .insert("token-kern".to_string(), "ns1".to_string());
+        (broker, rx, host)
+    }
+
+    fn bearer_kopf(token: &str) -> axum::http::HeaderMap {
+        let mut h = axum::http::HeaderMap::new();
+        h.insert(
+            header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        h
+    }
+
+    fn kern_aktion() -> TlAction {
+        TlAction::KernBefehl {
+            befehl: serde_json::json!({"art": "aufruf_zuruecknehmen", "id": "bh-1", "konkurrenz": "HE", "spiel": 1}),
+        }
+    }
+
+    #[test]
+    fn tl_kommando_grenze_traegt_jede_bestehende_aktion() {
+        // Größte bestehende Aktion: ein Profil mit vielen Panels und langen Namen.
+        let profil = relay_proto::TlPanelProfileWire {
+            id: "p".repeat(64),
+            name: "Ä".repeat(100),
+            panels: (0..64)
+                .map(|i| relay_proto::TlPanelSettingWire {
+                    key: format!("panel-mit-langem-namen-{i:03}"),
+                    visible: true,
+                    height_fr: 1.25,
+                    collapsed: false,
+                    column: 2,
+                })
+                .collect(),
+            column_widths: vec![1.0, 2.0, 3.0],
+            ..Default::default()
+        };
+        let body = serde_json::json!({
+            "opId": "o".repeat(128),
+            "viewRev": u64::MAX,
+            "action": TlAction::ProfileSave { profile: profil },
+        });
+        let len = serde_json::to_vec(&body).unwrap().len();
+        assert!(len * 2 < TL_COMMAND_BODY_MAX, "{len} Byte");
+    }
+
+    #[tokio::test]
+    async fn der_kern_zugang_belegt_keinen_geraeteplatz() {
+        let (broker, mut host_rx, _host) = broker_mit_kern_zugang().await;
+        {
+            // Alle Plätze von anderen Geräten belegt.
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            for i in 0..MAX_TL_DEVICES {
+                ns.tl_devices.insert(format!("anderer-{i}"), now_ms());
+            }
+        }
+        let b = broker.clone();
+        let auftrag = tokio::spawn(async move {
+            tl_command_route(
+                State(b),
+                bearer_kopf("token-kern"),
+                Json(TlCommandBody {
+                    op_id: "bh-1".into(),
+                    view_rev: 0,
+                    action: kern_aktion(),
+                }),
+            )
+            .await
+            .into_response()
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("Kernbefehl kam trotz voller Plätze nicht an");
+        assert!(msg.is_some());
+        auftrag.abort();
+    }
+
+    #[test]
+    fn kern_zugang_und_kernbefehl_gehoeren_zusammen() {
+        assert!(kern_zugang_passt(
+            relay_proto::TL_GERAET_KERN,
+            &kern_aktion()
+        ));
+        assert!(!kern_zugang_passt(
+            relay_proto::TL_GERAET_KERN,
+            &TlAction::SetAutoAssign { enabled: false }
+        ));
+        assert!(!kern_zugang_passt("tl-1", &kern_aktion()));
+        assert!(kern_zugang_passt(
+            "tl-1",
+            &TlAction::SetAutoAssign { enabled: false }
+        ));
+    }
+
+    #[tokio::test]
+    async fn der_kern_zugang_liest_keinen_turnierstand() {
+        let (broker, _rx, host) = broker_mit_kern_zugang().await;
+        handle_host_frame(
+            &broker,
+            "ns1",
+            HostFrame::TlState {
+                rev: 1,
+                json: r#"{"rev":1}"#.to_string(),
+            },
+            &host,
+        )
+        .await;
+        // Das normale Gerät liest, der Kern-Zugang ist für Leserouten unbekannt.
+        let ok = tl_state_route(State(broker.clone()), bearer_kopf("token-tl"))
+            .await
+            .into_response();
+        assert_eq!(ok.status(), StatusCode::OK);
+        assert_eq!(
+            tl_access_state(&broker, "token-kern").await,
+            TlAccess::Unknown
+        );
+        let nein = tl_state_route(State(broker.clone()), bearer_kopf("token-kern"))
+            .await
+            .into_response();
+        assert_ne!(nein.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn der_kern_zugang_darf_nur_kernbefehle_und_kein_anderer_zugang_kernbefehle() {
+        let (broker, mut host_rx, _host) = broker_mit_kern_zugang().await;
+        for (token, action) in [
+            ("token-kern", TlAction::SetAutoAssign { enabled: false }),
+            ("token-tl", kern_aktion()),
+        ] {
+            let antwort = tl_command_route(
+                State(broker.clone()),
+                bearer_kopf(token),
+                Json(TlCommandBody {
+                    op_id: "op".into(),
+                    view_rev: 0,
+                    action,
+                }),
+            )
+            .await
+            .into_response();
+            assert_eq!(antwort.status(), StatusCode::FORBIDDEN, "{token}");
+        }
+        // Nichts davon erreicht den Turnier-PC.
+        assert!(host_rx.try_recv().is_err());
+
+        // Der Kernbefehl des Kern-Zugangs geht unverändert durch.
+        let b = broker.clone();
+        let auftrag = tokio::spawn(async move {
+            tl_command_route(
+                State(b),
+                bearer_kopf("token-kern"),
+                Json(TlCommandBody {
+                    op_id: "bh-1".into(),
+                    view_rev: 0,
+                    action: kern_aktion(),
+                }),
+            )
+            .await
+            .into_response()
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("kein Kommando")
+            .expect("Kanal zu");
+        let Message::Text(t) = msg else {
+            panic!("Text erwartet")
+        };
+        let frame: RelayFrame = serde_json::from_str(t.as_str()).unwrap();
+        let RelayFrame::TlCommand {
+            device_id, action, ..
+        } = frame
+        else {
+            panic!("TlCommand erwartet");
+        };
+        assert_eq!(device_id, relay_proto::TL_GERAET_KERN);
+        assert_eq!(action, kern_aktion());
+        auftrag.abort();
     }
 
     #[tokio::test]

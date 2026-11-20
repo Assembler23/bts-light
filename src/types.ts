@@ -9,6 +9,20 @@ export interface BtpConfig {
 /** Turnierquelle (Rust `QuelleArt`): BTP oder ein badhub-Turnier (Paket L2). */
 export type QuelleArt = "btp" | "badhub";
 
+/** Abgleich mit badhub (Rust `quelle::badhub::Abgleich`, Paket L3). */
+export interface BadhubAbgleich {
+  /** "aktuell" | "wartet" | "keine_lease" | "entzogen" | "zurueckgegeben" | "angehalten" */
+  zustand: string;
+  wartend: number;
+  letzter_kontakt_ms: number;
+  /** Fertiger Text, z. B. "badhub: aktuell" oder "5 Ereignisse warten, letzter Kontakt 10:47". */
+  text: string;
+  kann_beenden: boolean;
+  kann_uebernehmen: boolean;
+  /** Roter Hinweis (Steuerung in badhub zurückgeholt, Abgleich angehalten). */
+  rot: boolean;
+}
+
 /** Gekoppeltes badhub-Turnier (Rust `BadhubTurnierConfig`). Setzt nur die
  *  Kopplung im Kern; das Token steht nie in der Konfiguration. */
 export interface BadhubTurnierConfig {

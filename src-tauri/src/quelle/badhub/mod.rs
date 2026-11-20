@@ -2,9 +2,11 @@
 //! Turnierkern lokal aus den Ereignissen des Turnierpakets faltet (Paket L2,
 //! badhub `docs/features/bts_light_steuerung.md`, ADR-0084).
 //!
-//! **Nur lesend.** Schreiben (Ergebnis, Feldvergabe, Offizielle …) folgt mit
-//! L3; bis dahin weist `quelle` jeden Schreibweg mit
-//! [`super::SCHREIBEN_FOLGT`] ab.
+//! **Schreiben (Paket L3):** Unter der Lease übersetzt [`schreiben`] die
+//! Schreibweichen in Kernbefehle; [`KernQuelle::ausfuehren`] prüft sie lokal
+//! mit dem Kern und hängt Befehl + Ereignisse an das Protokoll
+//! (`protokoll.jsonl`, fsync). Die Outbox ([`outbox_schleife`]) lädt die
+//! Posten zu badhub hoch; ohne Netz läuft die Halle unverändert weiter.
 //!
 //! Ablauf:
 //! - **Kopplung** ([`koppeln`]): Code aus badhub einlösen → Gerätetoken,
@@ -20,8 +22,12 @@
 pub mod abbildung;
 pub mod ablage;
 pub mod api;
+pub mod lease;
 pub mod paket;
+pub mod protokoll;
 pub mod schluessel;
+pub mod schreiben;
+pub mod slave;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -31,7 +37,10 @@ use crate::btp::model::BtpSnapshot;
 use crate::config::{AppConfig, BadhubTurnierConfig};
 
 use ablage::Ablage;
+use lease::{Lease, LeaseZustand};
 use paket::Paket;
+use protokoll::{Posten, Protokoll};
+use turnierkern::{TurnierBefehl, TurnierEreignis, TurnierStand};
 
 /// Version der eingebundenen Kern-Crate (gleich dem Tag in `Cargo.toml`,
 /// geprüft im Test `kern_version_passt_zum_cargo_tag`).
@@ -63,11 +72,116 @@ pub fn api_basis(push_url: &str) -> Result<String, String> {
     Ok(format!("{origin}/api/torg/v1"))
 }
 
-/// Gültigkeit der zwischengespeicherten Abbildung: (`n`, Ereigniszahl, ETag).
-type AbbildSchluessel = (u64, usize, Option<String>);
+/// Gültigkeit der zwischengespeicherten Abbildung: (`n`, Ereigniszahl, ETag,
+/// Zahl der Meldungen im Personenauszug).
+type AbbildSchluessel = (u64, usize, Option<String>, usize);
+
+/// Höchstzahl der Posten je Hochladen (badhub `LeaseHochladen::MAX_POSTEN`).
+pub const MAX_POSTEN: usize = 200;
+/// Höchstzahl der Ereignisse je Hochladen (badhub `MAX_EREIGNISSE`).
+pub const MAX_EREIGNISSE: usize = 1000;
+/// Neuversuche der Outbox: 5, 10, 20, 40, 60 s, danach alle 60 s.
+pub const OUTBOX_BACKOFF_S: [u64; 5] = [5, 10, 20, 40, 60];
+
+/// Akteur eines Befehls aus der Halle bzw. aus badhub (nur lokal im Protokoll).
+pub const AKTEUR_HALLE: &str = "bts-light";
+pub const AKTEUR_BADHUB: &str = "badhub";
+
+/// Warum ein Befehl nicht ausgeführt wurde.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SchreibFehler {
+    /// Der Kern lehnt ab (`grund` im Wortlaut des Kerns).
+    Kern {
+        text: String,
+        grund: serde_json::Value,
+    },
+    /// Keine Schreibberechtigung (keine Lease, zurückgeholt, Kern-Version).
+    Gesperrt(String),
+    /// Befehl unbrauchbar oder Platte nicht schreibbar.
+    Ungueltig(String),
+}
+
+impl std::fmt::Display for SchreibFehler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SchreibFehler::Kern { text, .. } => write!(f, "{text}"),
+            SchreibFehler::Gesperrt(t) | SchreibFehler::Ungueltig(t) => write!(f, "{t}"),
+        }
+    }
+}
+
+/// Text bei zurückgeholter Steuerung (badhub-Spec „Outbox“).
+pub const TEXT_ENTZOGEN: &str = "Die Steuerung wurde in badhub zurückgeholt. Eingaben am \
+     Turnier-PC gehen nicht mehr an badhub.";
+
+fn jetzt_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Unix-ms → Uhrzeit `HH:MM` (lokal).
+fn uhrzeit(ms: u64) -> String {
+    schreiben::wandzeit(ms)
+        .get(11..16)
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Ablehnung von `POST turnier/lease` in Worten (badhub B1/B2).
+pub fn lease_ablehnung_text(code: &str) -> String {
+    match code {
+        "uebernahme_nicht_freigegeben" => {
+            "Übernahme in badhub im Bereich Turniertag freigeben (gilt 10 Minuten)".into()
+        }
+        "uebernehmen_nicht_verfuegbar" => {
+            "ein anderes Gerät steuert das Turnier — Übernahme in badhub freigeben".into()
+        }
+        "relay_ungueltig" => "badhub lehnt die Relay-Angaben ab".into(),
+        andere => {
+            let c: String = andere
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .take(40)
+                .collect();
+            format!("badhub lehnt ab ({c})")
+        }
+    }
+}
+
+/// Ergebnis eines Outbox-Schritts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutboxSchritt {
+    /// Nichts zu tun (leer, keine Lease, angehalten).
+    Ruhe,
+    /// Hochgeladen bzw. Lücke aufgelöst — gleich weitermachen.
+    Weiter,
+    /// Netz/Server-Fehler — später erneut (Backoff).
+    Spaeter,
+    /// Endgültig angehalten (zurückgeholt, Abweichung).
+    Angehalten,
+}
+
+/// Lage des Abgleichs für Hauptfenster und TL-Web.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Abgleich {
+    /// `aktuell` | `wartet` | `keine_lease` | `entzogen` | `zurueckgegeben` | `angehalten`.
+    pub zustand: String,
+    /// Noch nicht von badhub bestätigte Ereignisse.
+    pub wartend: usize,
+    pub letzter_kontakt_ms: u64,
+    /// Fertiger Text („badhub: aktuell“ / „5 Ereignisse warten, letzter Kontakt 10:47“).
+    pub text: String,
+    /// Darf „Turnier beenden“ jetzt? (Lease aktiv, Outbox leer.)
+    pub kann_beenden: bool,
+    /// Darf „Steuerung wieder übernehmen“? (zurückgegeben oder zurückgeholt.)
+    pub kann_uebernehmen: bool,
+    /// Roter Hinweis (zurückgeholt) — TL-Web und Hauptfenster zeigen ihn als Banner.
+    pub rot: bool,
+}
 
 /// Laufzeitzustand eines gekoppelten Turniers.
-#[derive(Debug)]
 pub struct KernQuelle {
     ablage: Ablage,
     basis: String,
@@ -79,6 +193,41 @@ pub struct KernQuelle {
     /// badhub hat den Zugang abgelehnt (401/403): keine weiteren Anfragen
     /// bis zum nächsten Start bzw. zur neuen Kopplung.
     zugang_abgelehnt: bool,
+    /// Lokales Protokoll (Paket L3).
+    protokoll: Protokoll,
+    /// Gespeicherte Lease (`None` = noch nie genommen).
+    lease: Option<Lease>,
+    /// TL-Zugang für badhub (Relay), gilt mit der Lease.
+    tl_zugang: Option<String>,
+    /// In diesem Lauf schon bei badhub angemeldet (`POST turnier/lease`)?
+    lease_angemeldet: bool,
+    /// Letzte Auskunft zur Lease (belegt, offline …) für die Anzeige.
+    lease_hinweis: Option<String>,
+    /// badhub nimmt die Posten nicht an (`422 abweichung`): Outbox steht.
+    abweichung: Option<String>,
+    /// Zwischenspeicher der Kern-Faltung (Schlüssel wie die Abbildung).
+    kern: Option<((u64, usize), TurnierStand)>,
+    /// Präfix der Befehls-IDs dieses Laufs und Zähler.
+    id_praefix: String,
+    id_zaehler: u64,
+    /// Schlüssel zwischen Master und LAN-Ansage-Slave (`slave.bin`).
+    pub(crate) slave_schluessel: Option<String>,
+    /// Am Slave: die vom Master geholten Ereignisse.
+    slave_ereignisse: Vec<TurnierEreignis>,
+}
+
+// Debug von Hand: Gerätetoken und Relay-Zugang erscheinen nie im Klartext,
+// der Personenauszug nicht im Ganzen (Security-Review L3).
+impl std::fmt::Debug for KernQuelle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KernQuelle")
+            .field("basis", &self.basis)
+            .field("token", &self.token.as_ref().map(|_| "***"))
+            .field("tl_zugang", &self.tl_zugang.as_ref().map(|_| "***"))
+            .field("n", &self.n_lokal())
+            .field("lease", &self.lease)
+            .finish_non_exhaustive()
+    }
 }
 
 impl KernQuelle {
@@ -93,6 +242,15 @@ impl KernQuelle {
                 .to_string()
         })?;
         let token = ablage.token_laden();
+        let protokoll = Protokoll::laden(ablage.dir())?;
+        let lease = lease::laden(ablage.dir());
+        let tl_zugang = lease
+            .as_ref()
+            .filter(|l| l.aktiv())
+            .and_then(|_| ablage.geheimnis_laden(lease::ZUGANG_DATEI));
+        let id_praefix = lease::neuer_zugang()
+            .map(|z| z[..8].to_string())
+            .unwrap_or_else(|_| format!("{:08x}", jetzt_ms() & 0xffff_ffff));
         Ok(Self {
             ablage,
             basis: cfg.basis.clone(),
@@ -101,25 +259,644 @@ impl KernQuelle {
             etag,
             abbild: None,
             zugang_abgelehnt: false,
+            protokoll,
+            lease,
+            tl_zugang,
+            lease_angemeldet: false,
+            lease_hinweis: None,
+            abweichung: None,
+            kern: None,
+            id_praefix,
+            id_zaehler: 0,
+            slave_schluessel: None,
+            slave_ereignisse: Vec::new(),
         })
+        .map(|mut q: Self| {
+            q.slave_schluessel = q
+                .ablage
+                .geheimnis_laden(slave::SCHLUESSEL_DATEI)
+                .and_then(|s| slave::schluessel_normal(&s));
+            q
+        })
+    }
+
+    /// Alle Ereignisse: von badhub bestätigte (Paket) und die eigenen aus
+    /// dem Protokoll, die darüber hinausgehen.
+    pub fn alle_ereignisse(&self) -> Vec<TurnierEreignis> {
+        let basis = self.paket.n();
+        let mut alle = self.paket.ereignisse.clone();
+        alle.extend(
+            self.protokoll
+                .posten()
+                .iter()
+                .flat_map(|p| p.ereignisse.iter())
+                .filter(|e| e.n() > basis)
+                .cloned(),
+        );
+        alle
+    }
+
+    /// Lokales `n` (inklusive noch nicht hochgeladener Ereignisse).
+    pub fn n_lokal(&self) -> u64 {
+        self.paket.n().max(self.protokoll.n())
+    }
+
+    /// Von badhub bestätigtes `n`.
+    pub fn n_bestaetigt(&self) -> u64 {
+        match &self.lease {
+            Some(l) => l.bis_n.max(self.paket.n()),
+            None => self.paket.n(),
+        }
+    }
+
+    /// Posten, die noch auf badhub warten.
+    pub fn wartende_posten(&self) -> usize {
+        self.protokoll.offen_nach(self.n_bestaetigt()).count()
+    }
+
+    /// Ereignisse, die noch auf badhub warten.
+    pub fn wartende_ereignisse(&self) -> usize {
+        self.n_lokal().saturating_sub(self.n_bestaetigt()) as usize
+    }
+
+    fn faltungs_schluessel(&self) -> (u64, usize) {
+        (
+            self.n_lokal(),
+            self.paket.ereignisse.len() + self.protokoll.posten().len(),
+        )
+    }
+
+    /// Kern-Stand (Faltung nur bei neuen Daten).
+    pub fn kern_stand(&mut self) -> TurnierStand {
+        let schluessel = self.faltungs_schluessel();
+        if let Some((s, st)) = &self.kern {
+            if *s == schluessel {
+                return st.clone();
+            }
+        }
+        let st = turnierkern::falten_turnier(&self.alle_ereignisse());
+        self.kern = Some((schluessel, st.clone()));
+        st
     }
 
     /// Stand im heutigen Modell (Faltung nur bei neuen Daten).
     pub fn stand(&mut self) -> BtpSnapshot {
+        let (n, zahl) = self.faltungs_schluessel();
+        let schluessel = (n, zahl, self.etag.clone(), self.paket.meldungen.len());
+        if let Some((s, snap)) = &self.abbild {
+            if *s == schluessel {
+                return snap.clone();
+            }
+        }
+        let stand = self.kern_stand();
+        let snap = abbildung::abbilden(&stand, &self.paket);
+        self.abbild = Some((schluessel, snap.clone()));
+        snap
+    }
+
+    /// Ereignisse mit `n > ab`, höchstens `max` — für den LAN-Slave. Klont
+    /// nur die gelieferten, nicht das ganze Protokoll.
+    pub fn ereignisse_ab(&self, ab: u64, max: usize) -> Vec<TurnierEreignis> {
+        let basis = self.paket.n();
+        self.paket
+            .ereignisse
+            .iter()
+            .chain(
+                self.protokoll
+                    .posten()
+                    .iter()
+                    .flat_map(|p| p.ereignisse.iter())
+                    .filter(move |e| e.n() > basis),
+            )
+            .filter(|e| e.n() > ab)
+            .take(max)
+            .cloned()
+            .collect()
+    }
+
+    /// Am Slave: höchstes `n` der vom Master geholten Ereignisse.
+    pub fn slave_n(&self) -> u64 {
+        self.slave_ereignisse
+            .iter()
+            .map(TurnierEreignis::n)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Am Slave: eine Seite vom Master übernehmen. Ist der Master hinter dem
+    /// Slave (Steuerung neu übernommen, anderes Protokoll), beginnt der
+    /// Slave von vorn.
+    pub fn slave_uebernehmen(&mut self, master_n: u64, neu: Vec<TurnierEreignis>) {
+        if master_n < self.slave_n() {
+            self.slave_ereignisse.clear();
+            return;
+        }
+        let mut bekannt: std::collections::BTreeSet<u64> = self
+            .slave_ereignisse
+            .iter()
+            .map(TurnierEreignis::n)
+            .collect();
+        for e in neu {
+            if bekannt.insert(e.n()) {
+                self.slave_ereignisse.push(e);
+            }
+        }
+        self.slave_ereignisse.sort_by_key(TurnierEreignis::n);
+    }
+
+    /// Am Slave: Stand aus den Ereignissen des Masters mit dem eigenen Paket.
+    pub fn stand_slave(&mut self) -> BtpSnapshot {
+        let n = self.slave_n();
         let schluessel = (
-            self.paket.n(),
-            self.paket.ereignisse.len(),
+            n,
+            self.slave_ereignisse.len(),
             self.etag.clone(),
+            self.paket.meldungen.len(),
         );
         if let Some((s, snap)) = &self.abbild {
             if *s == schluessel {
                 return snap.clone();
             }
         }
-        let stand = turnierkern::falten_turnier(&self.paket.ereignisse);
+        let stand = turnierkern::falten_turnier(&self.slave_ereignisse);
         let snap = abbildung::abbilden(&stand, &self.paket);
         self.abbild = Some((schluessel, snap.clone()));
         snap
+    }
+
+    /// Schlüssel der lokalen Stores: die Turnier-UUID statt des Namens
+    /// (zwei Turniere gleichen Namens teilen sich so keine Stores).
+    pub fn turnier_schluessel(&self) -> String {
+        format!("badhub:{}", self.paket.turnier.uuid.to_ascii_lowercase())
+    }
+
+    /// Darf dieser PC gerade schreiben?
+    pub fn schreibrecht(&self) -> Result<(), SchreibFehler> {
+        match &self.lease {
+            Some(l) if l.zustand == LeaseZustand::Aktiv => {}
+            Some(l) if l.zustand == LeaseZustand::Entzogen => {
+                return Err(SchreibFehler::Gesperrt(TEXT_ENTZOGEN.into()))
+            }
+            Some(_) => {
+                return Err(SchreibFehler::Gesperrt(
+                    "Die Steuerung ist an badhub zurückgegeben — Eingaben bitte in badhub.".into(),
+                ))
+            }
+            None => {
+                return Err(SchreibFehler::Gesperrt(format!(
+                    "bts-light steuert dieses Turnier noch nicht (keine Lease von badhub){}.",
+                    self.lease_hinweis
+                        .as_deref()
+                        .map(|h| format!(" — {h}"))
+                        .unwrap_or_default()
+                )))
+            }
+        }
+        if !self.paket.kern_version.is_empty() && self.paket.kern_version != KERN_VERSION {
+            return Err(SchreibFehler::Gesperrt(format!(
+                "badhub rechnet mit Turnierkern {}, diese Version mit {KERN_VERSION} — bitte \
+                 bts-light aktualisieren.",
+                self.paket.kern_version
+            )));
+        }
+        Ok(())
+    }
+
+    /// Neue, eindeutige Befehls-ID (`bts-<Lauf>-<Zeit>-<Zähler>`, nur
+    /// Zeichen, die badhub annimmt).
+    fn neue_id(&mut self, jetzt: u64) -> String {
+        self.id_zaehler += 1;
+        format!("bts-{}-{jetzt:x}-{}", self.id_praefix, self.id_zaehler)
+    }
+
+    /// Prüft die Befehle der Reihe nach mit dem Kern und hängt sie samt
+    /// Ereignissen an das Protokoll — **alle oder keiner** (wie ein
+    /// BTP-Schreibvorgang). Befehle ohne Kennung bekommen eine. Ein Befehl
+    /// mit schon bekannter Kennung ist wirkungslos (Idempotenz des Kerns).
+    /// Liefert die Zahl neuer Posten.
+    pub fn ausfuehren(
+        &mut self,
+        befehle: Vec<TurnierBefehl>,
+        akteur: &str,
+    ) -> Result<usize, SchreibFehler> {
+        self.schreibrecht()?;
+        if befehle.is_empty() {
+            return Ok(0);
+        }
+        let jetzt = jetzt_ms();
+        let mut ereignisse = self.alle_ereignisse();
+        let mut stand = self.kern_stand();
+        let mut neu_posten = Vec::new();
+        for b in befehle {
+            let b = if b.id().is_empty() {
+                let id = self.neue_id(jetzt);
+                schreiben::mit_id(b, id)
+            } else {
+                b
+            };
+            match turnierkern::pruefen_turnier(&stand, &b) {
+                Ok(neu) if neu.is_empty() => continue,
+                Ok(neu) => {
+                    ereignisse.extend(neu.iter().cloned());
+                    stand = turnierkern::falten_turnier(&ereignisse);
+                    neu_posten.push(Posten {
+                        befehl: b,
+                        ereignisse: neu,
+                        akteur: akteur.to_string(),
+                        zeit_ms: jetzt,
+                    });
+                }
+                Err(a) => {
+                    return Err(SchreibFehler::Kern {
+                        text: schreiben::ablehnung_text(&a),
+                        grund: serde_json::to_value(&a).unwrap_or(serde_json::Value::Null),
+                    })
+                }
+            }
+        }
+        let zahl = neu_posten.len();
+        self.protokoll
+            .anhaengen(neu_posten)
+            .map_err(SchreibFehler::Ungueltig)?;
+        if zahl > 0 {
+            self.kern = Some((self.faltungs_schluessel(), stand));
+        }
+        Ok(zahl)
+    }
+
+    /// Ein Kernbefehl aus badhub (Relay, `TlAction::KernBefehl`): nur die
+    /// Durchführungs-Befehle, die badhub unter der Lease annimmt, mit einer
+    /// Kennung, die badhub annimmt. `jetzt` setzt dieser PC (ADR-0084).
+    pub fn befehl_von_badhub(&mut self, roh: serde_json::Value) -> Result<usize, SchreibFehler> {
+        schreiben::befehl_begrenzt(&roh).map_err(SchreibFehler::Ungueltig)?;
+        let mut roh = roh;
+        let art = roh
+            .get("art")
+            .and_then(|a| a.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !schreiben::ERLAUBTE_ARTEN.contains(&art.as_str()) {
+            return Err(SchreibFehler::Ungueltig(format!(
+                "Dieser Befehl ist unter der Lease nicht erlaubt ({art})."
+            )));
+        }
+        let id_ok = roh
+            .get("id")
+            .and_then(|i| i.as_str())
+            .is_some_and(schreiben::id_gueltig);
+        if !id_ok {
+            return Err(SchreibFehler::Ungueltig(
+                "Befehl ohne gültige Kennung (A–Z, a–z, 0–9, -; höchstens 64 Zeichen).".into(),
+            ));
+        }
+        if matches!(art.as_str(), "spiel_aufrufen" | "ergebnis_melden") {
+            if let Some(o) = roh.as_object_mut() {
+                o.insert(
+                    "jetzt".into(),
+                    serde_json::Value::String(schreiben::wandzeit(jetzt_ms())),
+                );
+            }
+        }
+        let befehl: TurnierBefehl = serde_json::from_value(roh)
+            .map_err(|e| SchreibFehler::Ungueltig(format!("Befehl unlesbar ({e}).")))?;
+        self.ausfuehren(vec![befehl], AKTEUR_BADHUB)
+    }
+
+    // ── Lease ───────────────────────────────────────────────────────────
+
+    /// Braucht es jetzt ein `POST turnier/lease`? Liefert (`n`, Relay).
+    /// Ohne gespeicherte Lease immer; mit aktiver Lease einmal je Lauf und
+    /// nur bei leerer Outbox (sonst stimmte `n` nicht mit badhub überein —
+    /// die Outbox läuft dann mit der gespeicherten Epoche weiter).
+    fn lease_bedarf(&mut self, relay_ns: Option<&str>) -> Option<(u64, Option<api::RelayAngaben>)> {
+        if self.token.is_none() || self.zugang_abgelehnt {
+            return None;
+        }
+        match &self.lease {
+            Some(l) if !l.aktiv() => return None,
+            Some(l) if self.lease_angemeldet && l.relay_ns.as_deref() == relay_ns => return None,
+            _ => {}
+        }
+        if self.wartende_posten() > 0 {
+            return None;
+        }
+        let relay = match relay_ns {
+            Some(ns) => {
+                let token = match &self.tl_zugang {
+                    Some(t) => t.clone(),
+                    None => lease::neuer_zugang().ok()?,
+                };
+                Some(api::RelayAngaben {
+                    ns: ns.to_string(),
+                    tl_token: token,
+                })
+            }
+            None => None,
+        };
+        Some((self.n_lokal(), relay))
+    }
+
+    /// Antwort auf `POST turnier/lease` übernehmen.
+    fn lease_antwort(
+        &mut self,
+        antwort: Result<api::LeaseAntwort, api::ApiFehler>,
+        relay: Option<api::RelayAngaben>,
+    ) {
+        let jetzt = jetzt_ms();
+        match antwort {
+            Ok(api::LeaseAntwort::Erteilt { epoche, n }) => {
+                let seit = self
+                    .lease
+                    .as_ref()
+                    .filter(|l| l.epoche == epoche && l.seit_ms > 0)
+                    .map_or(jetzt, |l| l.seit_ms);
+                if let Some(alt) = self.lease.as_ref().filter(|l| l.epoche != epoche) {
+                    tracing::info!(
+                        "Quelle badhub: Lease neu vergeben (Epoche {} → {epoche})",
+                        alt.epoche
+                    );
+                }
+                let l = Lease {
+                    epoche,
+                    bis_n: n,
+                    zustand: LeaseZustand::Aktiv,
+                    relay_ns: relay.as_ref().map(|r| r.ns.clone()),
+                    seit_ms: seit,
+                    letzter_kontakt_ms: jetzt,
+                };
+                if let Err(e) = lease::speichern(self.ablage.dir(), &l) {
+                    tracing::warn!("Quelle badhub: Lease nicht gesichert ({e})");
+                }
+                match &relay {
+                    Some(r) => {
+                        if let Err(e) = self
+                            .ablage
+                            .geheimnis_speichern(lease::ZUGANG_DATEI, &r.tl_token)
+                        {
+                            tracing::warn!("Quelle badhub: Relay-Zugang nicht gesichert ({e})");
+                        }
+                        self.tl_zugang = Some(r.tl_token.clone());
+                    }
+                    None => {
+                        let _ = std::fs::remove_file(self.ablage.dir().join(lease::ZUGANG_DATEI));
+                        self.tl_zugang = None;
+                    }
+                }
+                tracing::info!(
+                    "Quelle badhub: Lease Epoche {epoche}, n={n}{}",
+                    if relay.is_some() { ", mit Relay" } else { "" }
+                );
+                self.lease = Some(l);
+                self.lease_angemeldet = true;
+                self.lease_hinweis = None;
+            }
+            Ok(api::LeaseAntwort::NVeraltet { n }) => {
+                self.lease_hinweis = Some(format!(
+                    "badhub ist bei Ereignis {n}, dieser PC bei {} — Stand wird nachgeholt",
+                    self.n_lokal()
+                ));
+            }
+            Ok(api::LeaseAntwort::Belegt { geraet }) => {
+                self.lease_hinweis = Some(format!(
+                    "ein anderes Gerät steuert das Turnier ({})",
+                    geraet.chars().take(60).collect::<String>()
+                ));
+            }
+            Ok(api::LeaseAntwort::Abgelehnt(code)) => {
+                self.lease_hinweis = Some(lease_ablehnung_text(&code));
+            }
+            Err(api::ApiFehler::Zugang) => {
+                // 401/403 ist kein Beweis für eine Rückholung (das wäre
+                // `epoche_veraltet`, 409) — auch eine Firewall antwortet so.
+                // Abgleich anhalten und es sagen; die Lease bleibt.
+                self.zugang_abgelehnt = true;
+                self.lease_hinweis = Some("badhub lehnt den Zugang dieses PCs ab".into());
+            }
+            Err(e) => {
+                // Offline: eine gespeicherte Lease gilt weiter.
+                if self.lease.is_none() {
+                    self.lease_hinweis = Some(format!("{e}"));
+                }
+            }
+        }
+    }
+
+    /// badhub hat die Steuerung zurückgeholt: Outbox steht, Eingaben gesperrt.
+    fn entziehen(&mut self) {
+        if let Some(l) = self.lease.as_mut() {
+            l.zustand = LeaseZustand::Entzogen;
+            let l = l.clone();
+            if let Err(e) = lease::speichern(self.ablage.dir(), &l) {
+                tracing::warn!("Quelle badhub: Lease nicht gesichert ({e})");
+            }
+        }
+        self.tl_zugang = None;
+        let _ = std::fs::remove_file(self.ablage.dir().join(lease::ZUGANG_DATEI));
+        tracing::warn!("Quelle badhub: Steuerung in badhub zurückgeholt — Outbox angehalten");
+    }
+
+    // ── Outbox ──────────────────────────────────────────────────────────
+
+    /// Nächster Hochlade-Auftrag: (Basis, Token, Epoche, `basis_n`, Posten).
+    fn outbox_auftrag(&self) -> Option<(String, String, u64, u64, Vec<serde_json::Value>)> {
+        let l = self.lease.as_ref().filter(|l| l.aktiv())?;
+        if self.abweichung.is_some() || self.zugang_abgelehnt {
+            return None;
+        }
+        let token = self.token.clone()?;
+        let basis_n = self.n_bestaetigt();
+        let mut posten = Vec::new();
+        let mut ereignisse = 0usize;
+        for p in self.protokoll.offen_nach(basis_n) {
+            if posten.len() >= MAX_POSTEN
+                || (!posten.is_empty() && ereignisse + p.ereignisse.len() > MAX_EREIGNISSE)
+            {
+                break;
+            }
+            ereignisse += p.ereignisse.len();
+            posten.push(p.fuer_badhub());
+        }
+        if posten.is_empty() {
+            return None;
+        }
+        Some((self.basis.clone(), token, l.epoche, basis_n, posten))
+    }
+
+    /// Bestätigtes `n` setzen: eigene Ereignisse bis dorthin ins Paket
+    /// übernehmen (sie gelten jetzt als badhub-Stand) und sichern.
+    fn bestaetigen(&mut self, bis_n: u64) {
+        let jetzt = jetzt_ms();
+        let basis = self.paket.n();
+        let neu: Vec<TurnierEreignis> = self
+            .protokoll
+            .posten()
+            .iter()
+            .flat_map(|p| p.ereignisse.iter())
+            .filter(|e| e.n() > basis && e.n() <= bis_n)
+            .cloned()
+            .collect();
+        if !neu.is_empty() {
+            self.paket.ereignisse_anhaengen(neu);
+            if let Err(e) = self
+                .ablage
+                .ereignisse_speichern(&self.paket, self.etag.as_deref())
+            {
+                tracing::warn!("badhub-Turnier: Ereignisse nicht gesichert ({e})");
+            }
+        }
+        if let Some(l) = self.lease.as_mut() {
+            l.bis_n = bis_n;
+            l.letzter_kontakt_ms = jetzt;
+            let l = l.clone();
+            if let Err(e) = lease::speichern(self.ablage.dir(), &l) {
+                tracing::warn!("Quelle badhub: Lease nicht gesichert ({e})");
+            }
+        }
+    }
+
+    /// Antwort auf ein Hochladen übernehmen.
+    fn outbox_antwort(
+        &mut self,
+        r: Result<api::HochladenAntwort, api::ApiFehler>,
+    ) -> OutboxSchritt {
+        match r {
+            Ok(api::HochladenAntwort::Bestaetigt { bis_n }) => {
+                self.bestaetigen(bis_n.min(self.n_lokal()));
+                OutboxSchritt::Weiter
+            }
+            Ok(api::HochladenAntwort::Luecke { erwartet_n })
+                if erwartet_n == self.n_bestaetigt() =>
+            {
+                // Kein Fortschritt möglich: nicht in einer Schleife
+                // wiederholen, sondern mit Backoff.
+                OutboxSchritt::Spaeter
+            }
+            Ok(api::HochladenAntwort::Luecke { erwartet_n }) => {
+                if erwartet_n > self.n_lokal() || erwartet_n < self.paket.n() {
+                    // badhub kennt Ereignisse, die dieser PC nicht hat — nicht
+                    // still zusammenführen.
+                    self.abweichung = Some(format!(
+                        "badhub erwartet Ereignis {erwartet_n}, dieser PC ist bei {}",
+                        self.n_lokal()
+                    ));
+                    tracing::warn!("Quelle badhub: Lücke ohne Anschluss — Outbox angehalten");
+                    return OutboxSchritt::Angehalten;
+                }
+                tracing::info!("Quelle badhub: Lücke — weiter ab n={erwartet_n}");
+                self.bestaetigen(erwartet_n);
+                OutboxSchritt::Weiter
+            }
+            Ok(api::HochladenAntwort::EpocheVeraltet) => {
+                self.entziehen();
+                OutboxSchritt::Angehalten
+            }
+            Err(api::ApiFehler::Zugang) => {
+                // Widerruf oder vorgeschaltete Sperre: Outbox anhalten (bis
+                // zum Neustart), Eingaben bleiben möglich, nichts verworfen.
+                tracing::warn!("Quelle badhub: Zugang abgelehnt (401/403) — Outbox angehalten");
+                self.zugang_abgelehnt = true;
+                OutboxSchritt::Angehalten
+            }
+            Ok(api::HochladenAntwort::Abweichung { grund }) => {
+                let grund: String = grund
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .take(40)
+                    .collect();
+                tracing::warn!(
+                    "Quelle badhub: badhub weist die Posten ab ({grund}) — Outbox angehalten"
+                );
+                self.abweichung = Some(format!("badhub weist die Ereignisse ab ({grund})"));
+                OutboxSchritt::Angehalten
+            }
+            Err(e) => {
+                tracing::debug!("Quelle badhub: Hochladen gescheitert ({e})");
+                OutboxSchritt::Spaeter
+            }
+        }
+    }
+
+    /// Lage für die Anzeige.
+    pub fn abgleich(&self) -> Abgleich {
+        let wartend = self.wartende_ereignisse();
+        let kontakt = self.lease.as_ref().map_or(0, |l| l.letzter_kontakt_ms);
+        let kontakt_text = if kontakt > 0 {
+            format!(", letzter Kontakt {}", uhrzeit(kontakt))
+        } else {
+            String::new()
+        };
+        let (zustand, text, rot) = match &self.lease {
+            Some(l) if l.zustand == LeaseZustand::Entzogen => {
+                ("entzogen", TEXT_ENTZOGEN.to_string(), true)
+            }
+            Some(l) if l.zustand == LeaseZustand::Zurueckgegeben => (
+                "zurueckgegeben",
+                "Steuerung an badhub zurückgegeben.".to_string(),
+                false,
+            ),
+            Some(_) if self.zugang_abgelehnt => (
+                "angehalten",
+                format!(
+                    "Abgleich mit badhub angehalten: badhub lehnt den Zugang dieses PCs ab \
+                     (Kopplung widerrufen?). {wartend} Ereignisse warten — Übertragung neu \
+                     starten oder in badhub prüfen."
+                ),
+                true,
+            ),
+            Some(_) if self.abweichung.is_some() => (
+                "angehalten",
+                format!(
+                    "Abgleich mit badhub angehalten: {}. {wartend} Ereignisse warten.",
+                    self.abweichung.as_deref().unwrap_or("")
+                ),
+                true,
+            ),
+            Some(_) if wartend == 0 => ("aktuell", "badhub: aktuell".to_string(), false),
+            Some(_) => (
+                "wartet",
+                format!(
+                    "{wartend} {} warten{kontakt_text}",
+                    if wartend == 1 {
+                        "Ereignis"
+                    } else {
+                        "Ereignisse"
+                    }
+                ),
+                false,
+            ),
+            None => (
+                "keine_lease",
+                format!(
+                    "badhub: noch keine Steuerung{}",
+                    self.lease_hinweis
+                        .as_deref()
+                        .map(|h| format!(" — {h}"))
+                        .unwrap_or_default()
+                ),
+                false,
+            ),
+        };
+        let aktiv = self.lease.as_ref().is_some_and(Lease::aktiv);
+        Abgleich {
+            zustand: zustand.into(),
+            wartend,
+            letzter_kontakt_ms: kontakt,
+            text,
+            kann_beenden: aktiv
+                && wartend == 0
+                && self.abweichung.is_none()
+                && !self.zugang_abgelehnt,
+            kann_uebernehmen: self.lease.as_ref().is_some_and(|l| !l.aktiv()),
+            rot,
+        }
+    }
+
+    /// Personenauszug löschen (Rückgabe, Frist).
+    fn personen_loeschen(&mut self) {
+        self.ablage.personen_loeschen();
+        self.paket.meldungen.clear();
+        self.paket.schiedsrichter.clear();
+        self.abbild = None;
     }
 
     /// Übernimmt neue Ereignisse und legt sie ab. Liefert die Zahl neuer.
@@ -156,7 +933,7 @@ impl KernQuelle {
     }
 
     /// Zugangsdaten für einen Abgleich, `None` ohne Token oder nach 401.
-    fn zugang(&self) -> Option<(String, String, u64, Option<String>)> {
+    pub(crate) fn zugang(&self) -> Option<(String, String, u64, Option<String>)> {
         if self.zugang_abgelehnt {
             return None;
         }
@@ -183,14 +960,27 @@ pub fn starten(config: &AppConfig, daten: &Path) -> bool {
         tracing::warn!("Quelle badhub: kein Turnier gekoppelt");
         return false;
     }
+    aufraeumen(daten, Some(&config.badhub_turnier.uuid), heute());
     match KernQuelle::laden(daten, &config.badhub_turnier) {
         Ok(q) => {
             tracing::info!(
-                "Quelle badhub: Turnier {} geladen ({} Ereignisse, Kern {})",
+                "Quelle badhub: Turnier {} geladen ({} Ereignisse, {} eigene warten, Kern {})",
                 config.badhub_turnier.id,
                 q.paket.ereignisse.len(),
+                q.wartende_ereignisse(),
                 KERN_VERSION
             );
+            let mut q = q;
+            if !config.slave_mode && q.slave_schluessel.is_none() {
+                match slave::neuer_schluessel().and_then(|k| {
+                    q.ablage
+                        .geheimnis_speichern(slave::SCHLUESSEL_DATEI, &k)
+                        .map(|_| k)
+                }) {
+                    Ok(k) => q.slave_schluessel = Some(k),
+                    Err(e) => tracing::warn!("Quelle badhub: Slave-Schlüssel nicht angelegt ({e})"),
+                }
+            }
             let mit_token = q.token.is_some();
             *z = Some(q);
             mit_token
@@ -202,17 +992,9 @@ pub fn starten(config: &AppConfig, daten: &Path) -> bool {
     }
 }
 
-/// Liest den Stand des gekoppelten Turniers.
+/// Liest den Stand des gekoppelten Turniers (Master).
 pub fn stand(config: &AppConfig) -> Result<BtpSnapshot, String> {
-    if config.slave_mode {
-        // Der LAN-Slave liest bei Kern-Turnieren den Stand vom Master (Spec
-        // „Einrichtung“) — das kommt mit L3. BTP liest er hier bewusst nicht.
-        return Err(
-            "Ansage-Slave mit badhub-Turnier folgt in einer späteren Version — bitte den Slave \
-             vorerst mit Quelle BTP betreiben."
-                .into(),
-        );
-    }
+    let _ = config;
     match zustand().as_mut() {
         Some(q) => Ok(q.stand()),
         None => Err(
@@ -222,34 +1004,174 @@ pub fn stand(config: &AppConfig) -> Result<BtpSnapshot, String> {
     }
 }
 
+/// Der Schlüssel der lokalen Stores (UUID statt Name), `None` ohne Turnier.
+pub fn turnier_schluessel() -> Option<String> {
+    zustand().as_ref().map(KernQuelle::turnier_schluessel)
+}
+
+/// Darf gerade geschrieben werden? (Lease aktiv, Kern-Version passt.)
+pub fn schreiben_moeglich() -> bool {
+    zustand().as_ref().is_some_and(|q| q.schreibrecht().is_ok())
+}
+
+/// Führt Entwürfe aus dem jeweiligen Stand aus (Schreibweichen).
+fn mit_quelle<T>(
+    f: impl FnOnce(&mut KernQuelle) -> Result<T, SchreibFehler>,
+) -> Result<T, SchreibFehler> {
+    match zustand().as_mut() {
+        Some(q) => f(q),
+        None => Err(SchreibFehler::Gesperrt(
+            "Kein badhub-Turnier geladen — Eingabe nicht möglich.".into(),
+        )),
+    }
+}
+
+/// Weiche Feldvergabe (`write_courts_to_btp`).
+pub fn feld_vergabe(courts: &[crate::btp::proto::CourtAssignment]) -> Result<(), String> {
+    mit_quelle(|q| {
+        q.schreibrecht()?;
+        let stand = q.kern_stand();
+        let jetzt = schreiben::wandzeit(jetzt_ms());
+        let befehle = schreiben::aufrufe(&stand, &q.paket, courts, &jetzt)
+            .map_err(SchreibFehler::Ungueltig)?;
+        q.ausfuehren(befehle, AKTEUR_HALLE)
+    })
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Weiche Ergebnis (`write_result_to_btp`, `write_result_settled`).
+pub fn ergebnis(update: &crate::btp::proto::MatchUpdate) -> Result<(), String> {
+    mit_quelle(|q| {
+        q.schreibrecht()?;
+        let stand = q.kern_stand();
+        let jetzt = schreiben::wandzeit(jetzt_ms());
+        let befehl = schreiben::ergebnis(&stand, &q.paket, update, &jetzt)
+            .map_err(SchreibFehler::Ungueltig)?;
+        q.ausfuehren(befehl.into_iter().collect(), AKTEUR_HALLE)
+    })
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Weiche Schiedsrichter (`write_officials_to_btp`): je Spiel ein Befehl.
+/// Geliefert werden die Einträge, die erledigt sind — auch eine Ablehnung
+/// des Kerns zählt dazu (sie wird gemeldet, aber nicht jeden Takt neu
+/// versucht; der Kern-Stand zeigt dann weiter die alte Besetzung).
+pub fn offizielle(
+    entries: &[crate::btp::proto::MatchCourt],
+) -> Result<Vec<crate::btp::proto::MatchCourt>, String> {
+    mit_quelle(|q| {
+        q.schreibrecht()?;
+        let stand = q.kern_stand();
+        let mut erledigt = Vec::new();
+        for (e, r) in schreiben::offizielle(&stand, &q.paket, entries) {
+            match r {
+                Ok(None) => erledigt.push(e),
+                Ok(Some(b)) => match q.ausfuehren(vec![b], AKTEUR_HALLE) {
+                    Ok(_) => erledigt.push(e),
+                    Err(SchreibFehler::Kern { text, .. }) => {
+                        tracing::info!("Schiedsrichter für Spiel {}: {text}", e.match_id);
+                        erledigt.push(e);
+                    }
+                    Err(f) => return Err(f),
+                },
+                Err(t) => tracing::info!("Schiedsrichter für Spiel {}: {t}", e.match_id),
+            }
+        }
+        Ok(erledigt)
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Ein Kernbefehl aus badhub (über das Relay).
+pub fn befehl_von_badhub(befehl: serde_json::Value) -> Result<usize, SchreibFehler> {
+    mit_quelle(|q| q.befehl_von_badhub(befehl))
+}
+
+/// TL-Zugang für badhub, solange die Lease aktiv ist.
+pub fn tl_zugang() -> Option<String> {
+    zustand()
+        .as_ref()
+        .filter(|q| q.lease.as_ref().is_some_and(Lease::aktiv))
+        .and_then(|q| q.tl_zugang.clone())
+}
+
+/// Slave-Schlüssel des Masters in Anzeigeform (für das Dashboard).
+pub fn slave_schluessel_anzeige() -> Option<String> {
+    zustand()
+        .as_ref()
+        .and_then(|q| q.slave_schluessel.as_deref().map(slave::schluessel_anzeige))
+}
+
+/// Slave-Schlüssel am Slave eintragen (vom Turnier-PC abgelesen). Legt ihn
+/// im Turnierordner ab und übernimmt ihn in einen geladenen Zustand.
+pub fn slave_schluessel_setzen(daten: &Path, uuid: &str, eingabe: &str) -> Result<(), String> {
+    let k = slave::schluessel_normal(eingabe).ok_or(
+        "Der Slave-Schlüssel hat 32 Zeichen (0–9, a–f), Bindestriche sind egal.".to_string(),
+    )?;
+    Ablage::neu(daten, uuid)?.geheimnis_speichern(slave::SCHLUESSEL_DATEI, &k)?;
+    if let Some(q) = zustand()
+        .as_mut()
+        .filter(|q| q.paket.turnier.uuid.eq_ignore_ascii_case(uuid))
+    {
+        q.slave_schluessel = Some(k);
+    }
+    Ok(())
+}
+
+/// Lage des Abgleichs (`None` ohne geladenes badhub-Turnier).
+pub fn abgleich_lage() -> Option<Abgleich> {
+    zustand().as_ref().map(KernQuelle::abgleich)
+}
+
 /// Ein Schritt des Abgleichs; reine Netzarbeit außerhalb der Sperre.
-async fn abgleich_schritt(paket_faellig: bool) -> bool {
+///
+/// Ohne aktive, angemeldete Lease holt er neue Ereignisse und nimmt die
+/// Lease (`POST turnier/lease`). Unter der Lease holt er keine Ereignisse —
+/// neue gibt es dann nur von diesem PC —, nur alle 60 s die Stammdaten.
+async fn abgleich_schritt(paket_faellig: bool, relay_ns: Option<&str>) -> bool {
     let Some((basis, token, n, etag)) = zustand().as_ref().and_then(KernQuelle::zugang) else {
         return false;
     };
+    let ereignisse_holen = zustand().as_ref().is_some_and(|q| {
+        let unter_lease = q.lease.as_ref().is_some_and(Lease::aktiv) && q.lease_angemeldet;
+        let entzogen = q.lease.as_ref().is_some_and(|l| !l.aktiv());
+        !unter_lease && q.wartende_posten() == 0 && !entzogen
+    });
     let mut paket_geholt = false;
-    match api::ereignisse(&basis, &token, n).await {
-        Ok(neu) if !neu.is_empty() => {
-            if let Some(q) = zustand().as_mut() {
-                let zahl = q.ereignisse_uebernehmen(neu);
-                if zahl > 0 {
-                    tracing::info!(
-                        "Quelle badhub: {zahl} neue Ereignisse (bis n={})",
-                        q.paket.n()
-                    );
+    if ereignisse_holen {
+        match api::ereignisse(&basis, &token, n).await {
+            Ok(neu) if !neu.is_empty() => {
+                if let Some(q) = zustand().as_mut() {
+                    let zahl = q.ereignisse_uebernehmen(neu);
+                    if zahl > 0 {
+                        tracing::info!(
+                            "Quelle badhub: {zahl} neue Ereignisse (bis n={})",
+                            q.paket.n()
+                        );
+                    }
                 }
             }
-        }
-        Ok(_) => {}
-        Err(api::ApiFehler::Zugang) => {
-            tracing::warn!("Quelle badhub: Zugang abgelehnt (401/403) — Abgleich angehalten");
-            if let Some(q) = zustand().as_mut() {
-                q.zugang_abgelehnt = true;
+            Ok(_) => {}
+            Err(api::ApiFehler::Zugang) => {
+                tracing::warn!("Quelle badhub: Zugang abgelehnt (401/403) — Abgleich angehalten");
+                if let Some(q) = zustand().as_mut() {
+                    q.zugang_abgelehnt = true;
+                }
+                return false;
             }
-            return false;
+            // Offline: letzter Stand bleibt, kein Lärm im Log.
+            Err(e) => tracing::debug!("Quelle badhub: Ereignisse nicht abgeholt ({e})"),
         }
-        // Offline: letzter Stand bleibt, kein Lärm im Log.
-        Err(e) => tracing::debug!("Quelle badhub: Ereignisse nicht abgeholt ({e})"),
+    }
+    // Lease nehmen bzw. anmelden (nicht am Slave — der startet keinen Abgleich).
+    let bedarf = zustand().as_mut().and_then(|q| q.lease_bedarf(relay_ns));
+    if let Some((n, relay)) = bedarf {
+        let antwort = api::lease_nehmen(&basis, &token, n, relay.as_ref()).await;
+        if let Some(q) = zustand().as_mut() {
+            q.lease_antwort(antwort, relay);
+        }
     }
     if paket_faellig {
         match api::paket(&basis, &token, etag.as_deref()).await {
@@ -257,9 +1179,17 @@ async fn abgleich_schritt(paket_faellig: bool) -> bool {
             Ok(api::PaketAntwort::Neu { paket, etag }) => {
                 paket_geholt = true;
                 if let Some(q) = zustand().as_mut() {
-                    match q.paket_uebernehmen(*paket, etag) {
-                        Ok(()) => tracing::info!("Quelle badhub: Stammdaten aktualisiert"),
-                        Err(e) => tracing::warn!("Quelle badhub: Paket verworfen ({e})"),
+                    // Zurückgegeben: Der Personenauszug ist gelöscht und
+                    // bleibt es — das Paket kommt erst mit „übernehmen“.
+                    let zurueck = q
+                        .lease
+                        .as_ref()
+                        .is_some_and(|l| l.zustand == LeaseZustand::Zurueckgegeben);
+                    if !zurueck {
+                        match q.paket_uebernehmen(*paket, etag) {
+                            Ok(()) => tracing::info!("Quelle badhub: Stammdaten aktualisiert"),
+                            Err(e) => tracing::warn!("Quelle badhub: Paket verworfen ({e})"),
+                        }
                     }
                 }
             }
@@ -275,8 +1205,10 @@ async fn abgleich_schritt(paket_faellig: bool) -> bool {
 }
 
 /// Abgleich mit badhub, solange die Übertragung läuft (läuft unter einem
-/// `TaktWaechter` in `start_sync_kern`).
-pub async fn abgleich_schleife() {
+/// `TaktWaechter` in `start_sync_kern`). `relay_ns` = eigener
+/// Relay-Namespace, wenn der Cloud-Weg an ist — badhub leitet seine
+/// Eingaben dann dorthin.
+pub async fn abgleich_schleife(relay_ns: Option<String>) {
     let mut takt = tokio::time::interval(EREIGNIS_TAKT);
     takt.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut letztes_paket: Option<tokio::time::Instant> = None;
@@ -289,10 +1221,282 @@ pub async fn abgleich_schleife() {
         if letztes_paket.is_none() {
             letztes_paket = Some(jetzt);
         }
-        if abgleich_schritt(faellig).await {
+        if abgleich_schritt(faellig, relay_ns.as_deref()).await {
             letztes_paket = Some(jetzt);
         }
     }
+}
+
+/// Ein Hochlade-Schritt der Outbox gegen den Zustand `z` (Netzarbeit
+/// außerhalb der Sperre).
+pub(crate) async fn outbox_schritt(z: &Mutex<Option<KernQuelle>>) -> OutboxSchritt {
+    let auftrag = z
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .and_then(KernQuelle::outbox_auftrag);
+    let Some((basis, token, epoche, basis_n, posten)) = auftrag else {
+        return OutboxSchritt::Ruhe;
+    };
+    let r = api::hochladen(&basis, &token, epoche, basis_n, &posten).await;
+    match z
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_mut()
+    {
+        Some(q) => {
+            let schritt = q.outbox_antwort(r);
+            if schritt == OutboxSchritt::Weiter {
+                tracing::info!(
+                    "Quelle badhub: {} Posten hochgeladen, bestätigt bis n={}",
+                    posten.len(),
+                    q.n_bestaetigt()
+                );
+            }
+            schritt
+        }
+        None => OutboxSchritt::Ruhe,
+    }
+}
+
+/// Wartezeit nach dem `fehler`-ten Fehlschlag in Folge (1-basiert).
+pub fn outbox_wartezeit(fehler: usize) -> Duration {
+    let i = fehler.saturating_sub(1).min(OUTBOX_BACKOFF_S.len() - 1);
+    Duration::from_secs(OUTBOX_BACKOFF_S[i])
+}
+
+/// Die Outbox: lädt die Posten nach `basis_n` hoch, solange die Übertragung
+/// läuft (eigener Task unter einem `TaktWaechter`). Neuversuch nach 5, 10,
+/// 20, 40, 60 s, danach alle 60 s.
+pub async fn outbox_schleife() {
+    let mut fehler = 0usize;
+    loop {
+        match outbox_schritt(&ZUSTAND).await {
+            OutboxSchritt::Weiter => {
+                fehler = 0;
+                continue;
+            }
+            OutboxSchritt::Spaeter => {
+                fehler += 1;
+                tokio::time::sleep(outbox_wartezeit(fehler)).await;
+            }
+            OutboxSchritt::Ruhe | OutboxSchritt::Angehalten => {
+                fehler = 0;
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
+/// „Turnier beenden / Steuerung an badhub zurückgeben“: nur mit leerer
+/// Outbox, dann `DELETE turnier/lease`; danach wird der Personenauszug
+/// gelöscht.
+pub(crate) async fn zurueckgeben_in(z: &Mutex<Option<KernQuelle>>) -> Result<String, String> {
+    let auftrag = {
+        let g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let q = g.as_ref().ok_or("Kein badhub-Turnier geladen.")?;
+        let l = q
+            .lease
+            .as_ref()
+            .filter(|l| l.aktiv())
+            .ok_or("bts-light hält die Steuerung dieses Turniers nicht.")?;
+        let wartend = q.wartende_ereignisse();
+        if wartend > 0 {
+            return Err(format!(
+                "Es warten noch {wartend} Ereignisse auf den Abgleich mit badhub — bitte mit \
+                 Internet warten, bis „badhub: aktuell“ steht."
+            ));
+        }
+        let token = q
+            .token
+            .clone()
+            .ok_or("Kein Gerätetoken — bitte neu koppeln.")?;
+        (q.basis.clone(), token, l.epoche, q.n_bestaetigt())
+    };
+    let (basis, token, epoche, n) = auftrag;
+    let r = api::lease_zurueckgeben(&basis, &token, epoche, n).await;
+    let mut g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let q = g.as_mut().ok_or("Kein badhub-Turnier geladen.")?;
+    match r {
+        Ok(api::RueckgabeAntwort::Zurueckgegeben) => {
+            if let Some(l) = q.lease.as_mut() {
+                l.zustand = LeaseZustand::Zurueckgegeben;
+                l.letzter_kontakt_ms = jetzt_ms();
+                let l = l.clone();
+                lease::speichern(q.ablage.dir(), &l)?;
+            }
+            q.tl_zugang = None;
+            let _ = std::fs::remove_file(q.ablage.dir().join(lease::ZUGANG_DATEI));
+            q.personen_loeschen();
+            tracing::info!("Quelle badhub: Steuerung an badhub zurückgegeben");
+            Ok("Steuerung an badhub zurückgegeben. Der Personenauszug ist gelöscht.".into())
+        }
+        Ok(api::RueckgabeAntwort::NOffen { n }) => Err(format!(
+            "badhub ist bei Ereignis {n}, dieser PC bei {} — bitte kurz warten und erneut versuchen.",
+            q.n_bestaetigt()
+        )),
+        Ok(api::RueckgabeAntwort::EpocheVeraltet) => {
+            q.entziehen();
+            Err(TEXT_ENTZOGEN.into())
+        }
+        Err(api::ApiFehler::Zugang) => Err(
+            "badhub lehnt den Zugang dieses PCs ab (Kopplung widerrufen?) — Rückgabe nicht möglich."
+                .into(),
+        ),
+        Err(e) => Err(format!("{e} — Rückgabe braucht Internet.")),
+    }
+}
+
+/// Globaler Weg für den Knopf im Hauptfenster.
+pub async fn turnier_beenden() -> Result<String, String> {
+    zurueckgeben_in(&ZUSTAND).await
+}
+
+/// „Steuerung wieder übernehmen“ nach Rückgabe oder Rückholung: verwirft
+/// eigene, nicht in badhub angekommene Ereignisse (abgelegt als
+/// `verworfen-<ms>.jsonl`), lädt das Paket frisch und lässt den Abgleich die
+/// Lease neu nehmen.
+pub(crate) async fn uebernehmen_in(z: &Mutex<Option<KernQuelle>>) -> Result<String, String> {
+    let (basis, token) = {
+        let g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let q = g.as_ref().ok_or("Kein badhub-Turnier geladen.")?;
+        if q.lease.as_ref().is_some_and(Lease::aktiv) {
+            return Err("bts-light steuert dieses Turnier bereits.".into());
+        }
+        (
+            q.basis.clone(),
+            q.token
+                .clone()
+                .ok_or("Kein Gerätetoken — bitte neu koppeln.")?,
+        )
+    };
+    let (paket, etag) = match api::paket(&basis, &token, None).await {
+        Ok(api::PaketAntwort::Neu { paket, etag }) => (*paket, etag),
+        Ok(api::PaketAntwort::Unveraendert) => {
+            return Err("badhub liefert kein Turnierpaket.".into())
+        }
+        Err(e) => return Err(format!("{e} — Übernehmen braucht Internet.")),
+    };
+    paket.pruefen()?;
+    let mut g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let q = g.as_mut().ok_or("Kein badhub-Turnier geladen.")?;
+    if !paket
+        .turnier
+        .uuid
+        .eq_ignore_ascii_case(&q.paket.turnier.uuid)
+    {
+        return Err("badhub liefert ein anderes Turnier als gekoppelt.".into());
+    }
+    let bis = q.n_bestaetigt();
+    let verworfen = q.protokoll.kuerzen_auf(bis, jetzt_ms())?;
+    q.ablage.paket_speichern(&paket, etag.as_deref())?;
+    q.paket = paket;
+    q.etag = etag;
+    lease::entfernen(q.ablage.dir());
+    q.lease = None;
+    q.tl_zugang = None;
+    q.lease_angemeldet = false;
+    q.lease_hinweis = None;
+    q.abweichung = None;
+    q.zugang_abgelehnt = false;
+    q.abbild = None;
+    q.kern = None;
+    tracing::info!("Quelle badhub: Steuerung wird neu übernommen ({verworfen} Posten verworfen)");
+    Ok(if verworfen > 0 {
+        format!(
+            "Stand aus badhub geladen; {verworfen} Eingaben dieses PCs waren nicht in badhub \
+             angekommen und wurden verworfen. Die Steuerung wird gleich übernommen."
+        )
+    } else {
+        "Stand aus badhub geladen; die Steuerung wird gleich übernommen.".into()
+    })
+}
+
+/// Globaler Weg für den Knopf im Hauptfenster.
+pub async fn steuerung_uebernehmen() -> Result<String, String> {
+    uebernehmen_in(&ZUSTAND).await
+}
+
+fn heute() -> chrono::NaiveDate {
+    chrono::Local::now().date_naive()
+}
+
+/// Löschfrist des Personenauszugs nach Turnierende (badhub-Spec
+/// „Personendaten auf dem Hallen-PC“, analog ADR-0052).
+pub const FRIST_TAGE: i64 = 14;
+
+/// Räumt `turniere/` auf: Ordner alter Kopplungen ohne wartende Ereignisse
+/// werden gelöscht; der Personenauszug jedes Turniers spätestens
+/// [`FRIST_TAGE`] nach Turnierende (`turnier.ende`, sonst `beginn`).
+/// Ein Turnier ohne Datum behält ihn (bis Rückgabe oder neue Kopplung).
+pub fn aufraeumen(daten: &Path, aktuell: Option<&str>, heute: chrono::NaiveDate) {
+    let Ok(eintraege) = std::fs::read_dir(daten.join("turniere")) else {
+        return;
+    };
+    for e in eintraege.flatten() {
+        let pfad = e.path();
+        let Some(uuid) = pfad
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        if !pfad.is_dir() || !uuid_gueltig(&uuid) {
+            continue;
+        }
+        let gespeichert: Option<ablage::GespeichertesPaket> =
+            std::fs::read(pfad.join("paket.json"))
+                .ok()
+                .and_then(|t| serde_json::from_slice(&t).ok());
+        let ende = gespeichert.as_ref().and_then(|g| {
+            g.paket
+                .turnier
+                .ende
+                .clone()
+                .or_else(|| g.paket.turnier.beginn.clone())
+        });
+        let abgelaufen = ende
+            .as_deref()
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d.get(..10)?, "%Y-%m-%d").ok())
+            .is_some_and(|d| heute > d + chrono::Duration::days(FRIST_TAGE));
+        let bestaetigt = lease::laden(&pfad).map_or(0, |l| l.bis_n);
+        let basis = gespeichert
+            .as_ref()
+            .map_or(0, |g| g.paket.n())
+            .max(bestaetigt);
+        let wartend = Protokoll::laden(&pfad)
+            .map(|p| p.offen_nach(basis).count())
+            .unwrap_or(0);
+        let ist_aktuell = aktuell.is_some_and(|a| a.eq_ignore_ascii_case(&uuid));
+        if !ist_aktuell && wartend == 0 {
+            match std::fs::remove_dir_all(&pfad) {
+                Ok(()) => tracing::info!("badhub-Turnier: Ordner einer alten Kopplung gelöscht"),
+                Err(e) => tracing::warn!("badhub-Turnier: alter Ordner nicht gelöscht ({e})"),
+            }
+        } else if abgelaufen && pfad.join("personen.bin").exists() {
+            if let Ok(a) = Ablage::neu(daten, &uuid) {
+                a.personen_loeschen();
+            }
+        }
+    }
+}
+
+/// Wartende Ereignisse im Ordner eines Turniers (für die Kopplung: ein
+/// Neukoppeln darf sie nicht stillschweigend verwerfen).
+pub fn wartende_in(daten: &Path, uuid: &str) -> usize {
+    let Ok(a) = Ablage::neu(daten, uuid) else {
+        return 0;
+    };
+    let Some(l) = lease::laden(a.dir()) else {
+        return 0;
+    };
+    if l.zustand == LeaseZustand::Entzogen {
+        return 0; // kommen ohnehin nicht mehr an
+    }
+    Protokoll::laden(a.dir())
+        .map(|p| p.offen_nach(l.bis_n).count())
+        .unwrap_or(0)
 }
 
 /// Ergebnis einer Kopplung (für den Einrichtungsassistenten).
@@ -347,6 +1551,17 @@ pub async fn koppeln(
         return Err("Turnierpaket und Kopplung nennen verschiedene Turniere.".into());
     }
     let ablage = Ablage::neu(daten, &antwort.turnier.uuid)?;
+    let wartend = wartende_in(daten, &antwort.turnier.uuid);
+    if wartend > 0 {
+        return Err(format!(
+            "Für dieses Turnier warten auf diesem PC noch {wartend} Eingaben auf den Abgleich mit \
+             badhub. Bitte erst die Übertragung mit Internet laufen lassen, bis „badhub: aktuell“ \
+             steht."
+        ));
+    }
+    // Neue Kopplung = neues Gerät: alte Lease und Protokoll gelten nicht mehr.
+    lease::entfernen(ablage.dir());
+    let _ = std::fs::remove_file(ablage.dir().join(protokoll::DATEI));
     ablage.token_speichern(&antwort.token)?;
     ablage.paket_speichern(&paket, etag.as_deref())?;
     let stand = turnierkern::falten_turnier(&paket.ereignisse);
@@ -380,3 +1595,5 @@ pub async fn koppeln(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_l3;

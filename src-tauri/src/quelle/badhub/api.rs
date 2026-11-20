@@ -50,7 +50,7 @@ impl std::fmt::Display for ApiFehler {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 struct KoppelnAnfrage<'a> {
     code: &'a str,
     install_id: &'a str,
@@ -58,7 +58,7 @@ struct KoppelnAnfrage<'a> {
 }
 
 /// Antwort auf `POST /koppeln`.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 pub struct KopplungAntwort {
     pub token: String,
     pub turnier: KopplungTurnier,
@@ -223,5 +223,271 @@ pub async fn ereignisse(
         .map_err(|_| ApiFehler::Format("Ereignisse".into()))?
     {
         EreignisAntwort::Liste(l) | EreignisAntwort::Objekt { ereignisse: l } => Ok(l),
+    }
+}
+
+// ── Schreibende Aufrufe unter der Lease (Paket L3) ─────────────────────────
+
+/// Relay-Angaben beim Nehmen der Lease: über diesen Namespace und Zugang
+/// leitet badhub Eingaben aus dem Bereich „Spiele“ an diesen PC.
+#[derive(Clone, PartialEq, Eq, Serialize)]
+pub struct RelayAngaben {
+    pub ns: String,
+    pub tl_token: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LeaseAnfrage<'a> {
+    n: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relay: Option<&'a RelayAngaben>,
+    uebernehmen: bool,
+}
+
+/// Antwort auf `POST /turnier/lease`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeaseAntwort {
+    /// `200 {epoche, n}`.
+    Erteilt { epoche: u64, n: u64 },
+    /// `409 n_veraltet {n}`: bts-light ist nicht auf dem Stand von badhub.
+    NVeraltet { n: u64 },
+    /// `409 lease_belegt {geraet}`: ein anderes Gerät hält die Lease.
+    Belegt { geraet: String },
+    /// Andere Ablehnung (Code aus `fehler`).
+    Abgelehnt(String),
+}
+
+/// Antwort auf `POST /turnier/ereignisse`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HochladenAntwort {
+    /// `200 {bis_n}`.
+    Bestaetigt { bis_n: u64 },
+    /// `409 luecke {erwartet_n}`.
+    Luecke { erwartet_n: u64 },
+    /// `409 epoche_veraltet`: Steuerung in badhub zurückgeholt.
+    EpocheVeraltet,
+    /// `422 abweichung {posten, grund}`: badhub nimmt das Paket nicht an.
+    Abweichung { grund: String },
+}
+
+/// Antwort auf `DELETE /turnier/lease`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RueckgabeAntwort {
+    Zurueckgegeben,
+    /// `409 n_offen {n}`: badhub hat noch nicht alles.
+    NOffen {
+        n: u64,
+    },
+    EpocheVeraltet,
+}
+
+/// Fehlerkörper der badhub-API (`{fehler, …}`).
+#[derive(Debug, Default, Deserialize)]
+struct Fehlerkoerper {
+    #[serde(default)]
+    fehler: String,
+    #[serde(default)]
+    n: Option<u64>,
+    #[serde(default)]
+    erwartet_n: Option<u64>,
+    #[serde(default)]
+    geraet: Option<String>,
+    #[serde(default)]
+    grund: Option<String>,
+}
+
+async fn fehlerkoerper(antwort: reqwest::Response) -> Fehlerkoerper {
+    match koerper(antwort).await {
+        Ok(b) => serde_json::from_slice(&b).unwrap_or_default(),
+        Err(_) => Fehlerkoerper::default(),
+    }
+}
+
+/// `POST /turnier/lease {n, relay?, uebernehmen: false}`.
+pub async fn lease_nehmen(
+    basis: &str,
+    token: &str,
+    n: u64,
+    relay: Option<&RelayAngaben>,
+) -> Result<LeaseAntwort, ApiFehler> {
+    let body = serde_json::to_vec(&LeaseAnfrage {
+        n,
+        relay,
+        uebernehmen: false,
+    })
+    .map_err(|e| ApiFehler::Format(e.to_string()))?;
+    let antwort = client(Duration::from_secs(15))?
+        .post(format!("{basis}/turnier/lease"))
+        .bearer_auth(token)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(netz)?;
+    let status = antwort.status();
+    if status.is_success() {
+        #[derive(Deserialize)]
+        struct Ok_ {
+            epoche: u64,
+            n: u64,
+        }
+        let b = koerper(antwort).await?;
+        let o: Ok_ = serde_json::from_slice(&b).map_err(|_| ApiFehler::Format("Lease".into()))?;
+        return Ok(LeaseAntwort::Erteilt {
+            epoche: o.epoche,
+            n: o.n,
+        });
+    }
+    if status.as_u16() == 409 {
+        let f = fehlerkoerper(antwort).await;
+        return Ok(match f.fehler.as_str() {
+            "n_veraltet" => LeaseAntwort::NVeraltet {
+                n: f.n.unwrap_or(0),
+            },
+            "lease_belegt" => LeaseAntwort::Belegt {
+                geraet: f.geraet.unwrap_or_default(),
+            },
+            andere => LeaseAntwort::Abgelehnt(andere.to_string()),
+        });
+    }
+    if status.as_u16() == 400 {
+        let f = fehlerkoerper(antwort).await;
+        return Ok(LeaseAntwort::Abgelehnt(f.fehler));
+    }
+    Err(status_fehler(status))
+}
+
+/// `POST /turnier/ereignisse {epoche, basis_n, posten}`. `posten` in der
+/// Form aus [`super::protokoll::Posten::fuer_badhub`].
+pub async fn hochladen(
+    basis: &str,
+    token: &str,
+    epoche: u64,
+    basis_n: u64,
+    posten: &[serde_json::Value],
+) -> Result<HochladenAntwort, ApiFehler> {
+    let body = serde_json::to_vec(&serde_json::json!({
+        "epoche": epoche,
+        "basis_n": basis_n,
+        "posten": posten,
+    }))
+    .map_err(|e| ApiFehler::Format(e.to_string()))?;
+    let antwort = client(Duration::from_secs(30))?
+        .post(format!("{basis}/turnier/ereignisse"))
+        .bearer_auth(token)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(netz)?;
+    let status = antwort.status();
+    if status.is_success() {
+        #[derive(Deserialize)]
+        struct Ok_ {
+            bis_n: u64,
+        }
+        let b = koerper(antwort).await?;
+        let o: Ok_ =
+            serde_json::from_slice(&b).map_err(|_| ApiFehler::Format("Hochladen".into()))?;
+        return Ok(HochladenAntwort::Bestaetigt { bis_n: o.bis_n });
+    }
+    match status.as_u16() {
+        409 => {
+            let f = fehlerkoerper(antwort).await;
+            match f.fehler.as_str() {
+                "luecke" => Ok(HochladenAntwort::Luecke {
+                    erwartet_n: f.erwartet_n.unwrap_or(0),
+                }),
+                "epoche_veraltet" => Ok(HochladenAntwort::EpocheVeraltet),
+                _ => Err(ApiFehler::Status(409)),
+            }
+        }
+        422 => {
+            let f = fehlerkoerper(antwort).await;
+            Ok(HochladenAntwort::Abweichung {
+                grund: f.grund.unwrap_or(f.fehler),
+            })
+        }
+        _ => Err(status_fehler(status)),
+    }
+}
+
+/// `DELETE /turnier/lease {epoche, n}`.
+pub async fn lease_zurueckgeben(
+    basis: &str,
+    token: &str,
+    epoche: u64,
+    n: u64,
+) -> Result<RueckgabeAntwort, ApiFehler> {
+    let body = serde_json::to_vec(&serde_json::json!({ "epoche": epoche, "n": n }))
+        .map_err(|e| ApiFehler::Format(e.to_string()))?;
+    let antwort = client(Duration::from_secs(15))?
+        .delete(format!("{basis}/turnier/lease"))
+        .bearer_auth(token)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(netz)?;
+    let status = antwort.status();
+    if status.is_success() {
+        return Ok(RueckgabeAntwort::Zurueckgegeben);
+    }
+    if status.as_u16() == 409 {
+        let f = fehlerkoerper(antwort).await;
+        return match f.fehler.as_str() {
+            "n_offen" => Ok(RueckgabeAntwort::NOffen {
+                n: f.n.unwrap_or(0),
+            }),
+            "epoche_veraltet" => Ok(RueckgabeAntwort::EpocheVeraltet),
+            _ => Err(ApiFehler::Status(409)),
+        };
+    }
+    Err(status_fehler(status))
+}
+
+// Debug von Hand: Zugänge erscheinen nie im Klartext (Security-Review L3).
+impl std::fmt::Debug for KopplungAntwort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KopplungAntwort")
+            .field("token", &"***")
+            .field("turnier", &self.turnier)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for RelayAngaben {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RelayAngaben")
+            .field("ns", &self.ns)
+            .field("tl_token", &"***")
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+
+    #[test]
+    fn debug_zeigt_keine_zugaenge() {
+        let r = RelayAngaben {
+            ns: "ns-1".into(),
+            tl_token: "geheim-relay".into(),
+        };
+        let k = KopplungAntwort {
+            token: "geheim-geraet".into(),
+            turnier: KopplungTurnier {
+                id: 1,
+                uuid: "u".into(),
+                name: "n".into(),
+            },
+        };
+        let text = format!("{r:?} {k:?}");
+        assert!(!text.contains("geheim"), "{text}");
+        assert!(text.contains("ns-1"));
     }
 }

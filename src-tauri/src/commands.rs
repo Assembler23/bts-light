@@ -185,6 +185,8 @@ fn status_from(outcome: &SyncOutcome) -> SyncStatus {
         SyncOutcome::Abgeliefert => ("ok", "Verbunden – Liveticker aktuell".to_string()),
         SyncOutcome::SlaveActive => ("ok", "Ansage-Slave aktiv – nur Ansagen".to_string()),
         SyncOutcome::BtpError(e) => ("btp_error", format!("BTP nicht erreichbar: {e}")),
+        // Quelle badhub (Paket L3): eigener Text, nie „BTP nicht erreichbar“.
+        SyncOutcome::QuelleFehler(e) => ("btp_error", format!("badhub-Turnier: {e}")),
         // Bewusst "warn" (orange), nicht "btp_error" (rot): Der Guard
         // heilt sich im Folge-Abruf selbst — für die Turnierleitung ist
         // das kein Ausfall.
@@ -1257,6 +1259,62 @@ pub fn badhub_turnier_info(
     cfg.badhub_turnier
         .gekoppelt()
         .then(|| cfg.badhub_turnier.clone())
+}
+
+/// Abgleich mit badhub (Paket L3) für das Hauptfenster: „badhub: aktuell“ /
+/// „N Ereignisse warten …“, Lease-Zustand, welche Knöpfe gehen. `None` bei
+/// BTP oder ohne geladenes badhub-Turnier.
+#[tauri::command]
+pub fn badhub_abgleich(state: State<'_, AppState>) -> Option<crate::quelle::badhub::Abgleich> {
+    let badhub = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.quelle == crate::config::QuelleArt::Badhub && !cfg.slave_mode
+    };
+    badhub.then(crate::quelle::badhub::abgleich_lage).flatten()
+}
+
+/// „Turnier beenden / Steuerung an badhub zurückgeben“ (Paket L3): nur mit
+/// leerer Outbox; danach wird der Personenauszug gelöscht.
+#[tauri::command]
+pub async fn badhub_turnier_beenden() -> Result<String, String> {
+    crate::quelle::badhub::turnier_beenden().await
+}
+
+/// „Steuerung wieder übernehmen“ nach Rückgabe oder Rückholung (Paket L3).
+#[tauri::command]
+pub async fn badhub_steuerung_uebernehmen() -> Result<String, String> {
+    crate::quelle::badhub::steuerung_uebernehmen().await
+}
+
+/// Slave-Schlüssel des Turnier-PCs (Anzeigeform) für LAN-Ansage-Slaves eines
+/// badhub-Turniers; `None` bei BTP oder ohne geladenes Turnier.
+#[tauri::command]
+pub fn badhub_slave_schluessel(state: State<'_, AppState>) -> Option<String> {
+    let badhub = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.quelle == crate::config::QuelleArt::Badhub && !cfg.slave_mode
+    };
+    badhub
+        .then(crate::quelle::badhub::slave_schluessel_anzeige)
+        .flatten()
+}
+
+/// Slave-Schlüssel am Ansage-Slave eintragen (vom Turnier-PC abgelesen).
+#[tauri::command]
+pub fn badhub_slave_schluessel_setzen(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    schluessel: String,
+) -> Result<(), String> {
+    let uuid = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.badhub_turnier.uuid.clone()
+    };
+    if uuid.trim().is_empty() {
+        return Err("Erst diesen PC mit einem Kopplungscode koppeln.".into());
+    }
+    let daten = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::quelle::badhub::slave_schluessel_setzen(&daten, &uuid, &schluessel)
 }
 
 /// Testet die Verbindung zu BTP und liefert bei Erfolg den Turniernamen.
@@ -3653,6 +3711,11 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
     // Turnierquelle (Paket L2): die eine Stelle, an der sich BTP- und
     // badhub-Turniere trennen. Bei BTP startet hier nichts Neues.
     let quellen_start = crate::quelle::starten(&config, app.path().app_data_dir().ok().as_deref());
+    // Relay-Namespace für die Lease eines badhub-Turniers: Über ihn leitet
+    // badhub seine Eingaben an diesen PC — nur mit Cloud-Weg.
+    let kern_relay_ns = (!config.slave_mode && config.connection_mode.cloud_enabled())
+        .then(|| config.install_id.trim().to_string())
+        .filter(|ns| !ns.is_empty());
 
     // Poll-Push-Schleife BTP → Badhub.
     let app_handle = app.clone();
@@ -3739,7 +3802,14 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
         // 5 s, Paket alle 60 s; endet mit dieser Schleife.
         let _kern_abgleich = quellen_start.kern_abgleich.then(|| {
             TaktWaechter(tauri::async_runtime::spawn(
-                crate::quelle::badhub::abgleich_schleife(),
+                crate::quelle::badhub::abgleich_schleife(kern_relay_ns.clone()),
+            ))
+        });
+        // Outbox (Paket L3): lädt die eigenen Ereignisse zu badhub hoch —
+        // eigener Task, nur bei Quelle badhub am Master.
+        let _kern_outbox = quellen_start.kern_abgleich.then(|| {
+            TaktWaechter(tauri::async_runtime::spawn(
+                crate::quelle::badhub::outbox_schleife(),
             ))
         });
         let _tp_takt = (!slave_mode && quellen_start.btp_dienste).then(|| {
@@ -5658,6 +5728,10 @@ pub async fn confirm_walkover(
                 tablet.timeline_store().finalize(cand.match_id, false);
                 tablet.sheet_store().finalize(cand.match_id, false);
             }
+            Err(e) if !crate::quelle::nachschub_moeglich(&config) => {
+                // badhub: Ablehnung des Kerns, kein Nachschub (Paket L3).
+                errors.push(format!("{}: {e}", cand.round_name));
+            }
             Err(e) => {
                 // Nachschub-Queue (A5): Der Sync-Loop reicht den Walkover
                 // nach, sobald BTP wieder antwortet.
@@ -5839,6 +5913,7 @@ pub async fn enter_result(
             tracing::info!("Turnierleitung: Ergebnis für Match {mid} nach BTP geschrieben");
             Ok(())
         }
+        Err(e) if !crate::quelle::nachschub_moeglich(&config) => Err(e),
         Err(e) => {
             // Nachschub-Queue (A5): der Sync-Loop reicht es nach.
             tablet.queue_btp_retry(update, end_ms);
@@ -5909,6 +5984,7 @@ pub async fn disqualify_match(
             tracing::info!("Turnierleitung: Disqualifikation für Match {mid} nach BTP geschrieben");
             Ok(())
         }
+        Err(e) if !crate::quelle::nachschub_moeglich(&config) => Err(e),
         Err(e) => {
             tablet.queue_btp_retry(update, end_ms);
             Err(format!("{e} (wird automatisch nachgereicht)"))

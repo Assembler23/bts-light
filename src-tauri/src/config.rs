@@ -1189,8 +1189,8 @@ impl MeetingpointConfig {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum QuelleArt {
-    /// badhub-Turnier über das Turnierpaket (`badhub_turnier`); seit Paket L2
-    /// nur lesend, Schreiben folgt mit L3.
+    /// badhub-Turnier über das Turnierpaket (`badhub_turnier`); lesend seit
+    /// Paket L2, schreibend unter der Lease seit L3.
     Badhub,
     /// Badminton Tournament Planner über TP-Network (`config.btp`). Steht
     /// zuletzt, weil serde `other` nur an der letzten Variante erlaubt.
@@ -1633,6 +1633,11 @@ impl TlWebConfig {
     pub fn add_device(&mut self, device: TlDevice) -> Result<(), String> {
         if device.token.trim().is_empty() || device.id.trim().is_empty() {
             return Err("Gerät ohne Kennung oder Zugang.".to_string());
+        }
+        // Reserviert für den Kern-Zugang von badhub (Paket L3) — ein normales
+        // Gerät mit dieser Kennung dürfte sonst Kernbefehle senden.
+        if device.id.trim() == relay_proto::TL_GERAET_KERN {
+            return Err("Diese Gerätekennung ist reserviert.".to_string());
         }
         if self.devices.iter().any(|d| d.id == device.id) {
             return Err("Dieses Gerät ist schon gekoppelt.".to_string());
@@ -3651,6 +3656,11 @@ mod tl_device_tests {
         let mut cfg = TlWebConfig::default();
         cfg.add_device(geraet("a")).unwrap();
         assert!(cfg.add_device(geraet("a")).is_err());
+        // Reserviert für den Kern-Zugang von badhub.
+        let e = cfg
+            .add_device(geraet(relay_proto::TL_GERAET_KERN))
+            .unwrap_err();
+        assert!(e.contains("reserviert"), "{e}");
     }
 
     #[test]

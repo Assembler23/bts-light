@@ -16,11 +16,6 @@ use crate::btp::proto;
 use crate::config::{AppConfig, QuelleArt};
 use crate::tablet::state::TabletState;
 
-/// Antwort jedes Schreibwegs bei Quelle badhub, bis L3 den Schreibpfad bringt.
-pub const SCHREIBEN_FOLGT: &str =
-    "Schreiben über badhub folgt — dieses Turnier wird in badhub geführt; Ergebnisse und \
-     Feldvergabe bitte vorerst in badhub eintragen.";
-
 /// Liest den aktuellen Turnierstand aus der eingestellten Quelle.
 ///
 /// Für BTP genau der bisherige Abruf (`client::fetch_snapshot` mit Host,
@@ -34,7 +29,44 @@ pub async fn stand(config: &AppConfig) -> Result<BtpSnapshot, String> {
         )
         .await
         .map_err(|e| e.to_string()),
+        QuelleArt::Badhub if config.slave_mode => badhub::slave::stand_vom_master(config).await,
         QuelleArt::Badhub => badhub::stand(config),
+    }
+}
+
+/// Schlüssel der lokalen Stores: bei BTP `None` (es gilt wie bisher
+/// `tournament_name`), bei badhub die Turnier-UUID (Paket L3).
+pub fn turnier_schluessel(config: &AppConfig) -> Option<String> {
+    match config.quelle {
+        QuelleArt::Btp => None,
+        QuelleArt::Badhub if config.slave_mode => None,
+        QuelleArt::Badhub => badhub::turnier_schluessel(),
+    }
+}
+
+/// Darf gerade geschrieben werden? Bei BTP immer (wie bisher — ob BTP
+/// erreichbar ist, zeigt erst der Schreibversuch); bei badhub nur mit
+/// gültiger Lease. Damit schweigen Auto-Vergabe und Schiedsrichter-Abgleich
+/// ohne Lease, statt jeden Takt eine Warnung zu schreiben.
+pub fn schreiben_moeglich(config: &AppConfig) -> bool {
+    match config.quelle {
+        QuelleArt::Btp => true,
+        QuelleArt::Badhub => !config.slave_mode && badhub::schreiben_moeglich(),
+    }
+}
+
+/// Antwort an ein TL-Gerät, wenn ein Schreibweg scheitert: bei BTP wortgleich
+/// wie bisher (`BtpError`, „BTP hat abgelehnt: …“), bei badhub die Ablehnung
+/// selbst — die Halle soll nicht „BTP“ lesen, wo es kein BTP gibt.
+pub fn schreib_ablehnung(config: &AppConfig, fehler: &str) -> relay_proto::TlResponse {
+    match config.quelle {
+        QuelleArt::Btp => relay_proto::TlResponse::err(
+            relay_proto::TlErrorCode::BtpError,
+            format!("BTP hat abgelehnt: {fehler}"),
+        ),
+        QuelleArt::Badhub => {
+            relay_proto::TlResponse::err(relay_proto::TlErrorCode::KernAbgelehnt, fehler)
+        }
     }
 }
 
@@ -56,11 +88,16 @@ pub fn starten(config: &AppConfig, daten: Option<&std::path::Path>) -> QuellenSt
             kern_abgleich: false,
             btp_dienste: true,
         },
-        QuelleArt::Badhub => QuellenStart {
-            // Am Slave kein eigener Abgleich: er liest (ab L3) vom Master.
-            kern_abgleich: !config.slave_mode && daten.is_some_and(|d| badhub::starten(config, d)),
-            btp_dienste: false,
-        },
+        QuelleArt::Badhub => {
+            // Auch der Slave lädt sein Paket (Namen, Felder); einen eigenen
+            // Abgleich, eine Lease oder eine Outbox hat er nicht — den Stand
+            // liest er vom Master (`badhub::slave`).
+            let geladen = daten.is_some_and(|d| badhub::starten(config, d));
+            QuellenStart {
+                kern_abgleich: !config.slave_mode && geladen,
+                btp_dienste: false,
+            }
+        }
     }
 }
 
@@ -72,8 +109,8 @@ pub fn btp_dienste(config: &AppConfig) -> bool {
 }
 
 /// Darf ein gescheiterter Ergebnis-Write in die BTP-Nachschub-Queue? Nur bei
-/// BTP: Bei badhub ist der Fehler die Schreibsperre selbst, ein Nachschub
-/// liefe nie durch und hielte ein Ergebnis fest, das nirgends ankommt.
+/// BTP: Bei badhub scheitert ein Write nie am Netz, nur am Kern oder an der
+/// fehlenden Lease — ein Nachschub wiederholte dieselbe Ablehnung.
 pub fn nachschub_moeglich(config: &AppConfig) -> bool {
     config.quelle == QuelleArt::Btp
 }
@@ -83,7 +120,22 @@ pub fn nachschub_moeglich(config: &AppConfig) -> bool {
 // Dünne Weichen statt des früheren Re-Exports: bei BTP derselbe Aufruf wie
 // vorher (gleiche Argumente, gleiche Reihenfolge, kein zusätzliches Warten),
 // bei badhub kein BTP-Kontakt und keine Nebenwirkung auf BTP-Merker
-// (`eigene_writes`, Schreib-Gate, Nachschub).
+// (`eigene_writes`, Schreib-Gate, Nachschub), sondern Kernbefehle unter der
+// Lease (Paket L3, `badhub::schreiben`). Am Slave schreibt niemand.
+
+/// Fehler eines Schreibwegs am badhub-Slave.
+const SLAVE_SCHREIBT_NICHT: &str =
+    "Dieser Rechner ist ein Ansage-Slave — Eingaben nur am Turnier-PC.";
+
+fn badhub_weiche<T>(
+    config: &AppConfig,
+    f: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if config.slave_mode {
+        return Err(SLAVE_SCHREIBT_NICHT.into());
+    }
+    f()
+}
 
 pub(crate) async fn write_result_to_btp(
     config: &AppConfig,
@@ -91,7 +143,7 @@ pub(crate) async fn write_result_to_btp(
 ) -> Result<(), String> {
     match config.quelle {
         QuelleArt::Btp => btp::write_result_to_btp(config, update).await,
-        QuelleArt::Badhub => Err(SCHREIBEN_FOLGT.into()),
+        QuelleArt::Badhub => badhub_weiche(config, || badhub::ergebnis(update)),
     }
 }
 
@@ -102,7 +154,7 @@ pub(crate) async fn write_result_settled(
 ) -> Result<(), String> {
     match config.quelle {
         QuelleArt::Btp => btp::write_result_settled(config, tablet, update).await,
-        QuelleArt::Badhub => Err(SCHREIBEN_FOLGT.into()),
+        QuelleArt::Badhub => badhub_weiche(config, || badhub::ergebnis(update)),
     }
 }
 
@@ -113,7 +165,7 @@ pub(crate) async fn write_courts_to_btp(
 ) -> Result<(), String> {
     match config.quelle {
         QuelleArt::Btp => btp::write_courts_to_btp(config, courts, match_courts).await,
-        QuelleArt::Badhub => Err(SCHREIBEN_FOLGT.into()),
+        QuelleArt::Badhub => badhub_weiche(config, || badhub::feld_vergabe(courts)),
     }
 }
 
@@ -125,7 +177,7 @@ pub(crate) async fn write_officials_to_btp(
 ) -> Result<Vec<proto::MatchCourt>, String> {
     match config.quelle {
         QuelleArt::Btp => btp::write_officials_to_btp(config, entries, zyklus, tablet).await,
-        QuelleArt::Badhub => Err(SCHREIBEN_FOLGT.into()),
+        QuelleArt::Badhub => badhub_weiche(config, || badhub::offizielle(entries)),
     }
 }
 
@@ -135,7 +187,9 @@ pub(crate) async fn write_highlight_to_btp(
 ) -> Result<usize, String> {
     match config.quelle {
         QuelleArt::Btp => btp::write_highlight_to_btp(config, entries).await,
-        QuelleArt::Badhub => Err(SCHREIBEN_FOLGT.into()),
+        // Zeilenfarbe gibt es nur in BTP; bei Kern-Turnieren gilt der lokale
+        // Aufrufzustand — Erfolg ohne Kernbefehl.
+        QuelleArt::Badhub => Ok(entries.len()),
     }
 }
 
@@ -208,17 +262,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         tablet.set_btp_retry_path(dir.path().join("btp-retry.json"));
 
-        let e = write_result_to_btp(&config, &update(7)).await.unwrap_err();
-        assert_eq!(e, SCHREIBEN_FOLGT);
-        let e = write_result_settled(&config, &tablet, &update(7))
-            .await
-            .unwrap_err();
-        assert_eq!(e, SCHREIBEN_FOLGT);
-        assert!(write_courts_to_btp(&config, &[], &[]).await.is_err());
-        assert!(write_officials_to_btp(&config, &[], &leer(), &tablet)
+        // Ohne Lease (hier: ohne geladenes Turnier) lehnt der Kern-Weg ab —
+        // ohne BTP zu berühren.
+        assert!(write_result_to_btp(&config, &update(7)).await.is_err());
+        assert!(write_result_settled(&config, &tablet, &update(7))
             .await
             .is_err());
-        assert!(write_highlight_to_btp(&config, &[]).await.is_err());
+        let _ = write_courts_to_btp(&config, &[], &[]).await;
+        let _ = write_officials_to_btp(&config, &[], &leer(), &tablet).await;
+        // Zeilenfarbe gibt es nur in BTP: lokal Erfolg ohne Kernbefehl.
+        assert_eq!(write_highlight_to_btp(&config, &[]).await, Ok(0));
 
         // Keine Verbindung zu BTP, kein Nachschub-Eintrag, keine Datei.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -249,6 +302,17 @@ mod tests {
         );
         // Und es entsteht nichts unter `turniere/`.
         assert!(!dir.path().join("turniere").exists());
+        // Paket L3: kein Kern-Schlüssel, Schreiben wie bisher immer erlaubt,
+        // Ablehnungstext wortgleich wie vor L3.
+        assert_eq!(turnier_schluessel(&config), None);
+        assert!(schreiben_moeglich(&config));
+        let r = schreib_ablehnung(&config, "Zeitüberschreitung");
+        assert_eq!(r.code, Some(relay_proto::TlErrorCode::BtpError));
+        assert_eq!(
+            r.error.as_deref(),
+            Some("BTP hat abgelehnt: Zeitüberschreitung")
+        );
+        assert_eq!(r.ablehnung, None);
     }
 
     #[tokio::test]
@@ -261,8 +325,9 @@ mod tests {
             slave_mode: true,
             ..config.clone()
         };
+        // Der Slave liest vom Master (hier: nicht gekoppelt), nie BTP.
         let e = stand(&slave).await.unwrap_err();
-        assert!(e.contains("Slave"), "{e}");
+        assert!(e.contains("Slave") || e.contains("koppeln"), "{e}");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert_eq!(zaehler.load(Ordering::SeqCst), 0);
     }
