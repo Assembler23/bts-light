@@ -696,6 +696,11 @@ Anteil auflösbarer Plätze mit jeder Runde.
 `SENDUPDATE` schreibt ein Match-Ergebnis zurück nach BTP – die Grundlage
 für den digitalen Spielzettel (Tablet → bts-light → BTP).
 
+Die Schreibwege (`write_result_to_btp`, `write_courts_to_btp`,
+`write_officials_to_btp`, `write_highlight_to_btp`, `write_result_settled`)
+liegen seit v0.9.448 in `src-tauri/src/quelle/btp.rs` (BTP als eine von zwei
+Turnierquellen, [features/turnierquelle.md](features/turnierquelle.md)).
+
 Request-Aufbau (zusätzlich zum Nachrichten-Skelett):
 
 ```

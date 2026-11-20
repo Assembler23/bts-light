@@ -14,6 +14,7 @@ pub mod log_upload;
 pub mod offline_stimme;
 pub mod openai_tts;
 pub mod print;
+pub mod quelle;
 pub mod rueckweg;
 pub mod seiten_angebot;
 pub mod seiten_paket;
