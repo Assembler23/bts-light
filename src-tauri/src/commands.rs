@@ -1044,15 +1044,11 @@ pub async fn share_pronunciations(
 /// eine unbrauchbare badhub-URL. Der Aufrufer liefert dann `Unsupported`, und
 /// die Oberfläche blendet den Bereich aus (AK-A6, C4).
 fn checkin_zugang(cfg: &AppConfig) -> Option<(String, String, String)> {
-    if !cfg.checkin.is_ready() {
+    if !cfg.checkin_bereit() {
         return None;
     }
     let base = badhub_origin(&cfg.badhub.url)?;
-    Some((
-        base,
-        cfg.badhub.password.clone(),
-        cfg.checkin.tournament_uuid.trim().to_string(),
-    ))
+    Some((base, cfg.badhub.password.clone(), cfg.checkin_guid()))
 }
 
 /// Der Check-In-Stand für die Turnierleitungs-Sicht (AK-C1, C5).
@@ -3688,12 +3684,10 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
             tablet.sheet_store().set_dir(dir.join("zettel"));
         }
     }
-    tablet
-        .timeline_store()
-        .set_guid(&config.checkin.tournament_uuid);
-    tablet
-        .sheet_store()
-        .set_guid(&config.checkin.tournament_uuid);
+    // Wirksame GUID (bei Quelle badhub die aus der Kopplung).
+    let guid = config.checkin_guid();
+    tablet.timeline_store().set_guid(&guid);
+    tablet.sheet_store().set_guid(&guid);
     // Gesperrte Felder aus der Config in den Laufzeit-State übernehmen.
     tablet.set_locked_courts(config.locked_courts.iter().copied());
     // Pause der automatischen Vergabe samt Turnierbezug aus der Config

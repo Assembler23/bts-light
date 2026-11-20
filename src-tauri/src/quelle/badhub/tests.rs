@@ -157,6 +157,7 @@ pub(super) fn paket_fuer(log: Vec<TurnierEreignis>, n: u32, hallen: Vec<PaketHal
         turnier: PaketTurnier {
             id: 17,
             uuid: UUID.into(),
+            guid: None,
             name: "Wintercup".into(),
             beginn: Some("2026-12-06".into()),
             ende: None,
@@ -623,6 +624,8 @@ async fn kopplung_paket_etag_ereignisse_und_widerruf() {
         .await
         .unwrap();
     assert_eq!(k.turnier.uuid, UUID);
+    // Paket ohne `guid` (älteres badhub) → leer, es gilt die UUID.
+    assert_eq!(k.turnier.guid, "");
     assert_eq!(k.turnier.name, "Wintercup");
     assert_eq!(k.turnier.basis, basis);
     assert_eq!(k.spiele, 3);
@@ -679,13 +682,18 @@ async fn kopplung_paket_etag_ereignisse_und_widerruf() {
 async fn offline_bleibt_der_letzte_stand() {
     let (basis_log, _) = mit_nachzuegler();
     let a = Arc::new(Attrappe::default());
-    *a.paket.lock().unwrap() = Some(paket_fuer(basis_log, 4, eine_halle()));
+    // badhub nennt die GUID der Turnierseite (hier eine turnier.de-GUID in
+    // BTP-Schreibweise) → kanonisch in der Kopplung, für den Liveticker.
+    let mut p = paket_fuer(basis_log, 4, eine_halle());
+    p.turnier.guid = Some("{6b2352e2-2231-45a2-a338-5ed0cb2e1a5c}".into());
+    *a.paket.lock().unwrap() = Some(p);
     let basis = attrappe_starten(a).await;
     let daten = tempfile::tempdir().unwrap();
     let mut k = koppeln(&basis, daten.path(), "ABCD2345", "inst-1", "")
         .await
         .unwrap();
     assert_eq!(k.turnier.geraet_name, "bts-light");
+    assert_eq!(k.turnier.guid, "6B2352E2-2231-45A2-A338-5ED0CB2E1A5C");
     // Netz weg: ein Port, an dem niemand lauscht.
     let tot = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = tot.local_addr().unwrap().port();
@@ -714,6 +722,7 @@ fn fremdes_turnier_im_paket_wird_verworfen() {
         name: "Wintercup".into(),
         basis: "https://badhub.de/api/torg/v1".into(),
         geraet_name: "PC".into(),
+        guid: String::new(),
     };
     let mut q = KernQuelle::laden(daten.path(), &cfg).unwrap();
     let mut fremd = p.clone();

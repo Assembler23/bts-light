@@ -101,6 +101,13 @@ selbst herausgezogen. Sieht die Eingabe nicht nach einer Kennung aus, warnt die
 Seite. Ohne gültige Kennung **startet die Übertragung nicht** — die Meldung
 lautet dann „Die Turnier-Kennung von turnier.de fehlt".
 
+Bei der Turnierquelle **badhub** steht an dieser Stelle kein Eingabefeld,
+sondern die Kennung des gekoppelten Turniers („Kommt aus der Kopplung mit …").
+Liveticker, Check-In und Aushang laufen dann immer unter diesem Turnier — ein
+im Feld stehen gebliebener Wert eines früheren Turniers gilt erst wieder, wenn
+du auf BTP zurückstellst.
+<!-- pruef: "Kommt aus der Kopplung mit" in src/pages/SetupWizard.tsx -->
+
 Diese Kennung hängt an mehr als am Liveticker: Der Hallen-Check-In sendet ohne
 sie nichts, und Punktverlauf sowie abgelegte Schiedsrichterzettel werden damit
 dem richtigen Turnier zugeordnet.
