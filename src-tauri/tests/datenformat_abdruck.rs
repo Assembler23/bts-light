@@ -28,6 +28,7 @@ const DATEIEN: &[&str] = &[
     "quelle/badhub/lease.rs",
     "quelle/badhub/paket.rs",
     "quelle/badhub/protokoll.rs",
+    "quelle/badhub/standby.rs",
     "rueckweg.rs",
     "seiten_paket.rs",
     "tablet/exclusion.rs",

@@ -22,6 +22,7 @@ import { extractTournamentGuid } from "../tournamentGuid";
 import { AushangOverlay } from "../components/AushangOverlay";
 import { SlaveDevicesPanel } from "../components/SlaveDevicesPanel";
 import { BadhubAbgleichPanel } from "../components/BadhubAbgleichPanel";
+import { StandbyPanel } from "../components/StandbyPanel";
 import type { NavView, SettingsFocus } from "../components/SideNav";
 import type {
   AppConfig,
@@ -368,6 +369,8 @@ export function Dashboard({ config, status, onNavigate, onConfigSaved }: Props) 
 
       {/* badhub-Turnier (Paket L3): Abgleich, Rückgabe, Übernahme. Bei BTP leer. */}
       {running && config.quelle === "badhub" && !config.slave_mode && <BadhubAbgleichPanel />}
+      {/* Standby-PC (Paket S2): Spiegelstand, Sicherung einlesen, Übernehmen. */}
+      {running && config.quelle === "badhub" && config.slave_mode && <StandbyPanel />}
 
       {/* Ferne Halle (Cloud-Slave): Hallen-Auswahl + Tablet-QR + Monitor-Links
           der eigenen Halle. Rendert nur, wenn dieser PC als Cloud-Slave läuft. */}

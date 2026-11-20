@@ -17,12 +17,12 @@ use super::tests::{aufrufen, eine_halle, melden, paket_fuer, turnier, OBEN, UUID
 use super::*;
 use crate::btp::proto::{CourtAssignment, MatchCourt, MatchUpdate};
 
-const TOKEN: &str = "tok-l3";
+pub(super) const TOKEN: &str = "tok-l3";
 const JETZT: &str = "2026-12-06T11:00:00";
 
 // ── Übersetzung der Weichen ────────────────────────────────────────────────
 
-fn ko4() -> (Vec<TurnierEreignis>, Paket) {
+pub(super) fn ko4() -> (Vec<TurnierEreignis>, Paket) {
     let log = turnier(4, System::Ko { platz3: false }, &[("H1", 2)]);
     let p = paket_fuer(log.clone(), 4, eine_halle());
     (log, p)
@@ -292,11 +292,11 @@ fn befehls_ids_passen_zu_badhub() {
 
 #[derive(Default)]
 pub(super) struct Badhub {
-    ereignisse: StdMutex<Vec<TurnierEreignis>>,
-    ids: StdMutex<BTreeSet<String>>,
+    pub(super) ereignisse: StdMutex<Vec<TurnierEreignis>>,
+    pub(super) ids: StdMutex<BTreeSet<String>>,
     /// Gerät hält die Lease, mit Epoche.
-    lease: StdMutex<Option<u64>>,
-    epoche: StdMutex<u64>,
+    pub(super) lease: StdMutex<Option<u64>>,
+    pub(super) epoche: StdMutex<u64>,
     relay: StdMutex<Option<serde_json::Value>>,
     /// Nächste n Hochladen-Aufrufe antworten 503.
     fehler_503: AtomicUsize,
@@ -304,21 +304,25 @@ pub(super) struct Badhub {
     /// hat schon übernommen).
     antwort_verloren: AtomicBool,
     abweichung: AtomicBool,
-    hochladen_aufrufe: AtomicUsize,
-    paket: StdMutex<Option<Paket>>,
-    letzter_body: StdMutex<Option<serde_json::Value>>,
+    pub(super) hochladen_aufrufe: AtomicUsize,
+    pub(super) paket: StdMutex<Option<Paket>>,
+    pub(super) letzter_body: StdMutex<Option<serde_json::Value>>,
     /// `GET turnier/ereignisse`: höchstens so viele je Seite (0 = `max`).
     seite: AtomicUsize,
     /// Nach so vielen Seiten 503 (Netz bricht ab); `None` = nie.
     ausfall_nach: StdMutex<Option<usize>>,
-    lease_aufrufe: AtomicUsize,
+    pub(super) lease_aufrufe: AtomicUsize,
     /// Paket in Teilen: höchstens so viele Ereignisse, dazu `n` und
     /// `ereignisse_bis_n` wie badhub.
     kappen: StdMutex<Option<usize>>,
+    /// Paket S1: dieses Gerät ist Standby der laufenden Lease.
+    pub(super) standby_erlaubt: AtomicBool,
+    /// Paket S1: der Inhaber war gerade online (`409 inhaber_aktiv`).
+    pub(super) inhaber_aktiv: AtomicBool,
 }
 
 impl Badhub {
-    fn n(&self) -> u64 {
+    pub(super) fn n(&self) -> u64 {
         self.ereignisse
             .lock()
             .unwrap()
@@ -333,7 +337,7 @@ impl Badhub {
     }
 }
 
-async fn badhub_starten(b: Arc<Badhub>) -> String {
+pub(super) async fn badhub_starten(b: Arc<Badhub>) -> String {
     use axum::extract::State;
     use axum::http::{HeaderMap, StatusCode};
     use axum::response::IntoResponse;
@@ -395,6 +399,75 @@ async fn badhub_starten(b: Arc<Badhub>) -> String {
         *lease = None;
         Json(serde_json::json!({"epoche": body["epoche"], "n": b.n()})).into_response()
     }
+    async fn lease_lesen(State(b): State<Arc<Badhub>>, h: HeaderMap) -> axum::response::Response {
+        if !ok(&h) {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        let epoche = *b.epoche.lock().unwrap();
+        let du_bist = if b.lease.lock().unwrap().is_some() {
+            serde_json::json!("inhaber")
+        } else if b.standby_erlaubt.load(Ordering::SeqCst) {
+            serde_json::json!("standby")
+        } else {
+            serde_json::Value::Null
+        };
+        Json(
+            serde_json::json!({"lease": {"epoche": epoche, "geraet": "Halle 1 PC",
+            "standby": null, "du_bist": du_bist}, "n": b.n()}),
+        )
+        .into_response()
+    }
+    /// Standby-Upload wie badhub `LeaseHochladen::standby` (Paket S1).
+    fn standby_hochladen(b: &Badhub, body: &serde_json::Value) -> axum::response::Response {
+        if b.inhaber_aktiv.load(Ordering::SeqCst) {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"fehler": "inhaber_aktiv", "zuletzt_gesehen_vor_s": 30})),
+            )
+                .into_response();
+        }
+        let mut epoche = b.epoche.lock().unwrap();
+        if body["epoche"].as_u64() != Some(*epoche) {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"fehler": "epoche_veraltet", "epoche": *epoche})),
+            )
+                .into_response();
+        }
+        if !b.standby_erlaubt.load(Ordering::SeqCst) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"fehler": "kein_standby"})),
+            )
+                .into_response();
+        }
+        if body["basis_n"].as_u64().unwrap() > b.n() {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"fehler": "luecke", "erwartet_n": b.n()})),
+            )
+                .into_response();
+        }
+        let mut abgewiesen = 0u64;
+        for p in body["posten"].as_array().unwrap() {
+            let id = p["befehl"]["id"].as_str().unwrap().to_string();
+            if b.ids.lock().unwrap().contains(&id) {
+                continue;
+            }
+            let es: Vec<TurnierEreignis> = serde_json::from_value(p["ereignisse"].clone()).unwrap();
+            if abgewiesen > 0 || es.first().map(TurnierEreignis::n) != Some(b.n() + 1) {
+                abgewiesen += 1;
+                continue;
+            }
+            b.ids.lock().unwrap().insert(id);
+            b.ereignisse.lock().unwrap().extend(es);
+        }
+        *epoche += 1;
+        *b.lease.lock().unwrap() = Some(*epoche);
+        b.standby_erlaubt.store(false, Ordering::SeqCst);
+        Json(serde_json::json!({"bis_n": b.n(), "epoche": *epoche, "abgewiesen": abgewiesen}))
+            .into_response()
+    }
     async fn hochladen(
         State(b): State<Arc<Badhub>>,
         Json(body): Json<serde_json::Value>,
@@ -404,6 +477,9 @@ async fn badhub_starten(b: Arc<Badhub>) -> String {
         if b.fehler_503.load(Ordering::SeqCst) > 0 {
             b.fehler_503.fetch_sub(1, Ordering::SeqCst);
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
+        if body["standby"] == serde_json::json!(true) {
+            return standby_hochladen(&b, &body);
         }
         if *b.lease.lock().unwrap() != body["epoche"].as_u64() {
             return (
@@ -499,7 +575,7 @@ async fn badhub_starten(b: Arc<Badhub>) -> String {
         .route("/api/torg/v1/turnier/paket", axum::routing::get(paket))
         .route(
             "/api/torg/v1/turnier/lease",
-            post(lease_nehmen).delete(lease_zurueck),
+            post(lease_nehmen).delete(lease_zurueck).get(lease_lesen),
         )
         .route(
             "/api/torg/v1/turnier/ereignisse",
@@ -582,7 +658,7 @@ pub(super) fn mit<T>(z: &StdMutex<Option<KernQuelle>>, f: impl FnOnce(&mut KernQ
     f(z.lock().unwrap().as_mut().unwrap())
 }
 
-fn aufruf(spiel: u32, feld: &str) -> TurnierBefehl {
+pub(super) fn aufruf(spiel: u32, feld: &str) -> TurnierBefehl {
     TurnierBefehl::SpielAufrufen {
         id: String::new(),
         konkurrenz: "HE".into(),
@@ -812,13 +888,17 @@ async fn outbox_luecke_backoff_idempotenz_und_abweichung() {
                 .map(|p| vec![p.fuer_badhub()])
                 .unwrap()
         }),
+        false,
     )
     .await
     .unwrap();
     assert_eq!(r, api::HochladenAntwort::Luecke { erwartet_n: server });
     // badhub erwartet genau den bestätigten Stand: kein Fortschritt aus der
     // Antwort selbst → mit Backoff, kein Kreisen; der reguläre Schritt geht.
-    assert_eq!(mit(&z, |q| q.outbox_antwort(Ok(r))), OutboxSchritt::Spaeter);
+    assert_eq!(
+        mit(&z, |q| q.outbox_antwort(Ok(r), 0)),
+        OutboxSchritt::Spaeter
+    );
     assert_eq!(outbox_schritt(&z).await, OutboxSchritt::Weiter);
     assert_eq!(mit(&z, |q| q.n_lokal()), b.n());
 
@@ -929,7 +1009,7 @@ async fn zugang_abgelehnt_haelt_nur_an_und_verwirft_nichts() {
     mit(&z, |q| q.ausfuehren(vec![aufruf(1, "1")], AKTEUR_HALLE)).unwrap();
     // Eine 401/403 (Widerruf oder Firewall) ist keine Rückholung.
     assert_eq!(
-        mit(&z, |q| q.outbox_antwort(Err(ApiFehler::Zugang))),
+        mit(&z, |q| q.outbox_antwort(Err(ApiFehler::Zugang), 0)),
         OutboxSchritt::Angehalten
     );
     mit(&z, |q| {
@@ -1111,7 +1191,8 @@ async fn lan_slave_nur_mit_schluessel_und_seitenweise() {
     mit(&z, |q| q.ausfuehren(vec![aufruf(1, "1")], AKTEUR_HALLE)).unwrap();
     // Ohne Schlüssel am Master: niemand bekommt etwas.
     assert_eq!(
-        mit(&z, |q| slave::fuer_slave_aus(q, Some(UUID), 0).unwrap_err()),
+        mit(&z, |q| slave::fuer_slave_aus(q, Some(UUID), 0, false)
+            .unwrap_err()),
         403
     );
     let k = slave::neuer_schluessel().unwrap();
@@ -1119,20 +1200,24 @@ async fn lan_slave_nur_mit_schluessel_und_seitenweise() {
     let alle = mit(&z, |master| {
         // Die (öffentliche) UUID oder ein falscher Schlüssel reichen nicht.
         assert_eq!(
-            slave::fuer_slave_aus(master, Some(UUID), 0).unwrap_err(),
+            slave::fuer_slave_aus(master, Some(UUID), 0, false).unwrap_err(),
             403
         );
-        assert_eq!(slave::fuer_slave_aus(master, None, 0).unwrap_err(), 403);
+        assert_eq!(
+            slave::fuer_slave_aus(master, None, 0, false).unwrap_err(),
+            403
+        );
         let falsch = slave::neuer_schluessel().unwrap();
         assert_eq!(
-            slave::fuer_slave_aus(master, Some(&falsch), 0).unwrap_err(),
+            slave::fuer_slave_aus(master, Some(&falsch), 0, false).unwrap_err(),
             403
         );
         // Richtiger Schlüssel (in Anzeigeform): alles bzw. nur ab n.
-        let alle = slave::fuer_slave_aus(master, Some(&slave::schluessel_anzeige(&k)), 0).unwrap();
+        let alle =
+            slave::fuer_slave_aus(master, Some(&slave::schluessel_anzeige(&k)), 0, false).unwrap();
         assert_eq!(alle.n, master.n_lokal());
         assert_eq!(alle.ereignisse.len() as u64, master.n_lokal());
-        let rest = slave::fuer_slave_aus(master, Some(&k), master.n_lokal() - 1).unwrap();
+        let rest = slave::fuer_slave_aus(master, Some(&k), master.n_lokal() - 1, false).unwrap();
         assert_eq!(rest.ereignisse.len(), 1, "nur das eigene, nicht bestätigte");
         assert_eq!(master.ereignisse_ab(0, 3).len(), 3);
         alle

@@ -318,6 +318,21 @@ pub enum HochladenAntwort {
     EpocheVeraltet,
     /// `422 abweichung {posten, grund}`: badhub nimmt das Paket nicht an.
     Abweichung { grund: String },
+    /// Standby-Upload angenommen (badhub S1, `200 {bis_n, epoche,
+    /// abgewiesen}`): dieser PC hält jetzt die Lease unter `epoche`;
+    /// `abgewiesen` Posten liegen in badhubs Ablage.
+    StandbyUebernommen {
+        bis_n: u64,
+        epoche: u64,
+        abgewiesen: u64,
+    },
+    /// `403 kein_standby`: badhub kennt dieses Gerät nicht als Standby der
+    /// laufenden Lease.
+    KeinStandby,
+    /// `409 inhaber_aktiv {zuletzt_gesehen_vor_s}`: Der Hauptrechner war in
+    /// den letzten 120 s bei badhub — badhub nimmt die Übernahme noch nicht
+    /// an (nichts abgelegt, nichts geändert). Später erneut.
+    InhaberAktiv { vor_s: u64 },
 }
 
 /// Antwort auf `DELETE /turnier/lease`.
@@ -344,6 +359,8 @@ struct Fehlerkoerper {
     geraet: Option<String>,
     #[serde(default)]
     grund: Option<String>,
+    #[serde(default)]
+    zuletzt_gesehen_vor_s: Option<u64>,
 }
 
 async fn fehlerkoerper(antwort: reqwest::Response) -> Fehlerkoerper {
@@ -408,7 +425,35 @@ pub async fn lease_nehmen(
     Err(status_fehler(status))
 }
 
-/// `POST /turnier/ereignisse {epoche, basis_n, posten}`. `posten` in der
+/// Antwort von `GET /turnier/lease` (badhub S1, nur lesen).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct LeaseSicht {
+    #[serde(default)]
+    pub lease: Option<super::paket::PaketLease>,
+    #[serde(default)]
+    pub n: u64,
+}
+
+/// `GET /turnier/lease`: Inhaber, Standby und die eigene Rolle.
+pub async fn lease_lesen(basis: &str, token: &str) -> Result<LeaseSicht, ApiFehler> {
+    let antwort = client(Duration::from_secs(8))?
+        .get(format!("{basis}/turnier/lease"))
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(netz)?;
+    let status = antwort.status();
+    if !status.is_success() {
+        return Err(status_fehler(status));
+    }
+    let b = koerper(antwort).await?;
+    serde_json::from_slice(&b).map_err(|_| ApiFehler::Format("Lease".into()))
+}
+
+/// `POST /turnier/ereignisse {epoche, basis_n, posten}`. Mit `standby` (Paket S2)
+/// zusätzlich `"standby": true` — der erste Upload nach einer
+/// Standby-Übernahme ohne Netz. `posten` in der
 /// Form aus [`super::protokoll::Posten::fuer_badhub`].
 pub async fn hochladen(
     basis: &str,
@@ -416,13 +461,17 @@ pub async fn hochladen(
     epoche: u64,
     basis_n: u64,
     posten: &[serde_json::Value],
+    standby: bool,
 ) -> Result<HochladenAntwort, ApiFehler> {
-    let body = serde_json::to_vec(&serde_json::json!({
+    let mut anfrage = serde_json::json!({
         "epoche": epoche,
         "basis_n": basis_n,
         "posten": posten,
-    }))
-    .map_err(|e| ApiFehler::Format(e.to_string()))?;
+    });
+    if standby {
+        anfrage["standby"] = serde_json::Value::Bool(true);
+    }
+    let body = serde_json::to_vec(&anfrage).map_err(|e| ApiFehler::Format(e.to_string()))?;
     let antwort = client(Duration::from_secs(30))?
         .post(format!("{basis}/turnier/ereignisse"))
         .bearer_auth(token)
@@ -437,13 +486,36 @@ pub async fn hochladen(
         #[derive(Deserialize)]
         struct Ok_ {
             bis_n: u64,
+            #[serde(default)]
+            epoche: Option<u64>,
+            #[serde(default)]
+            abgewiesen: Option<u64>,
         }
         let b = koerper(antwort).await?;
         let o: Ok_ =
             serde_json::from_slice(&b).map_err(|_| ApiFehler::Format("Hochladen".into()))?;
+        if standby {
+            // Ohne neue Epoche wäre der Inhaberwechsel nicht belegt.
+            let epoche = o
+                .epoche
+                .ok_or_else(|| ApiFehler::Format("Hochladen ohne Epoche".into()))?;
+            return Ok(HochladenAntwort::StandbyUebernommen {
+                bis_n: o.bis_n,
+                epoche,
+                abgewiesen: o.abgewiesen.unwrap_or(0),
+            });
+        }
         return Ok(HochladenAntwort::Bestaetigt { bis_n: o.bis_n });
     }
     match status.as_u16() {
+        403 if standby => {
+            let f = fehlerkoerper(antwort).await;
+            if f.fehler == "kein_standby" {
+                Ok(HochladenAntwort::KeinStandby)
+            } else {
+                Err(ApiFehler::Zugang)
+            }
+        }
         409 => {
             let f = fehlerkoerper(antwort).await;
             match f.fehler.as_str() {
@@ -451,6 +523,9 @@ pub async fn hochladen(
                     erwartet_n: f.erwartet_n.unwrap_or(0),
                 }),
                 "epoche_veraltet" => Ok(HochladenAntwort::EpocheVeraltet),
+                "inhaber_aktiv" if standby => Ok(HochladenAntwort::InhaberAktiv {
+                    vor_s: f.zuletzt_gesehen_vor_s.unwrap_or(0),
+                }),
                 _ => Err(ApiFehler::Status(409)),
             }
         }

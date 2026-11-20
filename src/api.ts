@@ -12,6 +12,7 @@ import type {
   AppConfig,
   BadhubKopplung,
   BadhubAbgleich,
+  StandbyLage,
   BadhubTurnierConfig,
   CheckinView,
   CloudAnnounce,
@@ -83,6 +84,18 @@ export const badhubTurnierBeenden = (): Promise<string> =>
 /** „Steuerung wieder übernehmen" nach Rückgabe oder Rückholung. */
 export const badhubSteuerungUebernehmen = (): Promise<string> =>
   invoke("badhub_steuerung_uebernehmen");
+
+/** Lage des Standby-PCs (Paket S2), `null` am Hauptrechner oder bei BTP. */
+export const badhubStandbyLage = (): Promise<StandbyLage | null> =>
+  invoke("badhub_standby_lage");
+
+/** Notfall-Sicherung (`notfall-<uuid>.btsk`) einlesen. */
+export const badhubSicherungEinlesen = (pfad: string): Promise<string> =>
+  invoke("badhub_sicherung_einlesen", { pfad });
+
+/** „Hauptrechner ausgefallen – Turnier übernehmen“ (Paket S2). */
+export const badhubStandbyUebernehmen = (): Promise<string> =>
+  invoke("badhub_standby_uebernehmen");
 
 /** Slave-Schlüssel des Turnier-PCs für LAN-Ansage-Slaves (badhub-Turnier). */
 export const badhubSlaveSchluessel = (): Promise<string | null> =>

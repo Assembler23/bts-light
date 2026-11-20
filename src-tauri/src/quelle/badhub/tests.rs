@@ -160,6 +160,7 @@ pub(super) fn paket_fuer(log: Vec<TurnierEreignis>, n: u32, hallen: Vec<PaketHal
             name: "Wintercup".into(),
             beginn: Some("2026-12-06".into()),
             ende: None,
+            lease: None,
         },
         ereignisse: log,
         konkurrenzen: vec![PaketKonkurrenz {

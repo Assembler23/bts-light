@@ -21,6 +21,23 @@ export interface BadhubAbgleich {
   kann_uebernehmen: boolean;
   /** Roter Hinweis (Steuerung in badhub zurückgeholt, Abgleich angehalten). */
   rot: boolean;
+  /** Hinweis der Standby-Übernahme („k Eingaben abgewiesen“, „Hauptrechner war vor x s online“). */
+  warnung?: string;
+}
+
+/** Lage eines Standby-PCs (Paket S2). */
+export interface StandbyLage {
+  /** "standby" | "inhaber" | "keine" */
+  rolle: string;
+  hauptrechner: string;
+  epoche: number;
+  gespiegelt_n: number;
+  gespiegelt_ms: number;
+  /** "lan" | "sicherung" | "" */
+  quelle: string;
+  text: string;
+  kann_uebernehmen: boolean;
+  hinweis?: string;
 }
 
 /** Gekoppeltes badhub-Turnier (Rust `BadhubTurnierConfig`). Setzt nur die
@@ -841,6 +858,8 @@ export interface AppConfig {
   quelle?: QuelleArt;
   /** Vom Kern gepflegt (Kopplung), vom Assistenten nur gelesen. */
   badhub_turnier?: BadhubTurnierConfig;
+  /** Ordner der Notfall-Sicherung eines badhub-Turniers (leer = aus, Paket S2). */
+  badhub_notfall_ordner?: string;
   btp: BtpConfig;
   badhub: BadhubConfig;
   /** Diagnose-Logs automatisch an badhub.de hochladen. Bei einer

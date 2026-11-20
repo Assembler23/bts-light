@@ -2917,7 +2917,14 @@ async fn quelle_ereignisse_fuer_slave(
         .get(crate::quelle::badhub::slave::KOPF_SCHLUESSEL)
         .and_then(|v| v.to_str().ok());
     let ab = q.get("ab").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-    match crate::quelle::badhub::slave::fuer_slave(&ctx.app_config_arc(), schluessel, ab) {
+    // Standby (Paket S2): mit `posten=1` zusätzlich die Posten.
+    let mit_posten = q.get("posten").is_some_and(|v| v == "1");
+    match crate::quelle::badhub::slave::fuer_slave(
+        &ctx.app_config_arc(),
+        schluessel,
+        ab,
+        mit_posten,
+    ) {
         Ok(m) => ([(header::CACHE_CONTROL, "no-store")], Json(m)).into_response(),
         Err(code) => StatusCode::from_u16(code)
             .unwrap_or(StatusCode::NOT_FOUND)

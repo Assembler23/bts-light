@@ -365,6 +365,8 @@ export function SetupWizard({
   const [quelle, setQuelle] = useState<QuelleArt>(initialConfig.quelle ?? "btp");
   // LAN-Ansage-Slave eines badhub-Turniers: Schlüssel vom Turnier-PC (Paket L3).
   const [slaveSchluessel, setSlaveSchluessel] = useState("");
+  // Notfall-Sicherung eines badhub-Turniers (Paket S2): Vorgabe aus.
+  const [notfallOrdner, setNotfallOrdner] = useState(initialConfig.badhub_notfall_ordner ?? "");
   const [slaveSchluesselMeldung, setSlaveSchluesselMeldung] = useState<string | null>(null);
   const [kopplungsCode, setKopplungsCode] = useState("");
   const [geraetName, setGeraetName] = useState(
@@ -945,6 +947,7 @@ export function SetupWizard({
           );
     return {
       quelle,
+      badhub_notfall_ordner: notfallOrdner.trim(),
       btp: {
         host: host.trim(),
         port: Number(port) || 9901,
@@ -1653,8 +1656,9 @@ export function SetupWizard({
         </section>
 
         {/* Turnierquelle (Paket L2): BTP wie bisher oder ein in badhub
-            organisiertes Turnier. Ein Slave liest badhub-Turniere erst später. */}
-        {!slaveMode && (
+            organisiertes Turnier. Seit Paket S2 auch am Slave — ein Standby-PC
+            ist ein LAN-Slave des Turnier-PCs. */}
+        {(
           <section id="section-quelle" className="flex flex-col gap-3 scroll-mt-24">
             <SectionHeader icon={Database}>Turnierquelle</SectionHeader>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -1758,6 +1762,40 @@ export function SetupWizard({
                   <p className="flex items-start gap-1.5 text-sm text-rose-700">
                     <X size={16} className="mt-0.5 shrink-0" /> {kopplung.text}
                   </p>
+                )}
+                {slaveMode ? (
+                  <p className="text-xs text-slate-500">
+                    <strong>Standby:</strong> Ist dieser PC in badhub im Bereich Turniertag als
+                    Standby eingetragen, spiegelt er die Eingaben des Turnier-PCs und kann das
+                    Turnier übernehmen, wenn der Turnier-PC ausfällt (Knopf im Dashboard).
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    <Field
+                      label="Ordner für die Notfall-Sicherung (leer = aus)"
+                      value={notfallOrdner}
+                      onChange={setNotfallOrdner}
+                      placeholder="z. B. USB-Stick oder Netzlaufwerk"
+                    />
+                    <button
+                      onClick={() => {
+                        open({ directory: true, multiple: false })
+                          .then((o) => {
+                            if (typeof o === "string") setNotfallOrdner(o);
+                          })
+                          .catch(() => {});
+                      }}
+                      className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                                 text-slate-700 transition-colors hover:bg-slate-200"
+                    >
+                      Ordner wählen
+                    </button>
+                    <p className="text-xs text-slate-500">
+                      bts-light schreibt dort höchstens alle 30 Sekunden und beim Anhalten die Datei
+                      <code> notfall-&lt;Turnier&gt;.btsk</code> — nur Eingaben, keine Namen. Ein
+                      Standby-PC kann sie einlesen, wenn dieser PC ausfällt.
+                    </p>
+                  </div>
                 )}
               </div>
             )}

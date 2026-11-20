@@ -70,6 +70,7 @@ export function BadhubAbgleichPanel() {
         )}
         <span className={lage.rot ? "text-rose-800" : "text-slate-700"}>{lage.text}</span>
       </div>
+      {lage.warnung && <p className="text-sm text-amber-700">{lage.warnung}</p>}
       <div className="flex flex-wrap gap-2">
         {lage.zustand !== "zurueckgegeben" && lage.zustand !== "entzogen" && (
           <button

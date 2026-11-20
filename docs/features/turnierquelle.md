@@ -8,6 +8,7 @@
 > (badhub kappt auf 2000 Ereignisse, bts-light lädt seitenweise nach).
 > v0.9.452: Turnierkern **0.14.0** (gleich badhub): Rückzug während des Turniers (Kern 0.13.0) als Kernbefehl aus badhub
 > und als Aktion im TL-Web, Zählweise je Spiel (Kern 0.14.0) in der Abbildung.
+> v0.9.453: Standby-Übernahme ohne Netz (Paket S2): Spiegeln der Posten im LAN, Notfall-Sicherung, Übernehmen, Outbox mit `standby: true`.
 > Ziel und Gesamtplan: badhub `docs/features/bts_light_steuerung.md`, Entscheidung badhub ADR-0084 (bts-light hält am
 > Turniertag die Lease eines badhub-Turniers).
 
@@ -227,6 +228,26 @@ Antwort `ok`, `kern_abgelehnt` (+ `ablehnung`), `not_allowed` (keine Lease) oder
 - B2 schickt Kernbefehle mit `op_id` = Befehls-ID; `jetzt` darf fehlen. Erwartete Antworten wie oben; `host_offline`
   bzw. Zeitüberschreitung → Hinweis „Halle nicht erreichbar“.
 - Befehle aus bts-light tragen kein Feld `geraet`: Wer in der Halle gehandelt hat, steht nur lokal im Protokoll.
+
+## Standby-Übernahme ohne Netz (v0.9.453, Paket S2)
+
+Spec: badhub `bts_light_steuerung.md` („Standby-Übernahme ohne Netz → bts-light (Paket S2)“), ADR-0084 Nachtrag.
+Gegenseite badhub S1 (PR #1401).
+
+| Was | Wo |
+|---|---|
+| Rolle | `paket.turnier.lease` (`PaketLease {epoche, geraet, standby, du_bist}`) beim Koppeln und im 60-s-Paket, am Slave zusätzlich `GET /turnier/lease` höchstens einmal je Minute im Hintergrund (`slave::rolle_auffrischen`); abgelegt in `rolle.json`. Standby = `du_bist: "standby"` |
+| Spiegeln | Standby läuft als LAN-Slave: `GET :8088/quelle/ereignisse?ab=<spiegel_n>&posten=1` → zusätzlich `posten` (nicht bestätigte Posten des Masters, Befehl + Ereignisse), `bestaetigt_n`, `epoche`. Ohne `posten=1` bleibt die Antwort Byte für Byte wie bisher (älterer Slave), ein älterer Master liefert keine Posten → Hinweis, Rückfall auf die Ansage-Slave-Anzeige. Bestätigtes (≤ `bestaetigt_n`) wandert lückenlos ins eigene Paket, der Rest nach `spiegel.jsonl`; Stand in `spiegel.json`. Anzeige `StandbyLage` („Standby für <Hauptrechner>, gespiegelt bis n = …, vor x s“), Dashboard `StandbyPanel` |
+| Notfall-Sicherung | `config.badhub_notfall_ordner` (Vorgabe leer = aus, Assistent). Task `notfall_schleife` am Hauptrechner (5-s-Prüfung, höchstens alle 30 s nach Änderung), beim Anhalten `stop_sync_kern` → `notfall_sichern(…, true)`. Datei `notfall-<uuid>.btsk`: `{format: "bts-light-notfall", version: 1, uuid, epoche, n, geschrieben_ms, posten: [{befehl, ereignisse}]}` — keine Namen, keine Tokens, kein Akteur; atomar über `schreiben_privat` (temp + rename). Einlesen `sicherung_lesen` (Größe ≤ 64 MiB, Format, Version, UUID, lückenlos, `n`) + `KernQuelle::sicherung_einlesen` (gleiches Turnier, Anschluss an das eigene Paket, neuer als der Spiegel; alter Spiegel nach `verworfen-<ms>.jsonl`) |
+| Übernehmen | Tauri `badhub_standby_uebernehmen` (Desktop, Rückfrage mit Warnung) → `KernQuelle::als_standby_uebernehmen` (nur mit bestätigter Standby-Rolle und bekannter Epoche): Spiegel → `protokoll.jsonl`, `lease.json {epoche: bisherige, bis_n: Paket-n, standby: true}`; dann `slave_mode = false` und Neustart der Übertragung — Tablet-Server, TL-Web, Auto-Vergabe wie am Hauptrechner |
+| Outbox | Erster Upload mit `standby: true` (`OutboxAuftrag.standby`); bis dahin kein Ereignis-/Paket-Abruf und kein `POST turnier/lease` (badhub trägt noch die Ereignisse des Hauptrechners). Antworten: `200 {bis_n, epoche, abgewiesen}` → neue Epoche; passt der Stand (nichts abgewiesen, `bis_n` = eigener Stand bzw. darüber bei vollständig gesendetem Protokoll → Rest holt der Abgleich), normal weiter, sonst `lease.neu_laden` (Eingaben gesperrt, `neu_laden_in`: Paket frisch, Nicht-Bestätigtes nach `verworfen-<ms>.jsonl`). Danach Relay-Angaben per `POST turnier/lease`. `403 kein_standby` → angehalten (rot). `409 inhaber_aktiv {zuletzt_gesehen_vor_s}` → Posten behalten, Backoff, Hinweis „Hauptrechner war vor x s noch online …“. `409 epoche_veraltet` → `GET turnier/lease`: `du_bist: inhaber` (Antwort ging verloren) → neue Epoche + neu laden, sonst entzogen. `Abgleich.warnung` zeigt `abgewiesen > 0` im Hauptfenster und im TL-Web |
+| Tests | `tests_standby.rs`: Spiegeln (Befehl + Ereignisse, Bestätigtes ins Paket, älterer Master), Antwort ohne `posten=1` unverändert, Sicherung schreiben/einlesen (keine Namen/Tokens, abgeschnitten, falsches Turnier, Lücke, nichts Neues, fremde Datei), Übernahme + erster Upload (Relay nachmelden, alter Hauptrechner → `epoche_veraltet`), ohne Rolle kein Übernehmen, übersprungen, teilweise abgewiesen + Neuladen, `kein_standby`, `inhaber_aktiv`, `epoche_veraltet` (verlorene Antwort / wirklich veraltet), Rolle aus `GET /turnier/lease` |
+
+**Grenzen:** Ohne LAN-Spiegel und ohne Sicherung fehlen die Eingaben seit dem letzten Upload des Hauptrechners (Papierzettel).
+Tablets und Monitore koppeln nach der Übernahme neu. Mehr als 200 Posten bei der Übernahme: Wird im ersten Teil etwas
+abgewiesen, wandern auch die noch nicht gesendeten Posten in die Sicherungsdatei (nicht in badhubs Ablage).
+
+**Datenformat (ADR 0101), neu entschieden:** siehe `release/datenformat.json` (v0.9.453) — Grenze bleibt.
 
 ## Rückzug während des Turniers (v0.9.452, Kern 0.13.0)
 
