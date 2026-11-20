@@ -149,7 +149,9 @@ zur Generalprobe E1 nicht produktiv.
   `tournament_uuid` bleibt unangetastet und gilt bei BTP unverändert. Der Assistent zeigt die GUID statt des Felds
   und verlangt es nicht. Anlass: Köpi-Cup 2027 auf Test lief unter der GUID eines älteren Testturniers, die noch im
   Feld stand — der Stand landete auf dessen Turnierseite. Ändert sich die turnier.de-GUID in badhub nach der
-  Kopplung, gilt sie erst nach erneutem Koppeln.
+  Kopplung, gilt sie erst nach erneutem Koppeln. Die Oberfläche liest dieselbe GUID über `wirksameTurnierGuid()`
+  (`src/tournamentGuid.ts`). Bei Quelle badhub gibt es keine TP-Datei: `tp_datei_fuer_turnier` liefert `None`, die
+  TP-Automatik (`tp_finden::entscheide`) bleibt still.
 
 ## Paket L3 (umgesetzt, schreibend)
 
