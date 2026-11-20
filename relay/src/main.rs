@@ -1714,7 +1714,10 @@ fn router(broker: Broker, tl_an: bool) -> Router {
     let app = if tl_an {
         app.route("/tl", get(tl_page))
             .route("/tl/api/state", get(tl_state_route))
-            .route("/tl/api/command", post(tl_command_route))
+            .route(
+                "/tl/api/command",
+                post(tl_command_route).layer(DefaultBodyLimit::max(TL_COMMAND_BODY_MAX)),
+            )
             // Punktverlauf on-demand (Spec punktverlauf-graph, AK-5) —
             // gleicher Pfad wie am LAN-Server, damit tl.html in beiden
             // Modi identisch abruft.
@@ -6665,6 +6668,13 @@ async fn tl_timeline_route(
 /// Höchstgröße des Rumpfs einer Suchanfrage.
 const TL_SEARCH_BODY_MAX: usize = 1024;
 
+/// Obergrenze eines TL-Kommandos (Security-Review L3: `KernBefehl` trägt
+/// rohes JSON). Die größte bestehende Aktion ist `ProfileSave`; selbst ein
+/// Profil mit 64 Panels und langen Namen bleibt weit darunter
+/// (`tl_kommando_grenze_traegt_jede_bestehende_aktion`). Ein Kernbefehl ist
+/// am Turnier-PC zusätzlich auf 4 KiB begrenzt.
+const TL_COMMAND_BODY_MAX: usize = 32 * 1024;
+
 /// Rumpf einer Suchanfrage.
 #[derive(serde::Deserialize)]
 struct TlSearchBody {
@@ -6959,27 +6969,6 @@ async fn tl_command_route(
         }
         TlAccess::Unknown => return (StatusCode::UNAUTHORIZED, "Kein Zugang").into_response(),
     };
-    {
-        let mut map = broker.namespaces.lock().await;
-        let Some(namespace) = map.get_mut(&ns) else {
-            return (
-                StatusCode::OK,
-                [(header::CACHE_CONTROL, "no-store")],
-                Json(TlResponse::err(
-                    TlErrorCode::HostOffline,
-                    "Der Turnier-PC ist nicht mit dem Relay verbunden.",
-                )),
-            )
-                .into_response();
-        };
-        if !claim_tl_slot(namespace, &token, now) {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
-            )
-                .into_response();
-        }
-    }
     // Kernbefehle (Paket L3) nur vom Kern-Zugang, und der nur Kernbefehle.
     // Der Turnier-PC prüft dasselbe noch einmal; hier fällt es schon vor
     // dem Weiterleiten auf und belegt keinen Platz beim Host.
@@ -6993,6 +6982,29 @@ async fn tl_command_route(
             )),
         )
             .into_response();
+    }
+    {
+        let mut map = broker.namespaces.lock().await;
+        let Some(namespace) = map.get_mut(&ns) else {
+            return (
+                StatusCode::OK,
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(TlResponse::err(
+                    TlErrorCode::HostOffline,
+                    "Der Turnier-PC ist nicht mit dem Relay verbunden.",
+                )),
+            )
+                .into_response();
+        };
+        // Der Kern-Zugang (badhub) belegt keinen der Geräteplätze: Er ist
+        // kein Browser der Turnierleitung und darf sie nicht verdrängen.
+        if device_id != relay_proto::TL_GERAET_KERN && !claim_tl_slot(namespace, &token, now) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Zu viele Turnierleitungs-Geräte in diesem Turnier.",
+            )
+                .into_response();
+        }
     }
     let op_id: String = body.op_id.chars().take(128).collect();
     let antwort = tl_forward(&broker, &ns, device_id, op_id, body.view_rev, body.action).await;
@@ -11346,6 +11358,65 @@ mod tests {
         TlAction::KernBefehl {
             befehl: serde_json::json!({"art": "aufruf_zuruecknehmen", "id": "bh-1", "konkurrenz": "HE", "spiel": 1}),
         }
+    }
+
+    #[test]
+    fn tl_kommando_grenze_traegt_jede_bestehende_aktion() {
+        // Größte bestehende Aktion: ein Profil mit vielen Panels und langen Namen.
+        let profil = relay_proto::TlPanelProfileWire {
+            id: "p".repeat(64),
+            name: "Ä".repeat(100),
+            panels: (0..64)
+                .map(|i| relay_proto::TlPanelSettingWire {
+                    key: format!("panel-mit-langem-namen-{i:03}"),
+                    visible: true,
+                    height_fr: 1.25,
+                    collapsed: false,
+                    column: 2,
+                })
+                .collect(),
+            column_widths: vec![1.0, 2.0, 3.0],
+            ..Default::default()
+        };
+        let body = serde_json::json!({
+            "opId": "o".repeat(128),
+            "viewRev": u64::MAX,
+            "action": TlAction::ProfileSave { profile: profil },
+        });
+        let len = serde_json::to_vec(&body).unwrap().len();
+        assert!(len * 2 < TL_COMMAND_BODY_MAX, "{len} Byte");
+    }
+
+    #[tokio::test]
+    async fn der_kern_zugang_belegt_keinen_geraeteplatz() {
+        let (broker, mut host_rx, _host) = broker_mit_kern_zugang().await;
+        {
+            // Alle Plätze von anderen Geräten belegt.
+            let mut map = broker.namespaces.lock().await;
+            let ns = map.get_mut("ns1").unwrap();
+            for i in 0..MAX_TL_DEVICES {
+                ns.tl_devices.insert(format!("anderer-{i}"), now_ms());
+            }
+        }
+        let b = broker.clone();
+        let auftrag = tokio::spawn(async move {
+            tl_command_route(
+                State(b),
+                bearer_kopf("token-kern"),
+                Json(TlCommandBody {
+                    op_id: "bh-1".into(),
+                    view_rev: 0,
+                    action: kern_aktion(),
+                }),
+            )
+            .await
+            .into_response()
+        });
+        let msg = tokio::time::timeout(Duration::from_secs(2), host_rx.recv())
+            .await
+            .expect("Kernbefehl kam trotz voller Plätze nicht an");
+        assert!(msg.is_some());
+        auftrag.abort();
     }
 
     #[test]

@@ -198,6 +198,10 @@ gekoppeltem Turnier.
   Namen und Felder), übernimmt aber keine Steuerung: Er liest den Stand vom
   Turnier-PC, dessen Adresse im Feld **Adresse des Turnier-PCs (Master)** steht.
   <!-- pruef: "Adresse des Turnier-PCs (Master)" in src/pages/SetupWizard.tsx -->
+  Dazu gehört der **Slave-Schlüssel**: Er steht am Turnier-PC auf der Seite Status im Kasten „badhub-Abgleich“ und
+  wird am Slave eingetragen und mit **Schlüssel übernehmen** gespeichert. Ohne ihn gibt der Turnier-PC keinen Stand
+  heraus.
+  <!-- pruef: "Schlüssel übernehmen" in src/pages/SetupWizard.tsx -->
 
 ### 2 · BTP-Verbindung
 

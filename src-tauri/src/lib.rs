@@ -132,6 +132,8 @@ pub fn run() {
             commands::badhub_abgleich,
             commands::badhub_turnier_beenden,
             commands::badhub_steuerung_uebernehmen,
+            commands::badhub_slave_schluessel,
+            commands::badhub_slave_schluessel_setzen,
             commands::badhub_turnier_info,
             commands::azure_tts_speak,
             commands::tts_dienste_pruefen,

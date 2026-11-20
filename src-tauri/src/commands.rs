@@ -1286,6 +1286,37 @@ pub async fn badhub_steuerung_uebernehmen() -> Result<String, String> {
     crate::quelle::badhub::steuerung_uebernehmen().await
 }
 
+/// Slave-Schlüssel des Turnier-PCs (Anzeigeform) für LAN-Ansage-Slaves eines
+/// badhub-Turniers; `None` bei BTP oder ohne geladenes Turnier.
+#[tauri::command]
+pub fn badhub_slave_schluessel(state: State<'_, AppState>) -> Option<String> {
+    let badhub = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.quelle == crate::config::QuelleArt::Badhub && !cfg.slave_mode
+    };
+    badhub
+        .then(crate::quelle::badhub::slave_schluessel_anzeige)
+        .flatten()
+}
+
+/// Slave-Schlüssel am Ansage-Slave eintragen (vom Turnier-PC abgelesen).
+#[tauri::command]
+pub fn badhub_slave_schluessel_setzen(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    schluessel: String,
+) -> Result<(), String> {
+    let uuid = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.badhub_turnier.uuid.clone()
+    };
+    if uuid.trim().is_empty() {
+        return Err("Erst diesen PC mit einem Kopplungscode koppeln.".into());
+    }
+    let daten = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::quelle::badhub::slave_schluessel_setzen(&daten, &uuid, &schluessel)
+}
+
 /// Testet die Verbindung zu BTP und liefert bei Erfolg den Turniernamen.
 #[tauri::command]
 pub async fn test_btp(host: String, port: u16, password: Option<String>) -> Result<String, String> {

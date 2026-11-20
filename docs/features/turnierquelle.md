@@ -106,7 +106,7 @@ nicht die eingestellte Quelle.
 | `write_result_to_btp`, `write_result_settled`, `write_courts_to_btp`, `write_officials_to_btp`, `write_highlight_to_btp` (Tablet, TL-Web, Desktop, Auto-Vergabe, Farben, Schiedsrichter, Nachschub-Flush) | Weichen in `quelle/mod.rs`: seit L3 Kernbefehle (siehe unten), kein BTP-Kontakt, kein Schreib-Gate, keine `eigene_writes`-Merker; Zeilenfarbe nur lokal (`Ok`) |
 | Nachschub-Queue (`btp-retry.json`) | eingereiht wird nur, wenn `quelle::nachschub_moeglich` (Tablet, TL-Web, Desktop-Ergebnis/Walkover/Disqualifikation); bei badhub geht die Ablehnung des Kerns zurück, das Tablet behält sein Ergebnis |
 | `quelle::stand` (Sync-Takt) | badhub-Zweig, kein BTP-Abruf; Fehler als `SyncOutcome::QuelleFehler` („badhub-Turnier: …“, nie „BTP nicht erreichbar“) |
-| LAN-/Ansage-Slave (liest sonst BTP direkt) | seit L3 `badhub::slave`: Ereignisse vom Master (`GET :8088/quelle/ereignisse`, Kopf `X-Bts-Turnier`), gefaltet mit dem eigenen Paket; kein BTP, keine Lease |
+| LAN-/Ansage-Slave (liest sonst BTP direkt) | seit L3 `badhub::slave`: Ereignisse vom Master (`GET :8088/quelle/ereignisse?ab=<n>`, höchstens 500 je Antwort), gefaltet mit dem eigenen Paket; kein BTP, keine Lease. Zugang über den **Slave-Schlüssel** (16 Zufallsbytes, vom Master beim Start erzeugt und im Dashboard gezeigt, am Slave in den Einstellungen eingetragen, beide verschlüsselt in `slave.bin`, Vergleich in konstanter Zeit, Kopf `X-Bts-Slave`) — die Turnier-UUID allein ist öffentlich |
 | Auto-Vergabe, Schiedsrichter-Abgleich | schreiben nur, wenn `quelle::schreiben_moeglich` (BTP: immer; badhub: Lease) — keine Warnung je Takt ohne Lease |
 | TL-Antwort bei Schreibfehler | `quelle::schreib_ablehnung`: BTP wortgleich „BTP hat abgelehnt: …“ (`btp_error`), badhub die Kern-Ablehnung (`kern_abgelehnt`) |
 | TP-Takt, TP-Datei-Suche (`tp_takt.rs`, `tp_finden`) | starten nicht (`QuellenStart.btp_dienste`) |
@@ -123,7 +123,7 @@ Neue gespeicherte Variante `quelle = "badhub"`, neuer Block `badhub_turnier`, ne
 ältere Version. Ein Rückweg während eines badhub-Turniers schaltet die Halle auf BTP — bewusst in Kauf genommen, weil L2
 nur liest und nichts verloren geht.
 
-**L3 (v0.9.450), neu entschieden:** neue Dateien `protokoll.jsonl`, `lease.json`, `relay.bin`, `verworfen-*.jsonl`;
+**L3 (v0.9.450), neu entschieden:** neue Dateien `protokoll.jsonl`, `lease.json`, `relay.bin`, `slave.bin`, `verworfen-*.jsonl`;
 `paket.json` optional mit `turnier.ende` und `schiedsrichter[].person`. Die Grenze **bleibt**: `config.json` ist
 unverändert, BTP-Installationen haben keine dieser Dateien, für BTP-Turniere bleibt der Rückweg fachlich richtig — und
 „BTP unverändert“ verbietet, ihnen den Rückweg zu nehmen. In Kauf genommen: Ein Rückweg auf v0.9.449 **während** eines
@@ -200,7 +200,7 @@ Zeiten: lokale Wandzeit des Hallen-PCs `JJJJ-MM-TTTHH:MM:SS` (`schreiben::wandze
 
 ### Eingaben aus badhub über das Relay
 
-`TlAction::KernBefehl { befehl }` vom Kern-Zugang `badhub-kern` (Wire-Ebene: [cloud-relay.md](../cloud-relay.md),
+`TlAction::KernBefehl { befehl }` (höchstens 4096 Byte, 5 Sätze, 64 Zeichen je Angabe) vom Kern-Zugang `badhub-kern` (Wire-Ebene: [cloud-relay.md](../cloud-relay.md),
 „Kernbefehle aus badhub“). `KernQuelle::befehl_von_badhub`: nur die sechs Durchführungs-Befehle, Kennung wie oben
 geprüft, `jetzt` setzt der Knoten; danach derselbe Weg wie eine Eingabe in der Halle (Akteur `badhub` im Protokoll).
 Antwort `ok`, `kern_abgelehnt` (+ `ablehnung`), `not_allowed` (keine Lease) oder `unsupported`.

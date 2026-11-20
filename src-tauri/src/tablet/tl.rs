@@ -42,6 +42,9 @@ pub fn authorize(config: &AppConfig, token: &str) -> Option<crate::config::TlDev
         .tl_web
         .devices
         .iter()
+        // Die Kennung des Kern-Zugangs ist reserviert: Ein (von Hand
+        // eingetragenes) Gerät dieses Namens bekommt keinen Zugang.
+        .filter(|d| d.id != relay_proto::TL_GERAET_KERN)
         .find(|d| d.token == token)
         .cloned()
 }
@@ -78,8 +81,12 @@ pub(crate) fn device_by_id(config: &AppConfig, device_id: &str) -> Option<crate:
 /// ausdrücklich „kein Gerät zugelassen".
 pub(crate) fn auth_devices(config: &AppConfig) -> Vec<relay_proto::TlAuthDevice> {
     let mut geraete = auth_devices_tl_web(config);
-    // Kern-Zugang für badhub (Paket L3) — bei BTP nie vorhanden.
-    if let Some(k) = kern_zugang(config) {
+    // Kern-Zugang für badhub (Paket L3) — bei BTP nie vorhanden. Nur, wenn
+    // noch Platz ist: Eine zu lange Liste verwürfe der Relay ganz, samt jedem
+    // Widerruf eines TL-Geräts.
+    if let Some(k) =
+        kern_zugang(config).filter(|_| geraete.len() < relay_proto::MAX_TL_DEVICES_MIRRORED)
+    {
         geraete.push(relay_proto::TlAuthDevice {
             id: k.id,
             token: k.token,
@@ -120,7 +127,7 @@ fn auth_devices_tl_web(config: &AppConfig) -> Vec<relay_proto::TlAuthDevice> {
         .tl_web
         .devices
         .iter()
-        .filter(|d| !d.token.trim().is_empty())
+        .filter(|d| !d.token.trim().is_empty() && d.id != relay_proto::TL_GERAET_KERN)
         .map(|d| relay_proto::TlAuthDevice {
             id: d.id.clone(),
             token: d.token.clone(),

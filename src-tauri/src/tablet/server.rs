@@ -2911,11 +2911,13 @@ fn tl_device(ctx: &ServerCtx, headers: &axum::http::HeaderMap) -> Option<crate::
 async fn quelle_ereignisse_fuer_slave(
     State(ctx): State<Arc<ServerCtx>>,
     headers: axum::http::HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> axum::response::Response {
-    let uuid = headers
-        .get(crate::quelle::badhub::slave::KOPF_TURNIER)
+    let schluessel = headers
+        .get(crate::quelle::badhub::slave::KOPF_SCHLUESSEL)
         .and_then(|v| v.to_str().ok());
-    match crate::quelle::badhub::slave::fuer_slave(&ctx.app_config_arc(), uuid) {
+    let ab = q.get("ab").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    match crate::quelle::badhub::slave::fuer_slave(&ctx.app_config_arc(), schluessel, ab) {
         Ok(m) => ([(header::CACHE_CONTROL, "no-store")], Json(m)).into_response(),
         Err(code) => StatusCode::from_u16(code)
             .unwrap_or(StatusCode::NOT_FOUND)
@@ -7303,6 +7305,17 @@ mod tests {
         assert!(crate::tablet::tl::auth_devices(&cfg)
             .iter()
             .all(|d| d.id != relay_proto::TL_GERAET_KERN));
+
+        // Ein von Hand eingetragenes Gerät mit der reservierten Kennung
+        // bekommt keinen Zugang — weder im LAN noch beim Relay.
+        let (ctx2, _s2, _d2) = make_tl_ctx(vec![crate::config::TlDevice {
+            id: relay_proto::TL_GERAET_KERN.into(),
+            token: "tok-handarbeit".into(),
+            ..tl_device("x")
+        }]);
+        let cfg2 = ctx2.app_config();
+        assert!(crate::tablet::tl::authorize(&cfg2, "tok-handarbeit").is_none());
+        assert!(crate::tablet::tl::auth_devices(&cfg2).is_empty());
     }
 
     #[tokio::test]

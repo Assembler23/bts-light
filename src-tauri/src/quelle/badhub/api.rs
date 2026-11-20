@@ -50,7 +50,7 @@ impl std::fmt::Display for ApiFehler {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 struct KoppelnAnfrage<'a> {
     code: &'a str,
     install_id: &'a str,
@@ -58,7 +58,7 @@ struct KoppelnAnfrage<'a> {
 }
 
 /// Antwort auf `POST /koppeln`.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 pub struct KopplungAntwort {
     pub token: String,
     pub turnier: KopplungTurnier,
@@ -230,7 +230,7 @@ pub async fn ereignisse(
 
 /// Relay-Angaben beim Nehmen der Lease: über diesen Namespace und Zugang
 /// leitet badhub Eingaben aus dem Bereich „Spiele“ an diesen PC.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct RelayAngaben {
     pub ns: String,
     pub tl_token: String,
@@ -447,4 +447,47 @@ pub async fn lease_zurueckgeben(
         };
     }
     Err(status_fehler(status))
+}
+
+// Debug von Hand: Zugänge erscheinen nie im Klartext (Security-Review L3).
+impl std::fmt::Debug for KopplungAntwort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KopplungAntwort")
+            .field("token", &"***")
+            .field("turnier", &self.turnier)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for RelayAngaben {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RelayAngaben")
+            .field("ns", &self.ns)
+            .field("tl_token", &"***")
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+
+    #[test]
+    fn debug_zeigt_keine_zugaenge() {
+        let r = RelayAngaben {
+            ns: "ns-1".into(),
+            tl_token: "geheim-relay".into(),
+        };
+        let k = KopplungAntwort {
+            token: "geheim-geraet".into(),
+            turnier: KopplungTurnier {
+                id: 1,
+                uuid: "u".into(),
+                name: "n".into(),
+            },
+        };
+        let text = format!("{r:?} {k:?}");
+        assert!(!text.contains("geheim"), "{text}");
+        assert!(text.contains("ns-1"));
+    }
 }

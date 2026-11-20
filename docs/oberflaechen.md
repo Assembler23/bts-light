@@ -153,6 +153,10 @@ Darunter zwei Knöpfe:
   bleiben in einer Datei im Turnierordner liegen).
   <!-- pruef: "Steuerung wieder übernehmen" in src/components/BadhubAbgleichPanel.tsx -->
 
+Darunter steht der **Slave-Schlüssel** für einen Ansage-Slave im Hallennetz
+(siehe [Einstellungen](einstellungen.md)).
+<!-- pruef: "Slave-Schlüssel für einen Ansage-Slave im Hallennetz" in src/components/BadhubAbgleichPanel.tsx -->
+
 Bei einem badhub-Turnier sagt die Statuszeile nie „BTP nicht erreichbar“,
 sondern **„badhub-Turnier: …“** mit dem Grund.
 <!-- pruef: "badhub-Turnier: {e}" in src-tauri/src/commands.rs -->

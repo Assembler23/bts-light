@@ -309,6 +309,48 @@ pub const ERLAUBTE_ARTEN: [&str; 6] = [
     "gruppenrang_entscheiden",
 ];
 
+/// Höchstgröße eines Kernbefehls aus badhub (serialisiert, Security-Review L3).
+pub const BEFEHL_MAX_BYTES: usize = 4096;
+/// Höchstzahl der Sätze in `ergebnis_melden`.
+pub const SAETZE_MAX: usize = 5;
+/// Höchstlänge jeder Zeichenkette im Befehl (Konkurrenz, Feld, Kennung, Zeit).
+pub const TEXT_MAX: usize = 64;
+
+/// Begrenzt einen rohen Kernbefehl aus badhub, bevor er gelesen wird:
+/// höchstens [`BEFEHL_MAX_BYTES`], höchstens [`SAETZE_MAX`] Sätze, jede
+/// Zeichenkette höchstens [`TEXT_MAX`] Zeichen.
+pub fn befehl_begrenzt(roh: &serde_json::Value) -> Result<(), String> {
+    let laenge = serde_json::to_vec(roh)
+        .map(|v| v.len())
+        .unwrap_or(usize::MAX);
+    if laenge > BEFEHL_MAX_BYTES {
+        return Err(format!(
+            "Befehl zu groß ({laenge} Byte, höchstens {BEFEHL_MAX_BYTES})."
+        ));
+    }
+    if roh
+        .get("saetze")
+        .and_then(|v| v.as_array())
+        .is_some_and(|a| a.len() > SAETZE_MAX)
+    {
+        return Err(format!("Höchstens {SAETZE_MAX} Sätze."));
+    }
+    fn texte_ok(v: &serde_json::Value) -> bool {
+        match v {
+            serde_json::Value::String(t) => t.chars().count() <= TEXT_MAX,
+            serde_json::Value::Array(a) => a.iter().all(texte_ok),
+            serde_json::Value::Object(o) => o
+                .iter()
+                .all(|(k, w)| k.chars().count() <= TEXT_MAX && texte_ok(w)),
+            _ => true,
+        }
+    }
+    if !texte_ok(roh) {
+        return Err(format!("Angaben im Befehl höchstens {TEXT_MAX} Zeichen."));
+    }
+    Ok(())
+}
+
 /// Ist die Befehls-ID für badhub zulässig? (`[A-Za-z0-9-]{1,64}`, wie
 /// badhub `LeaseHochladen::postenGueltig`.)
 pub fn id_gueltig(id: &str) -> bool {

@@ -656,6 +656,11 @@ async fn kernbefehl_aus_badhub_idempotent_jetzt_vom_knoten_und_nur_spielbefehle(
         q.befehl_von_badhub(serde_json::json!({"art": "zeitplan_rechnen", "id": "bh-78"}))
     });
     assert!(matches!(e, Err(SchreibFehler::Ungueltig(_))), "{e:?}");
+    // Zu großer Befehl: abgelehnt, bevor er gelesen wird.
+    let e = mit(&z, |q| {
+        q.befehl_von_badhub(serde_json::json!({"art": "spiel_aufrufen", "id": "bh-81", "konkurrenz": "HE", "spiel": 1, "feld": "x".repeat(65)}))
+    });
+    assert!(matches!(e, Err(SchreibFehler::Ungueltig(_))), "{e:?}");
     // Kennung, die badhub nicht annähme.
     let e = mit(&z, |q| {
         q.befehl_von_badhub(serde_json::json!({"art": "aufruf_zuruecknehmen", "id": "bh_79", "konkurrenz": "HE", "spiel": 1}))
@@ -669,6 +674,23 @@ async fn kernbefehl_aus_badhub_idempotent_jetzt_vom_knoten_und_nur_spielbefehle(
         matches!(&e, Err(SchreibFehler::Kern { grund, .. }) if grund["grund"] == "feld_belegt"),
         "{e:?}"
     );
+}
+
+#[test]
+fn kernbefehl_aus_badhub_ist_begrenzt() {
+    let ok = serde_json::json!({"art": "ergebnis_melden", "id": "bh-1", "konkurrenz": "HE", "spiel": 1,
+        "saetze": [[21, 10], [10, 21], [21, 19], [1, 1], [2, 2]]});
+    assert!(schreiben::befehl_begrenzt(&ok).is_ok());
+    let sechs = serde_json::json!({"art": "ergebnis_melden", "id": "bh-1", "konkurrenz": "HE", "spiel": 1,
+        "saetze": [[1, 1], [1, 1], [1, 1], [1, 1], [1, 1], [1, 1]]});
+    assert!(schreiben::befehl_begrenzt(&sechs).is_err());
+    let lang = serde_json::json!({"art": "spiel_aufrufen", "id": "bh-1", "konkurrenz": "K".repeat(65), "spiel": 1});
+    assert!(schreiben::befehl_begrenzt(&lang).is_err());
+    let feld = serde_json::json!({"art": "spiel_aufrufen", "id": "bh-1", "konkurrenz": "HE", "feld": "F".repeat(65)});
+    assert!(schreiben::befehl_begrenzt(&feld).is_err());
+    let gross = serde_json::json!({"art": "gruppenrang_entscheiden", "id": "bh-1", "konkurrenz": "HE",
+        "gruppe": 1, "reihenfolge": (0..2000).collect::<Vec<u32>>()});
+    assert!(schreiben::befehl_begrenzt(&gross).is_err());
 }
 
 #[tokio::test]
@@ -1015,4 +1037,92 @@ fn turnier_schluessel_ist_die_uuid() {
     };
     let q = KernQuelle::laden(daten.path(), &cfg).unwrap();
     assert_eq!(q.turnier_schluessel(), format!("badhub:{UUID}"));
+}
+
+#[tokio::test]
+async fn lan_slave_nur_mit_schluessel_und_seitenweise() {
+    let (_d, _b, _c, z) = gekoppelt().await;
+    lease_schritt(&z, None).await;
+    mit(&z, |q| q.ausfuehren(vec![aufruf(1, "1")], AKTEUR_HALLE)).unwrap();
+    // Ohne Schlüssel am Master: niemand bekommt etwas.
+    assert_eq!(
+        mit(&z, |q| slave::fuer_slave_aus(q, Some(UUID), 0).unwrap_err()),
+        403
+    );
+    let k = slave::neuer_schluessel().unwrap();
+    mit(&z, |q| q.slave_schluessel = Some(k.clone()));
+    let alle = mit(&z, |master| {
+        // Die (öffentliche) UUID oder ein falscher Schlüssel reichen nicht.
+        assert_eq!(
+            slave::fuer_slave_aus(master, Some(UUID), 0).unwrap_err(),
+            403
+        );
+        assert_eq!(slave::fuer_slave_aus(master, None, 0).unwrap_err(), 403);
+        let falsch = slave::neuer_schluessel().unwrap();
+        assert_eq!(
+            slave::fuer_slave_aus(master, Some(&falsch), 0).unwrap_err(),
+            403
+        );
+        // Richtiger Schlüssel (in Anzeigeform): alles bzw. nur ab n.
+        let alle = slave::fuer_slave_aus(master, Some(&slave::schluessel_anzeige(&k)), 0).unwrap();
+        assert_eq!(alle.n, master.n_lokal());
+        assert_eq!(alle.ereignisse.len() as u64, master.n_lokal());
+        let rest = slave::fuer_slave_aus(master, Some(&k), master.n_lokal() - 1).unwrap();
+        assert_eq!(rest.ereignisse.len(), 1, "nur das eigene, nicht bestätigte");
+        assert_eq!(master.ereignisse_ab(0, 3).len(), 3);
+        alle
+    });
+
+    // Der Slave faltet die Ereignisse des Masters mit seinem Paket.
+    let (_d2, _b2, _c2, s) = gekoppelt().await;
+    mit(&s, |q| {
+        q.slave_uebernehmen(alle.n, alle.ereignisse.clone());
+        assert_eq!(q.slave_n(), alle.n);
+        assert_eq!(
+            q.stand_slave().matches[0].status,
+            crate::btp::model::MatchStatus::OnCourt
+        );
+        // Doppelt zugestellt: nichts ändert sich.
+        q.slave_uebernehmen(alle.n, alle.ereignisse.clone());
+        assert_eq!(q.slave_n(), alle.n);
+        // Master liegt hinter dem Slave (neu übernommen): von vorn.
+        q.slave_uebernehmen(1, vec![]);
+        assert_eq!(q.slave_n(), 0);
+    });
+}
+
+#[test]
+fn slave_schluessel_wird_abgelegt_und_geladen() {
+    let daten = tempfile::tempdir().unwrap();
+    let (_, p) = ko4();
+    Ablage::neu(daten.path(), UUID)
+        .unwrap()
+        .paket_speichern(&p, None)
+        .unwrap();
+    assert!(slave_schluessel_setzen(daten.path(), UUID, "zu kurz").is_err());
+    let k = slave::neuer_schluessel().unwrap();
+    slave_schluessel_setzen(
+        daten.path(),
+        UUID,
+        &slave::schluessel_anzeige(&k).to_uppercase(),
+    )
+    .unwrap();
+    let cfg = BadhubTurnierConfig {
+        uuid: UUID.into(),
+        basis: "https://badhub.de/api/torg/v1".into(),
+        ..Default::default()
+    };
+    let q = KernQuelle::laden(daten.path(), &cfg).unwrap();
+    assert_eq!(q.slave_schluessel.as_deref(), Some(k.as_str()));
+    // Nie im Klartext auf der Platte, nie im Debug.
+    let roh = std::fs::read(
+        daten
+            .path()
+            .join("turniere")
+            .join(UUID)
+            .join(slave::SCHLUESSEL_DATEI),
+    )
+    .unwrap();
+    assert!(!roh.windows(k.len()).any(|w| w == k.as_bytes()));
+    assert!(!format!("{q:?}").contains(&k));
 }

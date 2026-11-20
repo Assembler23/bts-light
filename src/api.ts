@@ -84,6 +84,14 @@ export const badhubTurnierBeenden = (): Promise<string> =>
 export const badhubSteuerungUebernehmen = (): Promise<string> =>
   invoke("badhub_steuerung_uebernehmen");
 
+/** Slave-Schlüssel des Turnier-PCs für LAN-Ansage-Slaves (badhub-Turnier). */
+export const badhubSlaveSchluessel = (): Promise<string | null> =>
+  invoke("badhub_slave_schluessel");
+
+/** Slave-Schlüssel am Ansage-Slave eintragen (vom Turnier-PC abgelesen). */
+export const badhubSlaveSchluesselSetzen = (schluessel: string): Promise<void> =>
+  invoke("badhub_slave_schluessel_setzen", { schluessel });
+
 /** Das gekoppelte badhub-Turnier, `null` ohne Kopplung. */
 export const badhubTurnierInfo = (): Promise<BadhubTurnierConfig | null> =>
   invoke("badhub_turnier_info");

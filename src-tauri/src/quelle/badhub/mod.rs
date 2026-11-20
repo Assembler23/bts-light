@@ -161,7 +161,6 @@ pub struct Abgleich {
 }
 
 /// Laufzeitzustand eines gekoppelten Turniers.
-#[derive(Debug)]
 pub struct KernQuelle {
     ablage: Ablage,
     basis: String,
@@ -190,6 +189,24 @@ pub struct KernQuelle {
     /// Präfix der Befehls-IDs dieses Laufs und Zähler.
     id_praefix: String,
     id_zaehler: u64,
+    /// Schlüssel zwischen Master und LAN-Ansage-Slave (`slave.bin`).
+    pub(crate) slave_schluessel: Option<String>,
+    /// Am Slave: die vom Master geholten Ereignisse.
+    slave_ereignisse: Vec<TurnierEreignis>,
+}
+
+// Debug von Hand: Gerätetoken und Relay-Zugang erscheinen nie im Klartext,
+// der Personenauszug nicht im Ganzen (Security-Review L3).
+impl std::fmt::Debug for KernQuelle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KernQuelle")
+            .field("basis", &self.basis)
+            .field("token", &self.token.as_ref().map(|_| "***"))
+            .field("tl_zugang", &self.tl_zugang.as_ref().map(|_| "***"))
+            .field("n", &self.n_lokal())
+            .field("lease", &self.lease)
+            .finish_non_exhaustive()
+    }
 }
 
 impl KernQuelle {
@@ -230,6 +247,15 @@ impl KernQuelle {
             kern: None,
             id_praefix,
             id_zaehler: 0,
+            slave_schluessel: None,
+            slave_ereignisse: Vec::new(),
+        })
+        .map(|mut q: Self| {
+            q.slave_schluessel = q
+                .ablage
+                .geheimnis_laden(slave::SCHLUESSEL_DATEI)
+                .and_then(|s| slave::schluessel_normal(&s));
+            q
         })
     }
 
@@ -307,13 +333,62 @@ impl KernQuelle {
         snap
     }
 
-    /// Stand aus fremden Ereignissen (LAN-Slave: vom Master) mit dem
-    /// eigenen Paket. Zwischengespeichert wie [`Self::stand`].
-    pub fn stand_aus(&mut self, ereignisse: Vec<TurnierEreignis>) -> BtpSnapshot {
-        let n = ereignisse.iter().map(TurnierEreignis::n).max().unwrap_or(0);
+    /// Ereignisse mit `n > ab`, höchstens `max` — für den LAN-Slave. Klont
+    /// nur die gelieferten, nicht das ganze Protokoll.
+    pub fn ereignisse_ab(&self, ab: u64, max: usize) -> Vec<TurnierEreignis> {
+        let basis = self.paket.n();
+        self.paket
+            .ereignisse
+            .iter()
+            .chain(
+                self.protokoll
+                    .posten()
+                    .iter()
+                    .flat_map(|p| p.ereignisse.iter())
+                    .filter(move |e| e.n() > basis),
+            )
+            .filter(|e| e.n() > ab)
+            .take(max)
+            .cloned()
+            .collect()
+    }
+
+    /// Am Slave: höchstes `n` der vom Master geholten Ereignisse.
+    pub fn slave_n(&self) -> u64 {
+        self.slave_ereignisse
+            .iter()
+            .map(TurnierEreignis::n)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Am Slave: eine Seite vom Master übernehmen. Ist der Master hinter dem
+    /// Slave (Steuerung neu übernommen, anderes Protokoll), beginnt der
+    /// Slave von vorn.
+    pub fn slave_uebernehmen(&mut self, master_n: u64, neu: Vec<TurnierEreignis>) {
+        if master_n < self.slave_n() {
+            self.slave_ereignisse.clear();
+            return;
+        }
+        let mut bekannt: std::collections::BTreeSet<u64> = self
+            .slave_ereignisse
+            .iter()
+            .map(TurnierEreignis::n)
+            .collect();
+        for e in neu {
+            if bekannt.insert(e.n()) {
+                self.slave_ereignisse.push(e);
+            }
+        }
+        self.slave_ereignisse.sort_by_key(TurnierEreignis::n);
+    }
+
+    /// Am Slave: Stand aus den Ereignissen des Masters mit dem eigenen Paket.
+    pub fn stand_slave(&mut self) -> BtpSnapshot {
+        let n = self.slave_n();
         let schluessel = (
             n,
-            ereignisse.len(),
+            self.slave_ereignisse.len(),
             self.etag.clone(),
             self.paket.meldungen.len(),
         );
@@ -322,7 +397,7 @@ impl KernQuelle {
                 return snap.clone();
             }
         }
-        let stand = turnierkern::falten_turnier(&ereignisse);
+        let stand = turnierkern::falten_turnier(&self.slave_ereignisse);
         let snap = abbildung::abbilden(&stand, &self.paket);
         self.abbild = Some((schluessel, snap.clone()));
         snap
@@ -432,6 +507,7 @@ impl KernQuelle {
     /// Durchführungs-Befehle, die badhub unter der Lease annimmt, mit einer
     /// Kennung, die badhub annimmt. `jetzt` setzt dieser PC (ADR-0084).
     pub fn befehl_von_badhub(&mut self, roh: serde_json::Value) -> Result<usize, SchreibFehler> {
+        schreiben::befehl_begrenzt(&roh).map_err(SchreibFehler::Ungueltig)?;
         let mut roh = roh;
         let art = roh
             .get("art")
@@ -873,6 +949,17 @@ pub fn starten(config: &AppConfig, daten: &Path) -> bool {
                 q.wartende_ereignisse(),
                 KERN_VERSION
             );
+            let mut q = q;
+            if !config.slave_mode && q.slave_schluessel.is_none() {
+                match slave::neuer_schluessel().and_then(|k| {
+                    q.ablage
+                        .geheimnis_speichern(slave::SCHLUESSEL_DATEI, &k)
+                        .map(|_| k)
+                }) {
+                    Ok(k) => q.slave_schluessel = Some(k),
+                    Err(e) => tracing::warn!("Quelle badhub: Slave-Schlüssel nicht angelegt ({e})"),
+                }
+            }
             let mit_token = q.token.is_some();
             *z = Some(q);
             mit_token
@@ -987,6 +1074,29 @@ pub fn tl_zugang() -> Option<String> {
         .as_ref()
         .filter(|q| q.lease.as_ref().is_some_and(Lease::aktiv))
         .and_then(|q| q.tl_zugang.clone())
+}
+
+/// Slave-Schlüssel des Masters in Anzeigeform (für das Dashboard).
+pub fn slave_schluessel_anzeige() -> Option<String> {
+    zustand()
+        .as_ref()
+        .and_then(|q| q.slave_schluessel.as_deref().map(slave::schluessel_anzeige))
+}
+
+/// Slave-Schlüssel am Slave eintragen (vom Turnier-PC abgelesen). Legt ihn
+/// im Turnierordner ab und übernimmt ihn in einen geladenen Zustand.
+pub fn slave_schluessel_setzen(daten: &Path, uuid: &str, eingabe: &str) -> Result<(), String> {
+    let k = slave::schluessel_normal(eingabe).ok_or(
+        "Der Slave-Schlüssel hat 32 Zeichen (0–9, a–f), Bindestriche sind egal.".to_string(),
+    )?;
+    Ablage::neu(daten, uuid)?.geheimnis_speichern(slave::SCHLUESSEL_DATEI, &k)?;
+    if let Some(q) = zustand()
+        .as_mut()
+        .filter(|q| q.paket.turnier.uuid.eq_ignore_ascii_case(uuid))
+    {
+        q.slave_schluessel = Some(k);
+    }
+    Ok(())
 }
 
 /// Lage des Abgleichs (`None` ohne geladenes badhub-Turnier).

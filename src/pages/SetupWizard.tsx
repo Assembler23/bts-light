@@ -26,6 +26,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   addCourtAd,
   badhubKoppeln,
+  badhubSlaveSchluesselSetzen,
   listCourtAds,
   readTournamentLogo,
   removeCourtAd,
@@ -362,6 +363,9 @@ export function SetupWizard({
   // Turnierquelle (Paket L2): BTP vorausgewählt, wie jede Konfiguration
   // ohne Quellenangabe.
   const [quelle, setQuelle] = useState<QuelleArt>(initialConfig.quelle ?? "btp");
+  // LAN-Ansage-Slave eines badhub-Turniers: Schlüssel vom Turnier-PC (Paket L3).
+  const [slaveSchluessel, setSlaveSchluessel] = useState("");
+  const [slaveSchluesselMeldung, setSlaveSchluesselMeldung] = useState<string | null>(null);
   const [kopplungsCode, setKopplungsCode] = useState("");
   const [geraetName, setGeraetName] = useState(
     initialConfig.badhub_turnier?.geraet_name || "Turnier-PC",
@@ -1694,6 +1698,27 @@ export function SetupWizard({
                       onChange={setHost}
                       placeholder="192.168.0.10"
                     />
+                    <Field
+                      label="Slave-Schlüssel (steht am Turnier-PC im Dashboard)"
+                      value={slaveSchluessel}
+                      onChange={setSlaveSchluessel}
+                      placeholder="abcd-ef01-…"
+                    />
+                    <button
+                      onClick={() => {
+                        badhubSlaveSchluesselSetzen(slaveSchluessel)
+                          .then(() => setSlaveSchluesselMeldung("Slave-Schlüssel übernommen."))
+                          .catch((e) => setSlaveSchluesselMeldung(String(e)));
+                      }}
+                      disabled={!badhubTurnier || slaveSchluessel.trim() === ""}
+                      className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                                 text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+                    >
+                      Schlüssel übernehmen
+                    </button>
+                    {slaveSchluesselMeldung && (
+                      <p className="text-xs text-slate-600">{slaveSchluesselMeldung}</p>
+                    )}
                   </>
                 )}
                 <Field

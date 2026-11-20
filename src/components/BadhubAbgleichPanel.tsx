@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { CloudUpload, TriangleAlert } from "lucide-react";
-import { badhubAbgleich, badhubSteuerungUebernehmen, badhubTurnierBeenden } from "../api";
+import {
+  badhubAbgleich,
+  badhubSlaveSchluessel,
+  badhubSteuerungUebernehmen,
+  badhubTurnierBeenden,
+} from "../api";
 import type { BadhubAbgleich } from "../types";
 
 /**
@@ -14,6 +19,11 @@ export function BadhubAbgleichPanel() {
   const [lage, setLage] = useState<BadhubAbgleich | null>(null);
   const [laeuft, setLaeuft] = useState(false);
   const [meldung, setMeldung] = useState<{ ok: boolean; text: string } | null>(null);
+  const [slaveSchluessel, setSlaveSchluessel] = useState<string | null>(null);
+
+  useEffect(() => {
+    badhubSlaveSchluessel().then(setSlaveSchluessel).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let aus = false;
@@ -101,6 +111,12 @@ export function BadhubAbgleichPanel() {
           </button>
         )}
       </div>
+      {slaveSchluessel && (
+        <p className="text-xs text-slate-500">
+          Slave-Schlüssel für einen Ansage-Slave im Hallennetz:{" "}
+          <code className="select-all font-mono">{slaveSchluessel}</code>
+        </p>
+      )}
       {meldung && (
         <p className={`text-sm ${meldung.ok ? "text-emerald-700" : "text-rose-700"}`}>
           {meldung.text}

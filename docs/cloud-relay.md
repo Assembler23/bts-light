@@ -789,6 +789,11 @@ Authorization: Bearer <Kern-Zugang>
   Lease oder nach der Rückholung `not_allowed`, für Befehle außerhalb der
   Durchführung oder mit ungültiger Kennung `unsupported`. `host_offline`
   vergibt wie immer nur der Relay.
+- **Grenzen:** `/tl/api/command` nimmt höchstens 32 KiB (`TL_COMMAND_BODY_MAX`; die größte bestehende Aktion,
+  `ProfileSave`, bleibt auch mit 64 Panels weit darunter — Test `tl_kommando_grenze_traegt_jede_bestehende_aktion`).
+  Der Turnier-PC begrenzt einen Kernbefehl zusätzlich auf 4096 Byte, höchstens 5 Sätze und 64 Zeichen je Angabe.
+  Der Kern-Zugang belegt keinen der Geräteplätze (`claim_tl_slot`), und die Kennung `badhub-kern` ist für normale
+  TL-Geräte reserviert (Koppeln lehnt sie ab, ein von Hand eingetragenes Gerät dieses Namens bekommt keinen Zugang).
 - **Deploy-Reihenfolge:** Relay **vor** dem App-Tag (ein älterer Relay kennt
   `kern_befehl` und `kern_abgelehnt` nicht). BTP-Turniere sehen keinen
   neuen Frame; ein älteres Relay bleibt für sie nutzbar.
