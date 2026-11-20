@@ -1091,6 +1091,16 @@ pub(crate) fn state_for_relay(
     if json.len() <= relay_proto::MAX_TL_STATE_LEN && state.queue.len() <= STUFEN[0] {
         return offene_auffuellen(state, offene, offene_gesamt, rev, json);
     }
+    // Erste Stufe: die Meldungsliste für den Rückzug (badhub-Turnier). Sie
+    // trägt jede ausgeloste Meldung und wird selten gebraucht — die
+    // Warteliste nie ihretwegen kürzen. Ohne Liste blendet die Seite den
+    // Knopf aus; im LAN (ohne Relay-Grenze) bleibt sie.
+    if json.len() > relay_proto::MAX_TL_STATE_LEN && state.badhub_meldungen.take().is_some() {
+        let json = serde_json::to_string(&state).unwrap_or_default();
+        if json.len() <= relay_proto::MAX_TL_STATE_LEN && state.queue.len() <= STUFEN[0] {
+            return offene_auffuellen(state, offene, offene_gesamt, rev, json);
+        }
+    }
     for limit in STUFEN {
         if state.queue.len() > limit {
             state.queue.truncate(limit);

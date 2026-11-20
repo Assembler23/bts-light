@@ -9399,6 +9399,8 @@ $("tablets-reload").addEventListener("click", reloadTablets);
 $("bh-beenden").addEventListener("click", badhubZurueckgeben);
 $("bh-rueckzug").addEventListener("click", rueckzugOeffnen);
 $("rz-suche").addEventListener("input", rueckzugListe);
+// Enter im Suchfeld schickte sonst das Dialog-Formular ab und schlösse es.
+$("rz-suche").addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
 $("rz-meldung").addEventListener("change", rueckzugAuswahl);
 $("rz-ziehen").addEventListener("click", () => rueckzugSenden(false));
 $("rz-zuruecknehmen").addEventListener("click", () => rueckzugSenden(true));
@@ -10530,6 +10532,9 @@ function renderBadhubAbgleich() {
     && (a.zustand === "aktuell" || a.zustand === "wartet"));
   $("bh-rueckzug").hidden = !(state && Array.isArray(state.badhub_meldungen)
     && state.badhub_meldungen.length > 0);
+  // Offener Dialog folgt dem Stand (Rückzug von einem anderen Gerät).
+  const rzDlg = document.getElementById("rz-dlg");
+  if (rzDlg && rzDlg.open && JSON.stringify(rueckzugMeldungen()) !== rzZuletzt) rueckzugListe();
   if (!a) {
     zeile.hidden = true;
     if (band) band.remove();
@@ -10595,7 +10600,9 @@ function rueckzugOeffnen() {
   $("rz-dlg").showModal();
 }
 
+var rzZuletzt = "";
 function rueckzugListe() {
+  rzZuletzt = JSON.stringify(rueckzugMeldungen());
   const sel = $("rz-meldung");
   const alt = sel.value;
   const q = $("rz-suche").value.trim().toLowerCase();
