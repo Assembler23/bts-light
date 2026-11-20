@@ -826,6 +826,32 @@ Authorization: Bearer <TL-Gerät>
   `badhub_zurueckgeben` nicht und wiese das Kommando ab. Für BTP-Turniere ändert
   sich nichts.
 
+### Rückzug aus dem TL-Web (seit v0.9.454, Turnierkern 0.13.0)
+
+```http
+POST /bts-relay/tl/api/command
+{"opId": "rueckzug-7-<ms>", "viewRev": 17, "action": {"action": "badhub_rueckzug", "entryId": 7, "ergebnisse": "behalten"}}
+{"opId": "rueckzug-zurueck-7-<ms>", "viewRev": 18, "action": {"action": "badhub_rueckzug_zuruecknehmen", "entryId": 7}}
+```
+
+- **`TlAction::BadhubRueckzug { entry_id, ergebnisse }`** (`behalten` |
+  `streichen`, Pflichtfeld ohne Vorgabe) und
+  **`TlAction::BadhubRueckzugZuruecknehmen { entry_id }`**; `entryId` =
+  Meldungsnummer. Der Relay reicht beide durch; der Kern-Zugang `badhub-kern`
+  darf sie nicht (`kern_zugang_passt`, `403`; Host `tl::execute`
+  „nur Kernbefehle"). badhub schickt einen Rückzug als `kern_befehl`
+  (`{"art": "rueckzug", "id", "konkurrenz", "meldung", "ergebnisse"}` bzw.
+  `rueckzug_zuruecknehmen`; `jetzt` setzt der Turnier-PC).
+- **Host:** nur bei Quelle badhub am Master mit Lease; Konkurrenz aus dem
+  Kern-Stand, Kennung und `jetzt` vom Turnier-PC, Wiederholungs-Speicher je
+  `opId`. Ablehnungen des Kerns als `kern_abgelehnt` mit `ablehnung` und
+  Klartext (`schon_zurueckgezogen`, `nicht_zurueckgezogen`,
+  `nicht_zuruecknehmbar {spiel}`, `meldung_zurueckgezogen {spiel}`).
+- **Zustand:** `TlState.badhub_meldungen` (nur unter der Lease, bei BTP nie):
+  `[{entry_id, konkurrenz, label, zurueckgezogen, ergebnisse?}]`. Die Seite
+  zeigt den Knopf nur damit.
+- **Deploy-Reihenfolge:** Relay vor dem App-Tag.
+
 ### Erneute Aufrufe — je Partei
 
 Beide Aufruf-Aktionen können auf **eine Partei** eingegrenzt werden; die

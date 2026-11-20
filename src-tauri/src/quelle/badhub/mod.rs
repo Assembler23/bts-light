@@ -181,6 +181,21 @@ pub struct Abgleich {
     pub rot: bool,
 }
 
+/// Eine ausgeloste Meldung für den Rückzug im TL-Web.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RueckzugMeldung {
+    /// Meldungsnummer (= `entry_id` im Modell).
+    pub entry_id: i64,
+    /// Name der Konkurrenz.
+    pub konkurrenz: String,
+    /// Namen der Meldung („Vorname Nachname / …“).
+    pub label: String,
+    pub zurueckgezogen: bool,
+    /// `behalten` | `streichen`, nur bei zurückgezogenen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ergebnisse: Option<String>,
+}
+
 /// Laufzeitzustand eines gekoppelten Turniers.
 pub struct KernQuelle {
     ablage: Ablage,
@@ -577,7 +592,7 @@ impl KernQuelle {
                 "Befehl ohne gültige Kennung (A–Z, a–z, 0–9, -; höchstens 64 Zeichen).".into(),
             ));
         }
-        if matches!(art.as_str(), "spiel_aufrufen" | "ergebnis_melden") {
+        if schreiben::ARTEN_MIT_JETZT.contains(&art.as_str()) {
             if let Some(o) = roh.as_object_mut() {
                 o.insert(
                     "jetzt".into(),
@@ -588,6 +603,104 @@ impl KernQuelle {
         let befehl: TurnierBefehl = serde_json::from_value(roh)
             .map_err(|e| SchreibFehler::Ungueltig(format!("Befehl unlesbar ({e}).")))?;
         self.ausfuehren(vec![befehl], AKTEUR_BADHUB)
+    }
+
+    /// Rückzug einer Meldung aus der Halle (TL-Web, Kern 0.13.0): `Some` =
+    /// zurückziehen mit der Wahl für die Gruppe, `None` = Rückzug
+    /// zurücknehmen. Die Konkurrenz kommt aus dem Kern-Stand (die
+    /// Meldungsnummer ist turnierweit eindeutig).
+    pub fn rueckzug(
+        &mut self,
+        meldung: u32,
+        ergebnisse: Option<turnierkern::Rueckzug>,
+    ) -> Result<usize, SchreibFehler> {
+        self.schreibrecht()?;
+        let stand = self.kern_stand();
+        let konkurrenz = stand
+            .meldung(meldung)
+            .map(|m| m.konkurrenz.clone())
+            .ok_or_else(|| {
+                SchreibFehler::Ungueltig(format!(
+                    "Meldung {meldung} gibt es in diesem Turnier nicht."
+                ))
+            })?;
+        let befehl = match ergebnisse {
+            Some(ergebnisse) => TurnierBefehl::Rueckzug {
+                id: String::new(),
+                konkurrenz,
+                meldung,
+                ergebnisse,
+                jetzt: schreiben::wandzeit(jetzt_ms()),
+            },
+            None => TurnierBefehl::RueckzugZuruecknehmen {
+                id: String::new(),
+                konkurrenz,
+                meldung,
+            },
+        };
+        self.ausfuehren(vec![befehl], AKTEUR_HALLE)
+    }
+
+    /// Meldungen, die das TL-Web zurückziehen kann: ausgelost in einer
+    /// Konkurrenz mit freigegebener Auslosung, samt Rückzugs-Stand. Namen aus
+    /// dem Personenauszug — dieselben, die ohnehin in der Warteliste stehen.
+    pub fn rueckzug_meldungen(&mut self) -> Vec<RueckzugMeldung> {
+        let stand = self.kern_stand();
+        let namen: std::collections::BTreeMap<u32, String> = self
+            .paket
+            .meldungen
+            .iter()
+            .map(|m| {
+                let n: Vec<String> = m
+                    .personen
+                    .iter()
+                    .map(|p| {
+                        format!("{} {}", p.vorname.trim(), p.nachname.trim())
+                            .trim()
+                            .to_string()
+                    })
+                    .collect();
+                (m.meldung, n.join(" / "))
+            })
+            .collect();
+        let mut liste = Vec::new();
+        for k in &self.paket.konkurrenzen {
+            let Some(d) = stand
+                .durchfuehrung
+                .get(&k.key)
+                .filter(|d| !d.spiele.is_empty())
+            else {
+                continue;
+            };
+            let Some(a) = stand.auslosungen.get(&k.key) else {
+                continue;
+            };
+            let mut gesehen = std::collections::BTreeSet::new();
+            for l in &a.auslosung.plaetze {
+                if !gesehen.insert(l.meldung) {
+                    continue;
+                }
+                let r = d.rueckzuege.get(&l.meldung);
+                liste.push(RueckzugMeldung {
+                    entry_id: i64::from(l.meldung),
+                    konkurrenz: if k.name.trim().is_empty() {
+                        k.key.clone()
+                    } else {
+                        k.name.clone()
+                    },
+                    label: namen
+                        .get(&l.meldung)
+                        .cloned()
+                        .unwrap_or_else(|| format!("Meldung {}", l.meldung)),
+                    zurueckgezogen: r.is_some(),
+                    ergebnisse: r.map(|r| match r.ergebnisse {
+                        turnierkern::Rueckzug::Behalten => "behalten".to_string(),
+                        turnierkern::Rueckzug::Streichen => "streichen".to_string(),
+                    }),
+                });
+            }
+        }
+        liste
     }
 
     // ── Lease ───────────────────────────────────────────────────────────
@@ -1115,6 +1228,23 @@ pub fn offizielle(
 /// Ein Kernbefehl aus badhub (über das Relay).
 pub fn befehl_von_badhub(befehl: serde_json::Value) -> Result<usize, SchreibFehler> {
     mit_quelle(|q| q.befehl_von_badhub(befehl))
+}
+
+/// Rückzug bzw. Rücknahme aus dem TL-Web (Kern 0.13.0).
+pub fn rueckzug(
+    meldung: u32,
+    ergebnisse: Option<turnierkern::Rueckzug>,
+) -> Result<usize, SchreibFehler> {
+    mit_quelle(|q| q.rueckzug(meldung, ergebnisse))
+}
+
+/// Meldungen für den Rückzug im TL-Web — nur, solange dieser PC schreiben
+/// darf (`None` sonst: ohne Lease gibt es nichts zurückzuziehen).
+pub fn rueckzug_liste() -> Option<Vec<RueckzugMeldung>> {
+    let mut g = zustand();
+    let q = g.as_mut()?;
+    q.schreibrecht().ok()?;
+    Some(q.rueckzug_meldungen())
 }
 
 /// TL-Zugang für badhub, solange die Lease aktiv ist.
@@ -1826,3 +1956,5 @@ pub async fn koppeln(
 mod tests;
 #[cfg(test)]
 mod tests_l3;
+#[cfg(test)]
+mod tests_rueckzug;

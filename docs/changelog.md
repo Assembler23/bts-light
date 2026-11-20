@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.454
+
+- **Rückzug während des Turniers** (badhub-Turniere). Im TL-Web trägt der neue
+  Knopf **Rückzug** ein, dass ein Spieler oder Paar aufhört: Offene KO-Spiele
+  gehen kampflos an die Gegner, in der Gruppe wählt die Turnierleitung
+  **Ergebnisse behalten** oder **streichen**. Entfallene Spiele verschwinden
+  aus Warteliste und Automatik; ein Versehen lässt sich zurücknehmen. Auch ein
+  Rückzug aus badhub kommt in der Halle an.
+- BTP-Turniere laufen unverändert.
+- Braucht das aktualisierte Relay auf badhub.de (wird vor dem Release
+  eingespielt).
+
 ## v0.9.452
 
 - **Zählweise je Spiel bei badhub-Turnieren.** badhub kann die Zählweise

@@ -291,7 +291,7 @@ fn befehls_ids_passen_zu_badhub() {
 // ── Attrappe von badhub B1 ────────────────────────────────────────────────
 
 #[derive(Default)]
-struct Badhub {
+pub(super) struct Badhub {
     ereignisse: StdMutex<Vec<TurnierEreignis>>,
     ids: StdMutex<BTreeSet<String>>,
     /// Gerät hält die Lease, mit Epoche.
@@ -516,7 +516,7 @@ async fn badhub_starten(b: Arc<Badhub>) -> String {
 
 /// Gekoppeltes Turnier auf der Platte (wie nach `koppeln`) samt
 /// badhub-Attrappe mit demselben Stand.
-async fn gekoppelt() -> (
+pub(super) async fn gekoppelt() -> (
     tempfile::TempDir,
     Arc<Badhub>,
     BadhubTurnierConfig,
@@ -559,7 +559,7 @@ async fn gekoppelt_mit(
 }
 
 /// Ein Lease-Schritt wie im Abgleich (Netz außerhalb der Sperre).
-async fn lease_schritt(z: &StdMutex<Option<KernQuelle>>, relay_ns: Option<&str>) {
+pub(super) async fn lease_schritt(z: &StdMutex<Option<KernQuelle>>, relay_ns: Option<&str>) {
     let (basis, token, bedarf) = {
         let mut g = z.lock().unwrap();
         let q = g.as_mut().unwrap();
@@ -579,7 +579,7 @@ async fn lease_schritt(z: &StdMutex<Option<KernQuelle>>, relay_ns: Option<&str>)
     }
 }
 
-fn mit<T>(z: &StdMutex<Option<KernQuelle>>, f: impl FnOnce(&mut KernQuelle) -> T) -> T {
+pub(super) fn mit<T>(z: &StdMutex<Option<KernQuelle>>, f: impl FnOnce(&mut KernQuelle) -> T) -> T {
     f(z.lock().unwrap().as_mut().unwrap())
 }
 

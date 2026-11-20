@@ -11521,6 +11521,21 @@ mod tests {
         auftrag.abort();
     }
 
+    #[test]
+    fn der_rueckzug_aus_dem_tl_web_kommt_nur_von_tl_geraeten_durch() {
+        // badhub schickt einen Rückzug als Kernbefehl; die TL-Aktion bleibt
+        // den Geräten der Halle vorbehalten.
+        let rueckzug = TlAction::BadhubRueckzug {
+            entry_id: 7,
+            ergebnisse: relay_proto::TlRueckzugErgebnisse::Behalten,
+        };
+        let zurueck = TlAction::BadhubRueckzugZuruecknehmen { entry_id: 7 };
+        for a in [&rueckzug, &zurueck] {
+            assert!(!kern_zugang_passt(relay_proto::TL_GERAET_KERN, a));
+            assert!(kern_zugang_passt("tl-1", a));
+        }
+    }
+
     #[tokio::test]
     async fn die_rueckgabe_an_badhub_kommt_nur_von_tl_geraeten_durch() {
         // Der Kern-Zugang darf die Steuerung nicht über den Turnier-PC
