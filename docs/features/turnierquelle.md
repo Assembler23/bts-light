@@ -188,8 +188,11 @@ Zeiten: lokale Wandzeit des Hallen-PCs `JJJJ-MM-TTTHH:MM:SS` (`schreiben::wandze
 - Lädt die Posten nach `basis_n` (= bestätigtes `n`) hoch: höchstens 200 Posten und 1000 Ereignisse je Aufruf.
 - `200 {bis_n}` → bestätigt; eigene Ereignisse bis dort wandern ins Paket (`paket.json`), `lease.json` trägt `bis_n`.
 - `409 luecke {erwartet_n}` → ab dort fortsetzen (liegt `erwartet_n` außerhalb des eigenen Bereichs: angehalten).
-- `409 epoche_veraltet` oder `401/403` (Widerruf beendet in badhub die Lease) → `entzogen`: Outbox steht, Eingaben
-  gesperrt, rotes Band im TL-Web und im Hauptfenster.
+- `409 epoche_veraltet` → `entzogen`: Outbox steht, Eingaben gesperrt, rotes Band im TL-Web und im Hauptfenster.
+- `401/403` (Widerruf — der in badhub die Lease beendet — oder eine vorgeschaltete Sperre) → nur **angehalten**
+  (rot, „badhub lehnt den Zugang dieses PCs ab“): Eingaben bleiben möglich, nichts wird verworfen; erst ein späteres
+  `epoche_veraltet` oder die Turnierleitung entscheidet über die Rückholung.
+- Protokoll: Scheitert das Anhängen mittendrin (Platte voll), wird die Datei auf die alte Länge zurückgeschnitten.
 - `422 abweichung` → angehalten (rot, „Abgleich mit badhub angehalten“); sollte bei gleicher Kern-Version nie vorkommen.
 - Netz, 429, 5xx → Neuversuch nach 5, 10, 20, 40, 60 s, danach alle 60 s.
 - Lage (`Abgleich`): „badhub: aktuell“ / „N Ereignisse warten, letzter Kontakt HH:MM“ — Tauri `badhub_abgleich`

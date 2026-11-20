@@ -438,12 +438,13 @@ pub async fn lease_zurueckgeben(
     }
     if status.as_u16() == 409 {
         let f = fehlerkoerper(antwort).await;
-        return Ok(match f.fehler.as_str() {
-            "n_offen" => RueckgabeAntwort::NOffen {
+        return match f.fehler.as_str() {
+            "n_offen" => Ok(RueckgabeAntwort::NOffen {
                 n: f.n.unwrap_or(0),
-            },
-            _ => RueckgabeAntwort::EpocheVeraltet,
-        });
+            }),
+            "epoche_veraltet" => Ok(RueckgabeAntwort::EpocheVeraltet),
+            _ => Err(ApiFehler::Status(409)),
+        };
     }
     Err(status_fehler(status))
 }

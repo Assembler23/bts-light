@@ -170,9 +170,17 @@ impl Protokoll {
         let mut f = opt
             .open(&self.datei)
             .map_err(|e| format!("Protokoll: {e}"))?;
-        f.write_all(&puffer)
-            .map_err(|e| format!("Protokoll: {e}"))?;
-        f.sync_data().map_err(|e| format!("Protokoll: {e}"))?;
+        // Länge vorher merken: Scheitert das Schreiben mittendrin (Platte
+        // voll), wird der angefangene Rest wieder abgeschnitten — sonst klebte
+        // der nächste gültige Posten an Müll und ginge beim Laden verloren.
+        let vorher = f.metadata().map(|m| m.len()).ok();
+        if let Err(e) = f.write_all(&puffer).and_then(|_| f.sync_data()) {
+            if let Some(l) = vorher {
+                let _ = f.set_len(l);
+                let _ = f.sync_data();
+            }
+            return Err(format!("Protokoll: {e}"));
+        }
         self.posten.extend(neu);
         Ok(())
     }
@@ -181,8 +189,10 @@ impl Protokoll {
     /// `verworfen-<ms>.jsonl` ab (Steuerung neu übernehmen nach einer
     /// Rückholung). Liefert die Zahl der verworfenen Posten.
     pub fn kuerzen_auf(&mut self, bis_n: u64, jetzt_ms: u64) -> Result<usize, String> {
+        // Erst schreiben, dann den Speicher ersetzen: Scheitert die Platte,
+        // bleibt der Stand im Speicher wie auf der Platte.
         let (bleiben, weg): (Vec<Posten>, Vec<Posten>) =
-            self.posten.drain(..).partition(|p| p.n() <= bis_n);
+            self.posten.iter().cloned().partition(|p| p.n() <= bis_n);
         let zahl = weg.len();
         let zeilen = |ps: &[Posten]| -> Result<Vec<u8>, String> {
             let mut b = Vec::new();

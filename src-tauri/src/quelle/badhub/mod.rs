@@ -569,11 +569,11 @@ impl KernQuelle {
                 self.lease_hinweis = Some(format!("badhub lehnt ab ({code})"));
             }
             Err(api::ApiFehler::Zugang) => {
+                // 401/403 ist kein Beweis für eine Rückholung (das wäre
+                // `epoche_veraltet`, 409) — auch eine Firewall antwortet so.
+                // Abgleich anhalten und es sagen; die Lease bleibt.
                 self.zugang_abgelehnt = true;
                 self.lease_hinweis = Some("badhub lehnt den Zugang dieses PCs ab".into());
-                if self.lease.as_ref().is_some_and(Lease::aktiv) {
-                    self.entziehen();
-                }
             }
             Err(e) => {
                 // Offline: eine gespeicherte Lease gilt weiter.
@@ -667,6 +667,13 @@ impl KernQuelle {
                 self.bestaetigen(bis_n.min(self.n_lokal()));
                 OutboxSchritt::Weiter
             }
+            Ok(api::HochladenAntwort::Luecke { erwartet_n })
+                if erwartet_n == self.n_bestaetigt() =>
+            {
+                // Kein Fortschritt möglich: nicht in einer Schleife
+                // wiederholen, sondern mit Backoff.
+                OutboxSchritt::Spaeter
+            }
             Ok(api::HochladenAntwort::Luecke { erwartet_n }) => {
                 if erwartet_n > self.n_lokal() || erwartet_n < self.paket.n() {
                     // badhub kennt Ereignisse, die dieser PC nicht hat — nicht
@@ -682,8 +689,15 @@ impl KernQuelle {
                 self.bestaetigen(erwartet_n);
                 OutboxSchritt::Weiter
             }
-            Ok(api::HochladenAntwort::EpocheVeraltet) | Err(api::ApiFehler::Zugang) => {
+            Ok(api::HochladenAntwort::EpocheVeraltet) => {
                 self.entziehen();
+                OutboxSchritt::Angehalten
+            }
+            Err(api::ApiFehler::Zugang) => {
+                // Widerruf oder vorgeschaltete Sperre: Outbox anhalten (bis
+                // zum Neustart), Eingaben bleiben möglich, nichts verworfen.
+                tracing::warn!("Quelle badhub: Zugang abgelehnt (401/403) — Outbox angehalten");
+                self.zugang_abgelehnt = true;
                 OutboxSchritt::Angehalten
             }
             Ok(api::HochladenAntwort::Abweichung { grund }) => {
@@ -722,6 +736,15 @@ impl KernQuelle {
                 "zurueckgegeben",
                 "Steuerung an badhub zurückgegeben.".to_string(),
                 false,
+            ),
+            Some(_) if self.zugang_abgelehnt => (
+                "angehalten",
+                format!(
+                    "Abgleich mit badhub angehalten: badhub lehnt den Zugang dieses PCs ab \
+                     (Kopplung widerrufen?). {wartend} Ereignisse warten — Übertragung neu \
+                     starten oder in badhub prüfen."
+                ),
+                true,
             ),
             Some(_) if self.abweichung.is_some() => (
                 "angehalten",
@@ -762,7 +785,10 @@ impl KernQuelle {
             wartend,
             letzter_kontakt_ms: kontakt,
             text,
-            kann_beenden: aktiv && wartend == 0 && self.abweichung.is_none(),
+            kann_beenden: aktiv
+                && wartend == 0
+                && self.abweichung.is_none()
+                && !self.zugang_abgelehnt,
             kann_uebernehmen: self.lease.as_ref().is_some_and(|l| !l.aktiv()),
             rot,
         }
@@ -1178,10 +1204,14 @@ pub(crate) async fn zurueckgeben_in(z: &Mutex<Option<KernQuelle>>) -> Result<Str
             "badhub ist bei Ereignis {n}, dieser PC bei {} — bitte kurz warten und erneut versuchen.",
             q.n_bestaetigt()
         )),
-        Ok(api::RueckgabeAntwort::EpocheVeraltet) | Err(api::ApiFehler::Zugang) => {
+        Ok(api::RueckgabeAntwort::EpocheVeraltet) => {
             q.entziehen();
             Err(TEXT_ENTZOGEN.into())
         }
+        Err(api::ApiFehler::Zugang) => Err(
+            "badhub lehnt den Zugang dieses PCs ab (Kopplung widerrufen?) — Rückgabe nicht möglich."
+                .into(),
+        ),
         Err(e) => Err(format!("{e} — Rückgabe braucht Internet.")),
     }
 }

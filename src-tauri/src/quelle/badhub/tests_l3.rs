@@ -729,7 +729,9 @@ async fn outbox_luecke_backoff_idempotenz_und_abweichung() {
     .await
     .unwrap();
     assert_eq!(r, api::HochladenAntwort::Luecke { erwartet_n: server });
-    assert_eq!(mit(&z, |q| q.outbox_antwort(Ok(r))), OutboxSchritt::Weiter);
+    // badhub erwartet genau den bestätigten Stand: kein Fortschritt aus der
+    // Antwort selbst → mit Backoff, kein Kreisen; der reguläre Schritt geht.
+    assert_eq!(mit(&z, |q| q.outbox_antwort(Ok(r))), OutboxSchritt::Spaeter);
     assert_eq!(outbox_schritt(&z).await, OutboxSchritt::Weiter);
     assert_eq!(mit(&z, |q| q.n_lokal()), b.n());
 
@@ -831,6 +833,28 @@ async fn zurueckgeholt_sperrt_eingaben_und_uebernehmen_verwirft_das_nicht_angeko
         );
         assert!(q.ausfuehren(vec![aufruf(1, "1")], AKTEUR_HALLE).is_ok());
     });
+}
+
+#[tokio::test]
+async fn zugang_abgelehnt_haelt_nur_an_und_verwirft_nichts() {
+    let (_d, _b, _c, z) = gekoppelt().await;
+    lease_schritt(&z, None).await;
+    mit(&z, |q| q.ausfuehren(vec![aufruf(1, "1")], AKTEUR_HALLE)).unwrap();
+    // Eine 401/403 (Widerruf oder Firewall) ist keine Rückholung.
+    assert_eq!(
+        mit(&z, |q| q.outbox_antwort(Err(ApiFehler::Zugang))),
+        OutboxSchritt::Angehalten
+    );
+    mit(&z, |q| {
+        assert!(q.lease.as_ref().unwrap().aktiv());
+        let lage = q.abgleich();
+        assert_eq!(lage.zustand, "angehalten");
+        assert!(lage.rot && !lage.kann_beenden && !lage.kann_uebernehmen);
+        assert_eq!(q.wartende_ereignisse(), 1);
+        // Eingaben gehen weiter, nichts verworfen.
+        assert!(q.ausfuehren(vec![aufruf(2, "2")], AKTEUR_HALLE).is_ok());
+    });
+    assert_eq!(outbox_schritt(&z).await, OutboxSchritt::Ruhe);
 }
 
 #[tokio::test]
@@ -991,5 +1015,4 @@ fn turnier_schluessel_ist_die_uuid() {
     };
     let q = KernQuelle::laden(daten.path(), &cfg).unwrap();
     assert_eq!(q.turnier_schluessel(), format!("badhub:{UUID}"));
-    let _ = ApiFehler::Zugang;
 }
