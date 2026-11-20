@@ -214,6 +214,8 @@ pub struct KernQuelle {
     pub(crate) slave_schluessel: Option<String>,
     /// Am Slave: die vom Master geholten Ereignisse.
     slave_ereignisse: Vec<TurnierEreignis>,
+    /// Eine Rückgabe (`DELETE turnier/lease`) ist unterwegs.
+    rueckgabe_laeuft: bool,
 }
 
 // Debug von Hand: Gerätetoken und Relay-Zugang erscheinen nie im Klartext,
@@ -270,14 +272,40 @@ impl KernQuelle {
             id_zaehler: 0,
             slave_schluessel: None,
             slave_ereignisse: Vec::new(),
+            rueckgabe_laeuft: false,
         })
         .map(|mut q: Self| {
+            q.protokoll_ohne_lease_raeumen();
             q.slave_schluessel = q
                 .ablage
                 .geheimnis_laden(slave::SCHLUESSEL_DATEI)
                 .and_then(|s| slave::schluessel_normal(&s));
             q
         })
+    }
+
+    /// Ohne Lease kann kein Posten mehr hochgeladen werden (die Outbox
+    /// braucht eine Epoche) — Posten im Protokoll sind dann von badhub
+    /// bestätigte Reste. Liegen sie über einem gekappten Paket, zählten sie
+    /// als „wartend“: kein Nachladen, keine Lease, kein Neu-Koppeln
+    /// (v0.9.450 nach „Steuerung wieder übernehmen“ mit mehr als 2000
+    /// Ereignissen). Deshalb räumen: was das Paket schon trägt, ersatzlos;
+    /// was darüber liegt, mit Sicherung in `verworfen-<ms>.jsonl` — es kommt
+    /// über das seitenweise Nachladen von badhub zurück.
+    fn protokoll_ohne_lease_raeumen(&mut self) {
+        if self.lease.is_some() || self.protokoll.posten().is_empty() {
+            return;
+        }
+        let r = self
+            .protokoll
+            .kuerzen_auf(self.paket.n(), jetzt_ms())
+            .and_then(|gesichert| self.protokoll.leeren().map(|()| gesichert));
+        match r {
+            Ok(gesichert) => tracing::info!(
+                "Quelle badhub: Protokoll ohne Lease geräumt ({gesichert} Posten über dem Paket gesichert)"
+            ),
+            Err(e) => tracing::warn!("Quelle badhub: Protokoll ohne Lease nicht geräumt ({e})"),
+        }
     }
 
     /// Alle Ereignisse: von badhub bestätigte (Paket) und die eigenen aus
@@ -1420,23 +1448,46 @@ pub async fn outbox_schleife() {
 /// gelöscht.
 pub(crate) async fn zurueckgeben_in(z: &Mutex<Option<KernQuelle>>) -> Result<String, String> {
     let auftrag = {
-        let g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let q = g.as_ref().ok_or("Kein badhub-Turnier geladen.")?;
-        let l = q
+        let mut g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let q = g.as_mut().ok_or("Kein badhub-Turnier geladen.")?;
+        let epoche = q
             .lease
             .as_ref()
             .filter(|l| l.aktiv())
-            .ok_or("bts-light hält die Steuerung dieses Turniers nicht.")?;
+            .ok_or("bts-light hält die Steuerung dieses Turniers nicht.")?
+            .epoche;
         let wartend = q.wartende_ereignisse();
         if wartend > 0 {
             return Err(text_outbox_offen(wartend));
+        }
+        // Höchstens eine Rückgabe zugleich (Hauptfenster, mehrere TL-Geräte,
+        // Doppeltipp): Ein zweiter `DELETE` bekäme `epoche_veraltet`, und das
+        // sähe aus wie eine Rückholung.
+        if q.rueckgabe_laeuft {
+            return Err("Die Rückgabe läuft schon — bitte kurz warten.".into());
         }
         let token = q
             .token
             .clone()
             .ok_or("Kein Gerätetoken — bitte neu koppeln.")?;
-        (q.basis.clone(), token, l.epoche, q.n_bestaetigt())
+        q.rueckgabe_laeuft = true;
+        (q.basis.clone(), token, epoche, q.n_bestaetigt())
     };
+    // Freigabe auch, wenn der Aufruf abgebrochen wird (Gerät trennt).
+    struct Frei<'a>(&'a Mutex<Option<KernQuelle>>);
+    impl Drop for Frei<'_> {
+        fn drop(&mut self) {
+            if let Some(q) = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_mut()
+            {
+                q.rueckgabe_laeuft = false;
+            }
+        }
+    }
+    let _frei = Frei(z);
     let (basis, token, epoche, n) = auftrag;
     let r = api::lease_zurueckgeben(&basis, &token, epoche, n).await;
     let mut g = z.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1537,6 +1588,10 @@ pub(crate) async fn uebernehmen_in(z: &Mutex<Option<KernQuelle>>) -> Result<Stri
     }
     let bis = q.n_bestaetigt();
     let verworfen = q.protokoll.kuerzen_auf(bis, jetzt_ms())?;
+    // Was bleibt, hat badhub bestätigt und kommt über Paket und Ereignisse
+    // zurück. Bliebe es liegen, zählte es über einem gekappten Paket als
+    // „wartend“ und hielte Nachladen und Lease an.
+    q.protokoll.leeren()?;
     q.ablage.paket_speichern(&paket, etag.as_deref())?;
     q.paket = paket;
     q.etag = etag;

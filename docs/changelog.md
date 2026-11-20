@@ -15,6 +15,9 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   badhub es kürzt. Bricht dabei das Internet ab, bleibt das Geladene stehen
   und der Rest kommt mit der Übertragung nach; die Steuerung übernimmt
   bts-light erst mit vollständigem Stand.
+- Behoben: Nach **Steuerung wieder übernehmen** konnte ein großes
+  badhub-Turnier hängen bleiben (keine Steuerung, keine Übertragung). Ein so
+  hängender Stand heilt beim nächsten Start von selbst.
 - BTP-Turniere laufen unverändert.
 - Braucht das aktualisierte Relay auf badhub.de (wird vor dem Release
   eingespielt).

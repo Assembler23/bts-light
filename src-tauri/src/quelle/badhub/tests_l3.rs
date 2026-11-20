@@ -312,6 +312,9 @@ struct Badhub {
     /// Nach so vielen Seiten 503 (Netz bricht ab); `None` = nie.
     ausfall_nach: StdMutex<Option<usize>>,
     lease_aufrufe: AtomicUsize,
+    /// Paket in Teilen: höchstens so viele Ereignisse, dazu `n` und
+    /// `ereignisse_bis_n` wie badhub.
+    kappen: StdMutex<Option<usize>>,
 }
 
 impl Badhub {
@@ -481,7 +484,16 @@ async fn badhub_starten(b: Arc<Badhub>) -> String {
     async fn paket(State(b): State<Arc<Badhub>>) -> axum::response::Response {
         let mut p = b.paket.lock().unwrap().clone().unwrap();
         p.ereignisse = b.ereignisse.lock().unwrap().clone();
-        Json(p).into_response()
+        let Some(k) = *b.kappen.lock().unwrap() else {
+            return Json(p).into_response();
+        };
+        let kopf = b.n();
+        p.ereignisse.truncate(k);
+        let bis = p.ereignisse.last().map_or(0, TurnierEreignis::n);
+        let mut v = serde_json::to_value(&p).unwrap();
+        v["n"] = serde_json::json!(kopf);
+        v["ereignisse_bis_n"] = serde_json::json!(bis);
+        Json(v).into_response()
     }
     let app = Router::new()
         .route("/api/torg/v1/turnier/paket", axum::routing::get(paket))
@@ -1237,4 +1249,108 @@ async fn lease_erst_wenn_der_stand_bis_zum_kopf_nachgeladen_ist() {
         "n passte beim ersten Versuch"
     );
     mit(&z, |q| assert_eq!(q.abgleich().zustand, "aktuell"));
+}
+
+/// Zwei Eingaben unter der Lease, von badhub bestätigt.
+async fn zwei_bestaetigte(z: &StdMutex<Option<KernQuelle>>, b: &Badhub) {
+    lease_schritt(z, None).await;
+    mit(z, |q| q.ausfuehren(vec![aufruf(1, "1")], AKTEUR_HALLE)).unwrap();
+    mit(z, |q| q.ausfuehren(vec![aufruf(2, "2")], AKTEUR_HALLE)).unwrap();
+    while outbox_schritt(z).await == OutboxSchritt::Weiter {}
+    assert_eq!(mit(z, |q| q.n_bestaetigt()), b.n());
+    assert_eq!(mit(z, |q| q.wartende_ereignisse()), 0);
+}
+
+fn zuruecknehmen(spiel: u32) -> TurnierBefehl {
+    TurnierBefehl::AufrufZuruecknehmen {
+        id: String::new(),
+        konkurrenz: "HE".into(),
+        spiel,
+    }
+}
+
+#[tokio::test]
+async fn uebernehmen_mit_mehr_bestaetigten_als_das_gekappte_paket_traegt_laedt_nach_und_nimmt_die_lease(
+) {
+    // Befund aus v0.9.450: Hatte der PC mehr bestätigt, als badhub ins
+    // gekappte Paket packt, zählten die bestätigten Posten über dem Paket als
+    // „wartend“ — kein Nachladen, keine Lease, keine Outbox.
+    let (_daten, b, _cfg, z) = gekoppelt().await;
+    zwei_bestaetigte(&z, &b).await;
+    zurueckgeben_in(&z).await.unwrap();
+    let kopf = b.n();
+    *b.kappen.lock().unwrap() = Some(4);
+    b.seite.store(2, Ordering::SeqCst);
+    // Netz bricht nach der ersten Seite ab.
+    *b.ausfall_nach.lock().unwrap() = Some(1);
+    let text = uebernehmen_in(&z).await.unwrap();
+    assert!(text.contains("erst bis Ereignis 6"), "{text}");
+    mit(&z, |q| {
+        assert_eq!(q.n_lokal(), 6, "lückenloser Anfang, nichts darüber");
+        assert_eq!(q.wartende_posten(), 0);
+        assert!(q.lease.is_none());
+    });
+    // Ohne vollständigen Stand keine Lease.
+    abgleich_schritt_in(&z, false, None).await;
+    assert!(b.lease.lock().unwrap().is_none());
+    assert_eq!(mit(&z, |q| q.n_lokal()), 6);
+
+    // Netz wieder da: bis zum Kopf nachgeladen, dann die Lease.
+    *b.ausfall_nach.lock().unwrap() = None;
+    abgleich_schritt_in(&z, false, None).await;
+    assert_eq!(mit(&z, |q| q.n_lokal()), kopf);
+    assert!(b.lease.lock().unwrap().is_some());
+    mit(&z, |q| assert_eq!(q.abgleich().zustand, "aktuell"));
+    // Und die Outbox läuft wieder.
+    mit(&z, |q| q.ausfuehren(vec![zuruecknehmen(1)], AKTEUR_HALLE)).unwrap();
+    assert_eq!(outbox_schritt(&z).await, OutboxSchritt::Weiter);
+    assert_eq!(b.n(), kopf + 1);
+    mit(&z, |q| assert_eq!(q.wartende_ereignisse(), 0));
+}
+
+#[tokio::test]
+async fn haengender_stand_aus_v0_9_450_heilt_beim_laden() {
+    // So lag es nach „Steuerung wieder übernehmen“ in v0.9.450 auf der
+    // Platte: keine Lease, gekapptes Paket, bestätigte Posten darüber.
+    let (daten, b, cfg, z) = gekoppelt().await;
+    zwei_bestaetigte(&z, &b).await;
+    drop(z);
+    let a = Ablage::neu(daten.path(), UUID).unwrap();
+    lease::entfernen(a.dir());
+    let (mut p, _) = a.paket_laden().unwrap().unwrap();
+    p.ereignisse.truncate(4);
+    a.paket_speichern(&p, Some("\"s1\"")).unwrap();
+
+    let q = KernQuelle::laden(daten.path(), &cfg).unwrap();
+    assert_eq!(q.wartende_posten(), 0, "nichts hält Nachladen und Lease an");
+    assert!(q.protokoll.posten().is_empty());
+    // Was über dem Paket lag, ist gesichert, nicht verloren.
+    assert!(std::fs::read_dir(a.dir())
+        .unwrap()
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().starts_with("verworfen-")));
+    let z = StdMutex::new(Some(q));
+    abgleich_schritt_in(&z, false, None).await;
+    assert_eq!(mit(&z, |q| q.n_lokal()), b.n());
+    assert!(b.lease.lock().unwrap().is_some());
+}
+
+#[tokio::test]
+async fn gleichzeitige_rueckgabe_bleibt_zurueckgegeben_und_holt_keine_namen_zurueck() {
+    // Doppeltipp oder zwei TL-Geräte: Beide prüfen die Lease, bevor einer
+    // fertig ist. Der zweite bekommt `epoche_veraltet` — das darf nicht als
+    // Rückholung gelten.
+    let (_daten, _b, _cfg, z) = gekoppelt().await;
+    lease_schritt(&z, None).await;
+    let (eins, zwei) = tokio::join!(zurueckgeben_in(&z), zurueckgeben_in(&z));
+    assert!(eins.is_ok(), "{eins:?}");
+    let zwei = zwei.unwrap_err();
+    assert!(zwei.contains("läuft schon"), "{zwei}");
+    // Danach ist die Sperre wieder frei: ein dritter Druck sagt den Stand.
+    let drei = zurueckgeben_in(&z).await.unwrap_err();
+    assert!(drei.contains("hält die Steuerung"), "{drei}");
+    mit(&z, |q| {
+        assert_eq!(q.abgleich().zustand, "zurueckgegeben");
+        assert!(q.paket.meldungen.is_empty());
+    });
 }

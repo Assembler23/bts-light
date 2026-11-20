@@ -253,6 +253,21 @@ badhub kappt `GET turnier/paket` auf höchstens 2000 Ereignisse und liefert nebe
   (früher heilte `n_veraltet` erst über mehrere Takte).
 - **Stammdaten-Abruf alle 60 s:** braucht kein Nachladen — die Ereignisse werden mit den gespeicherten vereinigt, das
   Paket ist immer ein Anfang ohne Lücke, und was fehlt, holt der nächste Takt ab `n`.
+- **Jeder Pfad, der das Paket ersetzt oder lädt,** endet bei „seitenweise bis `n`, dann erst Lease“: Koppeln und
+  Übernehmen laden selbst nach, der Start (`KernQuelle::laden`) und der 60-s-Abruf überlassen den Rest dem Abgleich,
+  der ohne vollständigen Stand keine Lease nimmt; die Outbox läuft ohnehin nur unter einer Lease.
+- **Befund aus v0.9.450 (behoben):** „Steuerung wieder übernehmen“ ersetzte das Paket, ließ aber bestätigte Posten im
+  Protokoll. Trug badhubs gekapptes Paket weniger, als der PC bestätigt hatte, zählten sie als „wartend“ — kein
+  Nachladen, keine Lease, keine Outbox, Neu-Koppeln abgewiesen. Jetzt leert `uebernehmen_in` das Protokoll nach dem
+  Verwerfen des Nicht-Angekommenen (der Rest ist bestätigt und kommt von badhub zurück), und `KernQuelle::laden` räumt
+  einen so hängenden Stand ohne Lease (`protokoll_ohne_lease_raeumen`: was über dem Paket liegt, gesichert nach
+  `verworfen-<ms>.jsonl`).
+- **Rückgabe nur einmal zugleich:** `zurueckgeben_in` sperrt über `rueckgabe_laeuft` (auch bei Abbruch freigegeben).
+  Ein zweiter, gleichzeitiger `DELETE` bekäme sonst `epoche_veraltet`, würde als Rückholung gewertet und holte mit dem
+  nächsten Paket die Namen zurück.
 - Tests: `gekapptes_paket_wird_beim_koppeln_seitenweise_nachgeladen`,
   `abbruch_beim_nachladen_laesst_einen_lueckenlosen_anfang_den_der_abgleich_ergaenzt` (`tests.rs`),
-  `lease_erst_wenn_der_stand_bis_zum_kopf_nachgeladen_ist` (`tests_l3.rs`).
+  `lease_erst_wenn_der_stand_bis_zum_kopf_nachgeladen_ist`,
+  `uebernehmen_mit_mehr_bestaetigten_als_das_gekappte_paket_traegt_laedt_nach_und_nimmt_die_lease`,
+  `haengender_stand_aus_v0_9_450_heilt_beim_laden`, `gleichzeitige_rueckgabe_bleibt_zurueckgegeben_und_holt_keine_namen_zurueck`
+  (`tests_l3.rs`).

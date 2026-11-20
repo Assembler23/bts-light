@@ -215,6 +215,15 @@ impl Protokoll {
         Ok(zahl)
     }
 
+    /// Leert das Protokoll ohne Sicherungskopie — nur für Posten, die
+    /// badhub nachweislich bestätigt hat (sie kommen über Paket und
+    /// Ereignisse zurück).
+    pub fn leeren(&mut self) -> Result<(), String> {
+        super::schluessel::schreiben_privat(&self.datei, b"")?;
+        self.posten.clear();
+        Ok(())
+    }
+
     /// Die Posten nach `basis_n` (noch nicht von badhub bestätigt).
     pub fn offen_nach(&self, basis_n: u64) -> impl Iterator<Item = &Posten> {
         self.posten.iter().filter(move |p| p.n() > basis_n)

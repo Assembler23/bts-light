@@ -2194,9 +2194,6 @@ pub(crate) async fn execute(
     }
 }
 
-/// Ein Kernbefehl aus badhub: derselbe Schreibpfad wie eine Eingabe in der
-/// Halle (Lease, Prüfung im Kern, Protokoll). Antwort „übernommen“ oder die
-/// Ablehnung des Kerns mit Code und Text.
 /// Darf dieser Turnier-PC die Steuerung aus dem TL-Web zurückgeben? Nur bei
 /// Quelle badhub am Master. Welches **Gerät** es darf, ist schon vorher
 /// entschieden: jedes gekoppelte TL-Gerät — das Rechtemodell des TL-Web
@@ -2233,6 +2230,9 @@ fn badhub_rueckgabe_antwort(
     }
 }
 
+/// Ein Kernbefehl aus badhub: derselbe Schreibpfad wie eine Eingabe in der
+/// Halle (Lease, Prüfung im Kern, Protokoll). Antwort „übernommen“ oder die
+/// Ablehnung des Kerns mit Code und Text.
 fn execute_kern_befehl(
     ctx: &crate::tablet::server::ServerCtx,
     befehl: serde_json::Value,
