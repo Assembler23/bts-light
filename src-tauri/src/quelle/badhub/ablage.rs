@@ -172,6 +172,7 @@ mod tests {
             turnier: PaketTurnier {
                 id: 17,
                 uuid: UUID.into(),
+                guid: None,
                 name: "Testturnier".into(),
                 beginn: None,
                 ende: None,

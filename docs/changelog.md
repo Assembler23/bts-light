@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.453
+## v0.9.455
 
 - **Standby-PC für badhub-Turniere.** Ein zweiter PC kann als Ansage-Slave des
   Turnier-PCs laufen und in badhub als Standby eingetragen werden. Er spiegelt
@@ -20,6 +20,7 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - BTP-Turniere laufen unverändert.
 
 ## v0.9.452
+## v0.9.454
 
 - **Rückzug während des Turniers** (badhub-Turniere). Im TL-Web trägt der neue
   Knopf **Rückzug** ein, dass ein Spieler oder Paar aufhört: Offene KO-Spiele
@@ -27,13 +28,20 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   **Ergebnisse behalten** oder **streichen**. Entfallene Spiele verschwinden
   aus Warteliste und Automatik; ein Versehen lässt sich zurücknehmen. Auch ein
   Rückzug aus badhub kommt in der Halle an.
-- Unterschiedliche Zählweisen innerhalb eines badhub-Turniers (z. B. Gruppe
-  bis 15, KO bis 21) erreichen Tablets und Ansage je Spiel.
-- Rechnet mit Turnierkern 0.14.0 — **nur zusammen mit badhub auf Kern 0.14.0
-  ausliefern**; mit älterem bts-light verweigert badhub die Steuerung.
 - BTP-Turniere laufen unverändert.
 - Braucht das aktualisierte Relay auf badhub.de (wird vor dem Release
   eingespielt).
+
+## v0.9.452
+
+- **Zählweise je Spiel bei badhub-Turnieren.** badhub kann die Zählweise
+  jetzt für das Turnier, je Konkurrenz, getrennt für Gruppen- und KO-Phase und
+  für einzelne Spiele festlegen (3×21, 3×15, 5×11 wie in der Bundesliga …).
+  Tablet und TL-Web bekommen das Zählformat jedes Spiels einzeln: Satzziel,
+  Obergrenze und Pause (bei 11er-Sätzen keine Pause im Satz).
+- Turnierkern 0.14.0 (passend zu badhub). Ältere Versionen zeigen bei
+  badhub-Turnieren den Hinweis auf die abweichende Kern-Version.
+- BTP-Turniere laufen unverändert.
 
 ## v0.9.451
 

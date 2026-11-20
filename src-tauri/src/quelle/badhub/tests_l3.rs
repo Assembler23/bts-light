@@ -628,6 +628,7 @@ async fn gekoppelt_mit(
         name: "Wintercup".into(),
         basis,
         geraet_name: "Halle 1 PC".into(),
+        guid: String::new(),
     };
     let q = KernQuelle::laden(daten.path(), &cfg).unwrap();
     (daten, b, cfg, StdMutex::new(Some(q)))

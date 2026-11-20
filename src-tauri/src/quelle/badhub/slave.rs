@@ -290,7 +290,10 @@ async fn spiegeln(
             Some(q) => q.spiegel_aufnehmen(m),
             None => return Ok(()),
         };
-        r.map_err(Spiegelfehler::Alt)?;
+        r.map_err(|e| match e {
+            super::standby::SpiegelFehler::Alt(t) => Spiegelfehler::Alt(t),
+            andere => Spiegelfehler::Sonst(andere.to_string()),
+        })?;
         let nachher = super::zustand().as_ref().map_or(0, |q| q.spiegel_n());
         if nachher >= master_n || nachher <= vorher {
             break;

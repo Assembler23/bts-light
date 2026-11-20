@@ -1229,12 +1229,30 @@ pub struct BadhubTurnierConfig {
     /// Gerätename, unter dem dieser PC in badhub gekoppelt ist.
     #[serde(default)]
     pub geraet_name: String,
+    /// GUID der Turnierseite in badhub (`turnier.guid` im Turnierpaket): die
+    /// turnier.de-GUID, wenn das Turnier eine hat, sonst die eigene UUID.
+    /// Unter ihr laufen Liveticker, Check-In und Aushang — sonst landete der
+    /// Stand unter der GUID, die zuletzt im Feld „Turnier bei turnier.de“
+    /// stand (Köpi-Cup 2027 auf Test, 20.11.2026). Leer bei Kopplungen von
+    /// vor v0.9.453 und bei badhub ohne das Feld → [`Self::turnier_guid`]
+    /// nimmt die UUID.
+    #[serde(default)]
+    pub guid: String,
 }
 
 impl BadhubTurnierConfig {
     /// Ist ein Turnier gekoppelt?
     pub fn gekoppelt(&self) -> bool {
         !self.uuid.trim().is_empty() && !self.basis.trim().is_empty()
+    }
+
+    /// Turnier-GUID für Liveticker, Check-In und Aushang in kanonischer Form:
+    /// `guid`, hilfsweise die UUID; `None` ohne Kopplung.
+    pub fn turnier_guid(&self) -> Option<String> {
+        if !self.gekoppelt() {
+            return None;
+        }
+        kanonische_guid(&self.guid).or_else(|| kanonische_guid(&self.uuid))
     }
 }
 
@@ -1986,9 +2004,43 @@ pub enum ConfigError {
 
 impl AppConfig {
     /// Die Turnier-GUID in kanonischer Form — oder `None`, wenn keine
-    /// gültige eingetragen ist. Einzige Quelle für Push und Links.
+    /// gültige eingetragen ist. Einzige Quelle für Push, Check-In und Links.
+    ///
+    /// Bei Quelle badhub mit gekoppeltem Turnier gilt die GUID aus der
+    /// Kopplung ([`BadhubTurnierConfig::turnier_guid`]), nicht das Feld
+    /// „Turnier bei turnier.de“: Das Turnier steht fest, ein dort stehen
+    /// gebliebener Wert eines anderen Turniers darf den Liveticker nicht
+    /// umleiten. Das Feld selbst bleibt unangetastet — zurück auf BTP gilt
+    /// es wieder.
+    /// GUID aus der badhub-Kopplung, wenn sie gilt (Quelle badhub, Turnier
+    /// gekoppelt) — sonst `None`, und es bleibt beim Feld.
+    fn badhub_guid(&self) -> Option<String> {
+        if self.quelle == QuelleArt::Badhub {
+            self.badhub_turnier.turnier_guid()
+        } else {
+            None
+        }
+    }
+
+    /// Ist der Check-In einsatzbereit? Bei Quelle badhub mit der GUID aus der
+    /// Kopplung, sonst unverändert [`CheckinConfig::is_ready`].
+    pub fn checkin_bereit(&self) -> bool {
+        match self.badhub_guid() {
+            Some(_) => self.checkin.enabled,
+            None => self.checkin.is_ready(),
+        }
+    }
+
+    /// GUID für Check-In, Punktverlauf und Zettel: bei Quelle badhub die aus
+    /// der Kopplung, sonst unverändert `checkin.tournament_uuid` (getrimmt).
+    pub fn checkin_guid(&self) -> String {
+        self.badhub_guid()
+            .unwrap_or_else(|| self.checkin.tournament_uuid.trim().to_string())
+    }
+
     pub fn tournament_uuid_kanonisch(&self) -> Option<String> {
-        kanonische_guid(&self.tournament_uuid)
+        self.badhub_guid()
+            .or_else(|| kanonische_guid(&self.tournament_uuid))
     }
 
     /// Pfad der TP-Datei für das **aktuelle** Turnier — nur, wenn die beim
@@ -1997,6 +2049,10 @@ impl AppConfig {
     /// Schreibweise nicht grundlos „Datei neu wählen" auslöst. Leerer Pfad,
     /// fehlende oder abweichende GUID → `None`.
     pub fn tp_datei_fuer_turnier(&self) -> Option<std::path::PathBuf> {
+        // Für badhub-Turniere gibt es keinen TP-Datei-Upload.
+        if self.quelle == QuelleArt::Badhub {
+            return None;
+        }
         let pfad = self.tp_upload.path.trim();
         if pfad.is_empty() {
             return None;
@@ -2214,6 +2270,86 @@ mod tests {
         // Das Token steht nie in der Konfiguration.
         let text = serde_json::to_string(&AppConfig::default()).unwrap();
         assert!(!text.contains("token"), "kein Token-Feld in config.json");
+    }
+
+    /// Köpi-Cup 2027 auf Test (20.11.2026): Bei Quelle badhub ging der
+    /// Liveticker unter der GUID aus dem Feld „Turnier bei turnier.de“ hinaus
+    /// — einem älteren Testturnier — statt unter der des gekoppelten Turniers.
+    #[test]
+    fn quelle_badhub_nimmt_die_guid_der_kopplung() {
+        const FELD: &str = "6b2352e2-2231-45a2-a338-5ed0cb2e1a5c";
+        const UUID: &str = "0ea5fd86-a64f-4445-a8de-bae3dbf762ba";
+        const TDE: &str = "{11111111-2222-4333-8444-555555555555}";
+        let feld = FELD.to_ascii_uppercase();
+        let uuid = UUID.to_ascii_uppercase();
+        let mut cfg = AppConfig {
+            tournament_uuid: FELD.into(),
+            ..AppConfig::default()
+        };
+        cfg.checkin.enabled = true;
+        cfg.checkin.tournament_uuid = FELD.into();
+        cfg.badhub_turnier = BadhubTurnierConfig {
+            uuid: UUID.into(),
+            basis: "https://test.badhub.de/api/torg/v1".into(),
+            ..BadhubTurnierConfig::default()
+        };
+
+        // BTP: unverändert das Feld, auch wenn noch eine Kopplung besteht.
+        assert_eq!(cfg.tournament_uuid_kanonisch(), Some(feld.clone()));
+
+        // badhub ohne `guid` (Kopplung von vor v0.9.453): die UUID.
+        cfg.quelle = QuelleArt::Badhub;
+        assert_eq!(cfg.tournament_uuid_kanonisch(), Some(uuid.clone()));
+        assert_eq!(cfg.checkin_guid(), uuid);
+        assert!(cfg.checkin_bereit());
+
+        // badhub mit turnier.de-GUID: die gewinnt.
+        cfg.badhub_turnier.guid = TDE.into();
+        assert_eq!(
+            cfg.tournament_uuid_kanonisch().as_deref(),
+            Some("11111111-2222-4333-8444-555555555555")
+        );
+
+        // Ungültige `guid` fällt auf die UUID zurück, nicht aufs Feld.
+        cfg.badhub_turnier.guid = "kaputt".into();
+        assert_eq!(cfg.tournament_uuid_kanonisch(), Some(uuid));
+
+        // badhub ohne Kopplung: wieder das Feld.
+        cfg.badhub_turnier = BadhubTurnierConfig::default();
+        assert_eq!(cfg.tournament_uuid_kanonisch(), Some(feld));
+
+        // Check-In braucht weiter den Schalter.
+        cfg.checkin.enabled = false;
+        assert!(!cfg.checkin_bereit());
+    }
+
+    /// badhub-Turniere haben keine TP-Datei: auch eine passend gebundene
+    /// Datei gilt bei Quelle badhub nicht (sonst Upload/Rückfragen im Takt).
+    #[test]
+    fn quelle_badhub_hat_keine_tp_datei() {
+        const G: &str = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
+        let mut cfg = AppConfig {
+            tournament_uuid: G.into(),
+            ..AppConfig::default()
+        };
+        cfg.tp_upload.path = "C:/t.tp".into();
+        cfg.tp_upload.tournament_uuid = G.into();
+        assert!(cfg.tp_datei_fuer_turnier().is_some());
+        cfg.quelle = QuelleArt::Badhub;
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
+    }
+
+    #[test]
+    fn badhub_turnier_ohne_guid_bleibt_lesbar() {
+        let t: BadhubTurnierConfig = serde_json::from_str(
+            r#"{"uuid":"0ea5fd86-a64f-4445-a8de-bae3dbf762ba","id":3,"name":"X","basis":"https://badhub.de/api/torg/v1","geraet_name":"PC"}"#,
+        )
+        .unwrap();
+        assert_eq!(t.guid, "");
+        assert_eq!(
+            t.turnier_guid().as_deref(),
+            Some("0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA")
+        );
     }
 
     // ── Druckzeitpunkt des Autodrucks (Spec `zettel-druck-bei-aufruf`) ──

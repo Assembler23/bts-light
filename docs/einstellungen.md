@@ -101,6 +101,13 @@ selbst herausgezogen. Sieht die Eingabe nicht nach einer Kennung aus, warnt die
 Seite. Ohne gültige Kennung **startet die Übertragung nicht** — die Meldung
 lautet dann „Die Turnier-Kennung von turnier.de fehlt".
 
+Bei der Turnierquelle **badhub** steht an dieser Stelle kein Eingabefeld,
+sondern die Kennung des gekoppelten Turniers („Kommt aus der Kopplung mit …").
+Liveticker, Check-In und Aushang laufen dann immer unter diesem Turnier — ein
+im Feld stehen gebliebener Wert eines früheren Turniers gilt erst wieder, wenn
+du auf BTP zurückstellst.
+<!-- pruef: "Kommt aus der Kopplung mit" in src/pages/SetupWizard.tsx -->
+
 Diese Kennung hängt an mehr als am Liveticker: Der Hallen-Check-In sendet ohne
 sie nichts, und Punktverlauf sowie abgelegte Schiedsrichterzettel werden damit
 dem richtigen Turnier zugeordnet.
@@ -148,7 +155,7 @@ wie bisher an badhub.
 
 ### Turnierquelle
 
-*Seit v0.9.453 auch im Ansage-Slave-Modus (für einen Standby-PC).*
+*Im Ansage-Slave-Modus nur, wenn schon „badhub-Turnier“ gewählt ist (Standby-PC, seit v0.9.455).*
 <!-- pruef: "Turnierquelle" in src/pages/SetupWizard.tsx -->
 
 Woher bts-light das Turnier liest. **BTP** ist vorausgewählt — so läuft jede
@@ -198,7 +205,7 @@ gekoppeltem Turnier.
   Namen und Felder), übernimmt aber keine Steuerung: Er liest den Stand vom
   Turnier-PC, dessen Adresse im Feld **Adresse des Turnier-PCs (Master)** steht.
   <!-- pruef: "Adresse des Turnier-PCs (Master)" in src/pages/SetupWizard.tsx -->
-- **Notfall-Sicherung (seit v0.9.453):** Am Turnier-PC unter **Ordner für die
+- **Notfall-Sicherung (seit v0.9.455):** Am Turnier-PC unter **Ordner für die
   Notfall-Sicherung (leer = aus)** einen Ordner eintragen oder mit **Ordner
   wählen** aussuchen, am besten einen USB-Stick oder ein Netzlaufwerk.
   Voreingestellt ist keiner. bts-light schreibt dort höchstens alle 30 Sekunden
@@ -208,7 +215,7 @@ gekoppeltem Turnier.
   <!-- pruef: "Ordner wählen" in src/pages/SetupWizard.tsx -->
   <!-- pruef: /SICHERUNG_TAKT_MS: u64 = 30_000/ in src-tauri/src/quelle/badhub/standby.rs -->
   <!-- pruef: "notfall-{}.btsk" in src-tauri/src/quelle/badhub/standby.rs -->
-- **Standby-PC (seit v0.9.453):** Ein zweiter PC kann als Ansage-Slave des
+- **Standby-PC (seit v0.9.455):** Ein zweiter PC kann als Ansage-Slave des
   Turnier-PCs laufen und in badhub (Bereich Turniertag) als **Standby**
   eingetragen werden. Er spiegelt dann laufend die Eingaben des Turnier-PCs und
   kann das Turnier übernehmen, wenn dieser ausfällt — auch ganz ohne Internet.

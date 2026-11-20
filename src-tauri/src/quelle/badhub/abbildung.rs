@@ -156,7 +156,9 @@ fn disziplin(kuerzel: &str) -> Discipline {
     }
 }
 
-/// Zählweise → BTP-Zählformat. Ohne Deckel ein unerreichbarer Wert.
+/// Zählweise → BTP-Zählformat. Ohne Deckel ein unerreichbarer Wert. Pause bei 11 (Sätze bis 21)
+/// bzw. 8 (bis 15); 11er-Sätze (5×11, Bundesliga) haben keine reguläre Pause im Satz — wie
+/// BTP-Satztyp 304 in `ScoringFormat::from_btp`.
 fn zaehlformat(z: &Zaehlweise) -> ScoringFormat {
     let ziel = i64::from(z.satz.ziel);
     ScoringFormat {
@@ -313,6 +315,9 @@ pub fn abbilden(stand: &TurnierStand, paket: &Paket) -> BtpSnapshot {
                 continue;
             }
             let (from1, from2) = herkunft(s.nr);
+            // Zählweise je Spiel (Kern ab 0.14.0: Spiel → Konkurrenz/KO-Phase → Turnier → 3×21),
+            // nicht mehr je Konkurrenz — Gruppen 3×15 und KO 3×21 oder ein Finale 5×11 gehen so durch.
+            let scoring = zaehlformat(&s.zaehlweise);
             let team = |m: Option<u32>| -> (i64, Vec<BtpPlayer>, Option<String>) {
                 match m {
                     Some(m) => (
@@ -399,10 +404,7 @@ pub fn abbilden(stand: &TurnierStand, paket: &Paket) -> BtpSnapshot {
                 preparation_call_ts: None,
                 preparation_hall: None,
                 preparation_call_rank: None,
-                // Zählweise je Spiel (Kern 0.14.0: Spiel → KO-Phase/Konkurrenz →
-                // Turnier → Badminton) — Tablets, Plausibilität (R5) und Ansage
-                // lesen sie am Spiel.
-                scoring: zaehlformat(&s.zaehlweise),
+                scoring,
             });
         }
     }

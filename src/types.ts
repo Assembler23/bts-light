@@ -48,6 +48,9 @@ export interface BadhubTurnierConfig {
   name: string;
   basis: string;
   geraet_name: string;
+  /** GUID der Turnierseite (turnier.de-GUID, sonst `uuid`); leer bei älteren
+   *  Kopplungen — dann gilt `uuid`. Liveticker und Check-In laufen darunter. */
+  guid?: string;
 }
 
 /** Ergebnis von `badhub_koppeln` (Rust `quelle::badhub::Kopplung`). */

@@ -123,7 +123,20 @@ async fn standby_spiegelt_die_posten_des_hauptrechners() {
     alt.posten = None;
     alt.bestaetigt_n = None;
     let e = mit(&zs, |q| q.spiegel_aufnehmen(alt)).unwrap_err();
-    assert!(e.contains("ältere"), "{e}");
+    assert!(
+        matches!(&e, standby::SpiegelFehler::Alt(t) if t.contains("ältere")),
+        "{e:?}"
+    );
+
+    // Neue Epoche am Hauptrechner: der alte Spiegel wird gesichert, nicht verlängert.
+    let mut neu = mit(&zm, |q| {
+        slave::fuer_slave_aus(q, Some(&k), 0, true).unwrap()
+    });
+    neu.epoche = Some(7);
+    neu.posten = Some(Vec::new());
+    mit(&zs, |q| q.spiegel_aufnehmen(neu)).unwrap();
+    assert!(mit(&zs, |q| q.spiegel.posten().is_empty()));
+    assert_eq!(mit(&zs, |q| q.spiegel_stand.as_ref().unwrap().epoche), 7);
 }
 
 #[tokio::test]
@@ -200,6 +213,7 @@ fn cfg_von(z: &Z) -> BadhubTurnierConfig {
         name: "Wintercup".into(),
         basis: q.basis.clone(),
         geraet_name: "Standby".into(),
+        ..Default::default()
     })
 }
 

@@ -157,7 +157,7 @@ Darunter steht der **Slave-Schlüssel** für einen Ansage-Slave im Hallennetz
 (siehe [Einstellungen](einstellungen.md)).
 <!-- pruef: "Slave-Schlüssel für einen Ansage-Slave im Hallennetz" in src/components/BadhubAbgleichPanel.tsx -->
 
-### Standby-PC (badhub-Turniere, seit v0.9.453)
+### Standby-PC (badhub-Turniere, seit v0.9.455)
 
 Läuft ein PC als Ansage-Slave eines badhub-Turniers, steht auf der Seite
 **Status** ein Kasten mit dem Standby-Stand. Ist der PC in badhub als Standby

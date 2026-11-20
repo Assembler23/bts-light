@@ -550,7 +550,7 @@ danach nur noch in badhub.
 
 Bei BTP-Turnieren erscheint nichts davon.
 
-**Rückzug während des Turniers (seit v0.9.452).** Zieht ein Spieler oder ein
+**Rückzug während des Turniers (seit v0.9.454).** Zieht ein Spieler oder ein
 Paar während eines badhub-Turniers zurück, trägt die Turnierleitung das mit dem
 Knopf **Rückzug** im Kopf ein — statt jedes Spiel einzeln als kampflos.
 <!-- pruef: "Rückzug" in src-tauri/assets/tl.html -->
@@ -577,7 +577,7 @@ Knopf **Rückzug** im Kopf ein — statt jedes Spiel einzeln als kampflos.
   Steuerung hält. Einen Rückzug aus badhub selbst nimmt der Turnier-PC als
   Kernbefehl an.
 
-**Nach einer Standby-Übernahme (seit v0.9.453)** steht neben dem Abgleich im
+**Nach einer Standby-Übernahme (seit v0.9.455)** steht neben dem Abgleich im
 Kopf gegebenenfalls ein orangefarbener Hinweis. Er sagt, wie viele Eingaben
 badhub abgewiesen hat, oder dass der alte Turnier-PC eben noch online war
 (siehe [Oberflächen](oberflaechen.md), „Standby-PC“).

@@ -1447,6 +1447,13 @@ pub fn sicherung_einlesen(pfad: &Path) -> Result<String, String> {
     }
 }
 
+/// Hält dieser PC eine aktive Lease?
+pub fn haelt_lease() -> bool {
+    zustand()
+        .as_ref()
+        .is_some_and(|q| q.lease.as_ref().is_some_and(Lease::aktiv))
+}
+
 /// „Hauptrechner ausgefallen – Turnier übernehmen“ am geladenen Zustand.
 /// Die Umstellung auf den Master-Betrieb (kein Slave mehr) macht der Aufrufer.
 pub fn standby_uebernehmen() -> Result<String, String> {
@@ -2305,6 +2312,14 @@ pub async fn koppeln(
             name: antwort.turnier.name,
             basis: basis.to_string(),
             geraet_name: name.to_string(),
+            // Nur eine gültige GUID übernehmen; sonst bleibt es bei der UUID
+            // (`BadhubTurnierConfig::turnier_guid`).
+            guid: paket
+                .turnier
+                .guid
+                .as_deref()
+                .and_then(crate::config::kanonische_guid)
+                .unwrap_or_default(),
         },
         konkurrenzen: paket.konkurrenzen.len(),
         spiele,

@@ -39,7 +39,7 @@ import {
   streamWerbungLink,
   type StreamWerbungOptionen,
 } from "../io/streamLink.mjs";
-import { extractTournamentGuid, isTournamentGuid } from "../tournamentGuid";
+import { wirksameTurnierGuid } from "../tournamentGuid";
 import type {
   AppConfig,
   ComboDirView,
@@ -343,9 +343,8 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
   // Turnier-GUID VOR display=/halle= anhängen (ADR 0054, I3) — sonst zeigt
   // der Online-Link bei zwei parallelen Turnieren desselben Verbands auf den
   // falschen Stand, weil badhub sonst nur den Verbands-Schlüssel kennt.
-  const guid = isTournamentGuid(config.tournament_uuid)
-    ? extractTournamentGuid(config.tournament_uuid)
-    : "";
+  // Bei Quelle badhub die GUID der Kopplung (wie der Liveticker-Push).
+  const guid = wirksameTurnierGuid(config);
   const liveUrlMitGuid = linkMitGuid(liveUrl, guid);
   const onlineOverviewUrl = liveUrlMitGuid
     ? liveUrlMitGuid + (liveUrlMitGuid.includes("?") ? "&" : "?") + "display=monitor"

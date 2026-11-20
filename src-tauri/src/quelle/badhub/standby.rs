@@ -86,6 +86,24 @@ impl PostenWire {
     }
 }
 
+/// Warum ein Spiegel-Abruf nicht übernommen wurde.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpiegelFehler {
+    /// Der Hauptrechner liefert keine Posten (ältere Version).
+    Alt(String),
+    /// Platte nicht schreibbar.
+    Platte(String),
+}
+
+impl std::fmt::Display for SpiegelFehler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SpiegelFehler::Alt(t) => write!(f, "{t}"),
+            SpiegelFehler::Platte(t) => write!(f, "Spiegel nicht gesichert ({t})"),
+        }
+    }
+}
+
 /// Inhalt von `spiegel.json`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpiegelStand {
@@ -271,20 +289,38 @@ impl KernQuelle {
 
     /// Eine Antwort des Hauptrechners in den Spiegel übernehmen. `Err`, wenn
     /// der Hauptrechner keine Posten liefert (ältere Version).
-    pub fn spiegel_aufnehmen(&mut self, m: MasterEreignisse) -> Result<(), String> {
+    pub fn spiegel_aufnehmen(&mut self, m: MasterEreignisse) -> Result<(), SpiegelFehler> {
         let (Some(posten), Some(bestaetigt)) = (m.posten, m.bestaetigt_n) else {
-            return Err(
+            return Err(SpiegelFehler::Alt(
                 "Der Hauptrechner liefert keine Posten (ältere bts-light-Version) — Standby-Spiegelung \
                  nicht möglich, bitte dort aktualisieren."
                     .into(),
-            );
+            ));
         };
         let jetzt = jetzt_ms();
+        // Andere Epoche als bisher gespiegelt (Hauptrechner hat die Steuerung
+        // neu genommen): nie an den alten Spiegel anhängen.
+        let alte_epoche = self.spiegel_stand.as_ref().map_or(0, |s| s.epoche);
+        let epoche_neu = m
+            .epoche
+            .is_some_and(|e| alte_epoche > 0 && e != alte_epoche);
+        if epoche_neu && !self.spiegel.posten().is_empty() {
+            let weg = self
+                .spiegel
+                .kuerzen_auf(0, jetzt)
+                .map_err(SpiegelFehler::Platte)?;
+            tracing::warn!(
+                "Quelle badhub: Hauptrechner unter neuer Epoche — {weg} gespiegelte Posten gesichert"
+            );
+        }
         if m.n < self.spiegel_n() {
             // Der Hauptrechner ist hinter dem Spiegel (Steuerung neu
             // übernommen, anderes Protokoll): nicht still zusammenführen —
             // den Spiegel sichern und von vorn.
-            let weg = self.spiegel.kuerzen_auf(self.paket.n(), jetzt)?;
+            let weg = self
+                .spiegel
+                .kuerzen_auf(self.paket.n(), jetzt)
+                .map_err(SpiegelFehler::Platte)?;
             tracing::warn!(
                 "Quelle badhub: Hauptrechner hinter dem Spiegel — {weg} gespiegelte Posten gesichert"
             );
@@ -326,7 +362,9 @@ impl KernQuelle {
             bis = p.n();
             anhaengen.push(p.als_posten(jetzt));
         }
-        self.spiegel.anhaengen(anhaengen)?;
+        self.spiegel
+            .anhaengen(anhaengen)
+            .map_err(SpiegelFehler::Platte)?;
         let stand = SpiegelStand {
             epoche: m
                 .epoche
@@ -336,7 +374,7 @@ impl KernQuelle {
             stand_ms: jetzt,
             quelle: "lan".into(),
         };
-        json_speichern(self.ablage.dir(), SPIEGEL_STAND, &stand)?;
+        json_speichern(self.ablage.dir(), SPIEGEL_STAND, &stand).map_err(SpiegelFehler::Platte)?;
         self.spiegel_stand = Some(stand);
         self.standby_hinweis = None;
         Ok(())
@@ -417,7 +455,11 @@ impl KernQuelle {
                 ));
             }
         }
-        if s.n <= self.spiegel_n() {
+        let gleiche_epoche = self
+            .spiegel_stand
+            .as_ref()
+            .is_none_or(|st| st.epoche == 0 || st.epoche == s.epoche);
+        if gleiche_epoche && s.n <= self.spiegel_n() {
             return Err(format!(
                 "Die Sicherung reicht bis Ereignis {}, dieser PC hat schon bis {} gespiegelt — nichts \
                  Neues.",
@@ -546,10 +588,14 @@ impl KernQuelle {
             ..Default::default()
         };
         lease::speichern(self.ablage.dir(), &l)?;
-        self.spiegel.ersetzen(Vec::new())?;
+        // Ab hier gilt die Übernahme — Speicher und Platte gleich halten; ein
+        // Spiegel, der nicht geleert werden kann, stört nicht mehr.
+        self.lease = Some(l);
+        if let Err(e) = self.spiegel.ersetzen(Vec::new()) {
+            tracing::warn!("Quelle badhub: Spiegel nach der Übernahme nicht geleert ({e})");
+        }
         let _ = std::fs::remove_file(self.ablage.dir().join(SPIEGEL_STAND));
         self.spiegel_stand = None;
-        self.lease = Some(l);
         self.lease_angemeldet = false;
         self.lease_hinweis = None;
         self.kein_standby = false;

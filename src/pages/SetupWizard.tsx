@@ -1089,7 +1089,7 @@ export function SetupWizard({
       checkin: {
         // Ohne gültige Turnier-Kennung bleibt der Check-In aus — sonst stünde
         // er als „aktiv" im Dashboard, ohne dass badhub je etwas erhielte.
-        enabled: ciEnabled && isTournamentGuid(tournamentGuid),
+        enabled: ciEnabled && (quelleBadhubGuid !== null || isTournamentGuid(tournamentGuid)),
         tournament_uuid: extractTournamentGuid(tournamentGuid),
         // Negative/leere Eingabe abfangen; 0 ist erlaubt (nie Namen nennen).
         missing_names_max:
@@ -1201,14 +1201,23 @@ export function SetupWizard({
     }
   }
 
+  // Bei Quelle badhub mit gekoppeltem Turnier gilt dessen GUID für Liveticker
+  // und Check-In (Rust `AppConfig::tournament_uuid_kanonisch`), nicht das Feld
+  // „Turnier bei turnier.de“.
+  const quelleBadhubGuid =
+    quelle === "badhub" && badhubTurnier
+      ? (badhubTurnier.guid || badhubTurnier.uuid).toUpperCase()
+      : null;
+
   const canSave =
     host.trim() !== "" &&
     // Quelle badhub braucht ein gekoppeltes Turnier.
     (quelle !== "badhub" || badhubTurnier !== null) &&
     (!isManual || (badhubUrl.trim() !== "" && badhubPassword.trim() !== "")) &&
     // Ohne Turnier-GUID kann badhub das Turnier nicht von einem parallelen
-    // desselben Verbands unterscheiden (ADR 0054). Ein Ansage-Slave pusht nie.
-    (slaveMode || isTournamentGuid(tournamentGuid)) &&
+    // desselben Verbands unterscheiden (ADR 0054). Ein Ansage-Slave pusht nie;
+    // bei Quelle badhub kommt die GUID aus der Kopplung.
+    (slaveMode || quelleBadhubGuid !== null || isTournamentGuid(tournamentGuid)) &&
     // Mindestens ein Tablet-Verbindungsweg muss aktiv sein.
     (lanEnabled || cloudEnabled);
 
@@ -1490,6 +1499,18 @@ export function SetupWizard({
             );
           })}
 
+          {quelleBadhubGuid !== null ? (
+            <div className="mt-1 flex flex-col gap-1 text-sm text-slate-600">
+              <span>Turnier</span>
+              <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs">
+                {quelleBadhubGuid}
+              </span>
+              <span className="text-xs text-slate-500">
+                Kommt aus der Kopplung mit „{badhubTurnier?.name}" — Liveticker
+                und Check-In laufen unter diesem badhub-Turnier.
+              </span>
+            </div>
+          ) : (
           <label className="mt-1 flex flex-col gap-1 text-sm text-slate-600">
             <span>
               Turnier bei turnier.de{" "}
@@ -1529,6 +1550,7 @@ export function SetupWizard({
               </span>
             )}
           </label>
+          )}
 
           <ChoiceCard
             icon={KeyRound}
@@ -1656,9 +1678,9 @@ export function SetupWizard({
         </section>
 
         {/* Turnierquelle (Paket L2): BTP wie bisher oder ein in badhub
-            organisiertes Turnier. Seit Paket S2 auch am Slave — ein Standby-PC
-            ist ein LAN-Slave des Turnier-PCs. */}
-        {(
+            organisiertes Turnier. Am Slave nur bei schon gewähltem badhub-Turnier
+            (Standby-PC, Paket S2) — ein BTP-Slave sieht den Abschnitt wie bisher nicht. */}
+        {(!slaveMode || quelle === "badhub") && (
           <section id="section-quelle" className="flex flex-col gap-3 scroll-mt-24">
             <SectionHeader icon={Database}>Turnierquelle</SectionHeader>
             <div className="grid gap-2 sm:grid-cols-2">

@@ -53,6 +53,10 @@ pub struct Paket {
 pub struct PaketTurnier {
     pub id: i64,
     pub uuid: String,
+    /// GUID der Turnierseite (turnier.de-GUID, sonst `uuid`), seit badhub
+    /// 21.11.2026. Fehlt sie (älteres badhub), gilt die UUID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guid: Option<String>,
     pub name: String,
     #[serde(default)]
     pub beginn: Option<String>,

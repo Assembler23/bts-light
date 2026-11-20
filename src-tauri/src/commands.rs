@@ -1044,15 +1044,11 @@ pub async fn share_pronunciations(
 /// eine unbrauchbare badhub-URL. Der Aufrufer liefert dann `Unsupported`, und
 /// die Oberfläche blendet den Bereich aus (AK-A6, C4).
 fn checkin_zugang(cfg: &AppConfig) -> Option<(String, String, String)> {
-    if !cfg.checkin.is_ready() {
+    if !cfg.checkin_bereit() {
         return None;
     }
     let base = badhub_origin(&cfg.badhub.url)?;
-    Some((
-        base,
-        cfg.badhub.password.clone(),
-        cfg.checkin.tournament_uuid.trim().to_string(),
-    ))
+    Some((base, cfg.badhub.password.clone(), cfg.checkin_guid()))
 }
 
 /// Der Check-In-Stand für die Turnierleitungs-Sicht (AK-C1, C5).
@@ -1344,19 +1340,38 @@ pub fn badhub_standby_uebernehmen(
             return Err("Übernehmen geht nur an einem Standby-PC eines badhub-Turniers.".into());
         }
     }
-    let text = crate::quelle::badhub::standby_uebernehmen()?;
+    // Schon übernommen (z. B. ein früherer Versuch scheiterte erst beim
+    // Speichern der Einstellungen)? Dann nur noch auf den Master-Betrieb
+    // umstellen — ein zweiter Klick soll das zu Ende bringen.
+    let text = if crate::quelle::badhub::haelt_lease() {
+        "Turnier war schon übernommen — dieser PC läuft jetzt als Turnier-PC.".to_string()
+    } else {
+        crate::quelle::badhub::standby_uebernehmen()?
+    };
     let lief = state
         .sync_task
         .lock()
         .expect("Task-Mutex nicht vergiftet")
         .is_some();
+    let weiter = |e: String| {
+        format!(
+            "Das Turnier ist übernommen, aber {e} — bitte noch einmal „Hauptrechner ausgefallen – \
+             Turnier übernehmen“ drücken oder im Assistenten „Ansage-Slave“ ausschalten."
+        )
+    };
     mutate_config(&app, &state, |cfg| {
         cfg.slave_mode = false;
         Ok(())
+    })
+    .map_err(|e| {
+        weiter(format!(
+            "die Einstellungen ließen sich nicht speichern ({e})"
+        ))
     })?;
     if lief {
         stop_sync_kern(&state);
-        start_sync_kern(&app, &state)?;
+        start_sync_kern(&app, &state)
+            .map_err(|e| weiter(format!("die Übertragung startete nicht neu ({e})")))?;
     }
     Ok(text)
 }
@@ -3750,12 +3765,10 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
             tablet.sheet_store().set_dir(dir.join("zettel"));
         }
     }
-    tablet
-        .timeline_store()
-        .set_guid(&config.checkin.tournament_uuid);
-    tablet
-        .sheet_store()
-        .set_guid(&config.checkin.tournament_uuid);
+    // Wirksame GUID (bei Quelle badhub die aus der Kopplung).
+    let guid = config.checkin_guid();
+    tablet.timeline_store().set_guid(&guid);
+    tablet.sheet_store().set_guid(&guid);
     // Gesperrte Felder aus der Config in den Laufzeit-State übernehmen.
     tablet.set_locked_courts(config.locked_courts.iter().copied());
     // Pause der automatischen Vergabe samt Turnierbezug aus der Config
@@ -5107,15 +5120,19 @@ pub fn stop_sync(state: State<'_, AppState>) {
 pub(crate) fn stop_sync_kern(state: &AppState) {
     // Notfall-Sicherung beim Anhalten (Paket S2): einmal sofort, falls sich
     // seit der letzten etwas geändert hat. Nur badhub am Hauptrechner.
-    {
+    // Ordner kopieren und die Sperre lösen, bevor geschrieben wird: Ein
+    // hängendes Netzlaufwerk darf nicht jeden `config.lock()` aufhalten.
+    let notfall = {
         let cfg = state
             .config
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let ordner = cfg.badhub_notfall_ordner.trim();
-        if cfg.quelle == crate::config::QuelleArt::Badhub && !cfg.slave_mode && !ordner.is_empty() {
-            crate::quelle::badhub::notfall_sichern(std::path::Path::new(ordner), true);
-        }
+        let ordner = cfg.badhub_notfall_ordner.trim().to_string();
+        (cfg.quelle == crate::config::QuelleArt::Badhub && !cfg.slave_mode && !ordner.is_empty())
+            .then_some(ordner)
+    };
+    if let Some(ordner) = notfall {
+        crate::quelle::badhub::notfall_sichern(std::path::Path::new(&ordner), true);
     }
     if let Some(handle) = state
         .sync_task

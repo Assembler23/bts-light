@@ -826,7 +826,7 @@ Authorization: Bearer <TL-Gerät>
   `badhub_zurueckgeben` nicht und wiese das Kommando ab. Für BTP-Turniere ändert
   sich nichts.
 
-### Standby-Übernahme und Relay (seit v0.9.453, Paket S2)
+### Standby-Übernahme und Relay (seit v0.9.455, Paket S2)
 
 Übernimmt ein Standby-PC das Turnier, ist er ab dann der Host. Im Cloud-Modus
 ist das sein **eigener** Namensraum (`install_id`), denn ein Namensraum hat
@@ -838,6 +838,7 @@ Relay-Protokoll ändert sich nicht: Die Spiegelung läuft im Hallennetz über
 `GET :8088/quelle/ereignisse?ab=<n>&posten=1`.
 
 ### Rückzug aus dem TL-Web (seit v0.9.452, Turnierkern 0.13.0)
+### Rückzug aus dem TL-Web (seit v0.9.454, Turnierkern 0.13.0)
 
 ```http
 POST /bts-relay/tl/api/command

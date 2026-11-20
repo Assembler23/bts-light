@@ -30,3 +30,20 @@ export function extractTournamentGuid(value: string): string {
 export function shortTournamentGuid(guid: string): string {
   return `${guid.slice(0, 8)}…`;
 }
+
+/** Wirksame Turnier-GUID (kanonisch, groß) — Spiegel von Rust
+ *  `AppConfig::tournament_uuid_kanonisch`: Bei Quelle badhub mit gekoppeltem
+ *  Turnier die GUID der Kopplung (`guid`, sonst `uuid`), sonst das Feld
+ *  „Turnier bei turnier.de“. `""` ohne gültige GUID. */
+export function wirksameTurnierGuid(c: {
+  quelle?: string;
+  tournament_uuid: string;
+  badhub_turnier?: { uuid: string; basis: string; guid?: string } | null;
+}): string {
+  const t = c.badhub_turnier;
+  if (c.quelle === "badhub" && t && t.uuid.trim() !== "" && t.basis.trim() !== "") {
+    const g = [t.guid ?? "", t.uuid].find((v) => isTournamentGuid(v));
+    if (g) return extractTournamentGuid(g);
+  }
+  return isTournamentGuid(c.tournament_uuid) ? extractTournamentGuid(c.tournament_uuid) : "";
+}

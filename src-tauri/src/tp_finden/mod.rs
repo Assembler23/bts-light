@@ -385,7 +385,10 @@ pub enum Aktion {
 /// bei gleicher Kennung still übernommen — eine leere Kennung füllt hier
 /// niemand ohne Zutun (Security-Review 15.11.2026), das tut das Setup.
 pub fn entscheide(cfg: &crate::config::AppConfig, fund: &Fund) -> Aktion {
-    if !cfg.tp_upload.finden_automatisch {
+    // badhub-Turniere haben keine TP-Datei (badhub-Spec „Turnierseite und
+    // Liveticker“); ihre GUID passt nie zu einer — die Automatik fragte sonst
+    // jeden Takt erneut.
+    if !cfg.tp_upload.finden_automatisch || cfg.quelle == crate::config::QuelleArt::Badhub {
         return Aktion::Nichts;
     }
     let Some(eingetragen) = cfg.tournament_uuid_kanonisch() else {
@@ -525,6 +528,23 @@ mod tests {
             pfade: pfade.iter().map(|p| p.to_string()).collect(),
             ..RohBefund::default()
         }
+    }
+
+    #[test]
+    fn entscheide_fragt_bei_quelle_badhub_nie() {
+        let mut cfg = crate::config::AppConfig {
+            tournament_uuid: "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA".into(),
+            ..Default::default()
+        };
+        cfg.tp_upload.finden_automatisch = true;
+        let fund = Fund {
+            pfad: "C:/t.tp".into(),
+            name: "t.tp".into(),
+            guid: Some("6B2352E2-2231-45A2-A338-5ED0CB2E1A5C".into()),
+        };
+        assert!(matches!(entscheide(&cfg, &fund), Aktion::Fragen(_)));
+        cfg.quelle = crate::config::QuelleArt::Badhub;
+        assert!(matches!(entscheide(&cfg, &fund), Aktion::Nichts));
     }
 
     #[test]
