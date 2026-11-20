@@ -3873,6 +3873,13 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             ctx.tablet.sheet_store().finalize(m.id, body.retired);
             ResultResponse::ok()
         }
+        Err(e) if !crate::quelle::nachschub_moeglich(&ctx.config) => {
+            // Quelle badhub (Paket L2): Schreiben folgt mit L3. Klar
+            // ablehnen statt einzureihen — ein Nachschub käme nie an. Die
+            // Ablehnung ist wiederholbar: Das Tablet behält das Ergebnis.
+            tracing::warn!("Ergebnis vom Tablet nicht übernommen (Match {}): {e}", m.id);
+            ResultResponse::err(e)
+        }
         Err(e) => {
             // Nachschub-Queue (A5): Der Sync-Loop schiebt den Write nach,
             // sobald BTP wieder antwortet. Bezugszeitpunkt = Spielende
@@ -3937,9 +3944,10 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-// BTP-Schreibwege liegen seit Paket L1 in `crate::quelle::btp`; die alten
-// Namen bleiben hier, damit die Aufrufer unverändert bleiben.
-pub(crate) use crate::quelle::btp::{
+// Schreibwege gehen seit Paket L2 über die Weichen in `crate::quelle` (BTP:
+// unverändert `quelle::btp`; badhub: Schreibsperre bis L3). Die alten Namen
+// bleiben hier, damit die Aufrufer unverändert bleiben.
+pub(crate) use crate::quelle::{
     write_courts_to_btp, write_highlight_to_btp, write_officials_to_btp, write_result_settled,
     write_result_to_btp,
 };

@@ -24,6 +24,8 @@ use std::path::{Path, PathBuf};
 /// einen neuen Store anlegt, trägt seine Datei hier ein.
 const DATEIEN: &[&str] = &[
     "config.rs",
+    "quelle/badhub/ablage.rs",
+    "quelle/badhub/paket.rs",
     "rueckweg.rs",
     "seiten_paket.rs",
     "tablet/exclusion.rs",
@@ -54,6 +56,7 @@ const NICHT_GESPEICHERT: &[&str] = &[
     "badhub/tp_upload.rs",
     "commands.rs",
     "kern_tausch.rs",
+    "quelle/badhub/api.rs",
     "seiten_angebot.rs",
     "tablet/assign.rs",
     "tablet/server.rs",

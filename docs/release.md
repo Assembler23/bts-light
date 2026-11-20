@@ -615,6 +615,7 @@ muss von Hand in die Namensliste.
 | `ANDROID_KEYSTORE_B64` | Base64 des Signatur-Keystores der Tablet-Kiosk-App, Alias `bts-light-tablet` |
 | `ANDROID_KEYSTORE_PASS` | Passwort dieses Keystores |
 | `RELEASE_TAG_KEY` | privater Deploy-Key für den Workflow „Release auslösen" — **nicht** als Repo-Secret, sondern im Environment `release-tag` (nur `main`) |
+| `TURNIERKERN_LESE_TOKEN` | Lese-Token für das private Repo `Assembler23/turnierkern` (Crate `turnierkern`, seit v0.9.449). Der Schritt „Zugang zum Turnierkern“ in `ci.yml` (beide Jobs), `release.yml` (`build`) und `relay-deploy.yml` biegt die Git-URL per `insteadOf` auf HTTPS mit Token um und setzt `CARGO_NET_GIT_FETCH_WITH_CLI=true` — vor **jedem** cargo-Aufruf, auch `-p bts-relay` löst den ganzen Workspace auf. **Dependabot-Läufe und PRs aus Forks** bekommen keine Secrets: Dort scheitert cargo am Kern |
 
 Der **Android-Keystore** wird wie der Updater-Schlüssel **nie gewechselt** —
 Sideload-Updates auf ein bereits eingerichtetes Tablet verlangen dieselbe

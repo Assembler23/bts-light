@@ -700,6 +700,9 @@ Die Schreibwege (`write_result_to_btp`, `write_courts_to_btp`,
 `write_officials_to_btp`, `write_highlight_to_btp`, `write_result_settled`)
 liegen seit v0.9.448 in `src-tauri/src/quelle/btp.rs` (BTP als eine von zwei
 Turnierquellen, [features/turnierquelle.md](features/turnierquelle.md)).
+Seit v0.9.449 rufen alle Aufrufer sie über die Weichen in `quelle/mod.rs` auf:
+bei Quelle BTP unverändert derselbe Aufruf, bei Quelle badhub geht nichts an
+BTP (Schreibsperre bis Paket L3).
 
 Request-Aufbau (zusätzlich zum Nachrichten-Skelett):
 

@@ -25,6 +25,7 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   addCourtAd,
+  badhubKoppeln,
   listCourtAds,
   readTournamentLogo,
   removeCourtAd,
@@ -62,6 +63,9 @@ import {
 import type {
   RotationMode,
   AppConfig,
+  BadhubKopplung,
+  BadhubTurnierConfig,
+  QuelleArt,
   AutoCallMode,
   ConnectionMode,
   CourtAd,
@@ -355,6 +359,22 @@ export function SetupWizard({
   const [testSystem, setTestSystem] = useState(
     istTestsystem(initialConfig.badhub.url),
   );
+  // Turnierquelle (Paket L2): BTP vorausgewählt, wie jede Konfiguration
+  // ohne Quellenangabe.
+  const [quelle, setQuelle] = useState<QuelleArt>(initialConfig.quelle ?? "btp");
+  const [kopplungsCode, setKopplungsCode] = useState("");
+  const [geraetName, setGeraetName] = useState(
+    initialConfig.badhub_turnier?.geraet_name || "Turnier-PC",
+  );
+  const [badhubTurnier, setBadhubTurnier] = useState<BadhubTurnierConfig | null>(
+    initialConfig.badhub_turnier?.uuid ? initialConfig.badhub_turnier : null,
+  );
+  const [kopplung, setKopplung] = useState<
+    | { kind: "idle" }
+    | { kind: "laeuft" }
+    | { kind: "ok"; info: BadhubKopplung }
+    | { kind: "fehler"; text: string }
+  >({ kind: "idle" });
   const [host, setHost] = useState(initialConfig.btp.host);
   const [port, setPort] = useState(String(initialConfig.btp.port));
   const [btpPassword, setBtpPassword] = useState(
@@ -920,6 +940,7 @@ export function SetupWizard({
             testSystem,
           );
     return {
+      quelle,
       btp: {
         host: host.trim(),
         port: Number(port) || 9901,
@@ -1175,12 +1196,27 @@ export function SetupWizard({
 
   const canSave =
     host.trim() !== "" &&
+    // Quelle badhub braucht ein gekoppeltes Turnier.
+    (quelle !== "badhub" || badhubTurnier !== null) &&
     (!isManual || (badhubUrl.trim() !== "" && badhubPassword.trim() !== "")) &&
     // Ohne Turnier-GUID kann badhub das Turnier nicht von einem parallelen
     // desselben Verbands unterscheiden (ADR 0054). Ein Ansage-Slave pusht nie.
     (slaveMode || isTournamentGuid(tournamentGuid)) &&
     // Mindestens ein Tablet-Verbindungsweg muss aktiv sein.
     (lanEnabled || cloudEnabled);
+
+  /** Löst den Kopplungscode aus badhub ein und lädt das Turnierpaket. */
+  async function koppeln() {
+    setKopplung({ kind: "laeuft" });
+    try {
+      const info = await badhubKoppeln(kopplungsCode.trim(), geraetName.trim());
+      setBadhubTurnier(info.turnier);
+      setKopplungsCode("");
+      setKopplung({ kind: "ok", info });
+    } catch (e) {
+      setKopplung({ kind: "fehler", text: String(e) });
+    }
+  }
 
   async function runTest() {
     setTest({ kind: "testing" });
@@ -1612,7 +1648,79 @@ export function SetupWizard({
           {logoError && <p className="text-xs text-rose-700">{logoError}</p>}
         </section>
 
+        {/* Turnierquelle (Paket L2): BTP wie bisher oder ein in badhub
+            organisiertes Turnier. Ein Slave liest badhub-Turniere erst später. */}
+        {!slaveMode && (
+          <section id="section-quelle" className="flex flex-col gap-3 scroll-mt-24">
+            <SectionHeader icon={Database}>Turnierquelle</SectionHeader>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <ChoiceCard
+                icon={Server}
+                title="BTP"
+                description="Das Turnier läuft im Badminton Tournament Planner."
+                active={quelle === "btp"}
+                onClick={() => setQuelle("btp")}
+              />
+              <ChoiceCard
+                icon={Cloud}
+                title="badhub-Turnier"
+                description="Das Turnier ist in badhub organisiert."
+                active={quelle === "badhub"}
+                onClick={() => setQuelle("badhub")}
+              />
+            </div>
+            {quelle === "badhub" && (
+              <div className="flex flex-col gap-3">
+                <p className="text-xs text-slate-500">
+                  In badhub im Bereich <strong>Turniertag</strong> auf{" "}
+                  <strong>„bts-light koppeln"</strong> klicken und den Code hier
+                  eintragen. bts-light lädt dann das Turnierpaket und zeigt das
+                  Turnier auf Tablets, Monitoren und im TL-Web.{" "}
+                  <strong>Ergebnisse und Feldvergabe trägt die Turnierleitung in
+                  dieser Version noch in badhub ein.</strong>
+                </p>
+                <Field
+                  label="Kopplungscode"
+                  value={kopplungsCode}
+                  onChange={setKopplungsCode}
+                  placeholder="z. B. ABCD-2345"
+                />
+                <Field
+                  label="Name dieses PCs in badhub"
+                  value={geraetName}
+                  onChange={setGeraetName}
+                  placeholder="Turnier-PC"
+                />
+                <button
+                  onClick={() => void koppeln()}
+                  disabled={kopplung.kind === "laeuft" || kopplungsCode.trim() === ""}
+                  className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                             text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+                >
+                  {kopplung.kind === "laeuft" ? "Kopple …" : "Koppeln"}
+                </button>
+                {badhubTurnier && (
+                  <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+                    <Check size={16} /> Gekoppelt mit „{badhubTurnier.name}"
+                    {kopplung.kind === "ok" &&
+                      ` – ${kopplung.info.konkurrenzen} Konkurrenzen, ${kopplung.info.spiele} Spiele`}
+                  </p>
+                )}
+                {kopplung.kind === "ok" && kopplung.info.kern_hinweis && (
+                  <p className="text-xs text-amber-700">{kopplung.info.kern_hinweis}</p>
+                )}
+                {kopplung.kind === "fehler" && (
+                  <p className="flex items-start gap-1.5 text-sm text-rose-700">
+                    <X size={16} className="mt-0.5 shrink-0" /> {kopplung.text}
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
         {/* Schritt 2: BTP-Verbindung */}
+        {quelle === "btp" && (
         <section className="flex flex-col gap-3">
           <SectionHeader icon={Server}>2 · BTP-Verbindung</SectionHeader>
           <Field
@@ -1658,11 +1766,12 @@ export function SetupWizard({
             </p>
           )}
         </section>
+        )}
 
         {/* TP-Datei an badhub (Spec tp-datei-upload, L1): die offene Turnierdatenbank,
             gebunden an die Turnier-GUID zum Zeitpunkt der Wahl. Gesendet wird im
             Dashboard; im Slave-Modus gibt es den Abschnitt nicht (nur der Master lädt hoch). */}
-        {!slaveMode && (
+        {!slaveMode && quelle === "btp" && (
           <section id="section-tp-datei" className="flex flex-col gap-2 scroll-mt-24">
             <SectionHeader icon={Database}>TP-Datei (Turnierdatenbank)</SectionHeader>
             <p className="text-xs text-slate-500">

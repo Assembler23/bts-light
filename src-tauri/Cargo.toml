@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.448"
+version = "0.9.449"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -59,6 +59,12 @@ ring = "0.17"
 # Prüfung der Seiten-Pakete mit dem Updater-Schlüssel (ADR 0099). Kommt über
 # `tauri-plugin-updater` ohnehin mit; hier nur direkt benannt.
 minisign-verify = "0.3"
+# Turnierkern (badhub ADR-0084, Paket L2): faltet die Ereignisse eines
+# badhub-Turniers lokal zum Stand. Privates Repo — in der CI über das Secret
+# `TURNIERKERN_LESE_TOKEN` (insteadOf vor jedem cargo-Aufruf). Version gleich
+# dem Kern-Dienst in badhub, sonst meldet badhub beim Hochladen (L3)
+# `abweichung`. Der Kern-Code wird NICHT ins öffentliche Repo kopiert.
+turnierkern = { git = "https://github.com/Assembler23/turnierkern", tag = "v0.12.0" }
 # Offline-Stimme (ADR 0104), bisher NUR für das Messwerkzeug E0
 # `tests/offline_stimme_probe.rs`: hinter dem Feature `offline-probe`, das
 # weder die CI noch der Release-Build einschaltet. Apache-2.0, ohne GPL
@@ -100,6 +106,9 @@ windows = { version = "0.62", features = [
   # Arbeitsspeicher des eigenen Prozesses fürs Messwerkzeug der
   # Offline-Stimme (`K32GetProcessMemoryInfo`).
   "Win32_System_ProcessStatus",
+  # Schlüssel des verschlüsselten Personenauszugs eines badhub-Turniers an
+  # das Benutzerkonto binden (DPAPI `CryptProtectData`, Paket L2).
+  "Win32_Security_Cryptography",
 ] }
 # Ansage-Ton aus dem Kern (ADR 0065): WASAPI-Ausgabe mit Gerät je Stück.
 # Apache-2.0 (RustAudio), hängt an derselben `windows`-Version 0.62 — keine

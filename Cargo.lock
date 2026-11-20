@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "bts-light"
-version = "0.9.448"
+version = "0.9.449"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -528,6 +528,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "turnierkern",
  "windows",
 ]
 
@@ -5590,6 +5591,14 @@ dependencies = [
  "rustls-pki-types",
  "sha1 0.11.0",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "turnierkern"
+version = "0.12.0"
+source = "git+https://github.com/Assembler23/turnierkern?tag=v0.12.0#e856fc2057a7f6a841063d7a20d30e7cc42e4c94"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

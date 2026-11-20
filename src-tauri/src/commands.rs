@@ -558,6 +558,9 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
         incoming.tournament_logo.eigen_data.clear();
         incoming.tournament_logo.eigen_mime.clear();
     }
+    // Das gekoppelte badhub-Turnier setzt nur die Kopplung im Kern
+    // (`badhub_koppeln`), nie das Formular (Paket L2).
+    incoming.badhub_turnier = current.badhub_turnier.clone();
     if incoming.tl_web.enabled {
         incoming.tl_web.devices = current.tl_web.devices.clone();
     } else {
@@ -759,6 +762,9 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
     // der Automatik reist mit — am neuen PC findet sie die Datei selbst.
     cfg.tp_upload.path.clear();
     cfg.tp_upload.tournament_uuid.clear();
+    // Die Kopplung an ein badhub-Turnier gilt je Gerät (Token liegt nur auf
+    // diesem PC); der neue PC koppelt neu.
+    cfg.badhub_turnier = crate::config::BadhubTurnierConfig::default();
     cfg
 }
 
@@ -766,6 +772,8 @@ fn identity_bundle(mut cfg: AppConfig) -> AppConfig {
 /// gesetzten Secrets (das Bündel enthält keine): BTP-/Badhub-Passwort +
 /// Azure-Key. Rein & testbar.
 fn apply_imported_identity(mut imported: AppConfig, current: &AppConfig) -> AppConfig {
+    // Kopplung gehört dem PC, nicht dem Bündel (siehe `identity_bundle`).
+    imported.badhub_turnier = current.badhub_turnier.clone();
     if imported.btp.password.is_none() {
         imported.btp.password = current.btp.password.clone();
     }
@@ -1205,6 +1213,50 @@ pub async fn checkin_announcement(
 /// vorgehaltener Client im `AppState` wäre hier Zustand ohne Gegenwert.
 fn checkin_client() -> reqwest::Client {
     crate::badhub::checkin_state::build_client()
+}
+
+/// Koppelt diesen PC an ein badhub-Turnier (Quelle badhub, Paket L2): Code
+/// einlösen, Turnierpaket laden und ablegen, Turnier in der Konfiguration
+/// vermerken. Die Quelle selbst stellt erst das Speichern im Assistenten um.
+///
+/// Die API-Basis folgt der Push-Adresse (Testsystem-Schalter); der Code
+/// und die Antwort landen nie im Log.
+#[tauri::command]
+pub async fn badhub_koppeln(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    code: String,
+    geraet_name: String,
+) -> Result<crate::quelle::badhub::Kopplung, String> {
+    let (push_url, install_id) = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        (cfg.badhub.url.clone(), cfg.install_id.clone())
+    };
+    if install_id.trim().is_empty() {
+        return Err("Die Installations-ID fehlt — bitte die Einrichtung einmal speichern.".into());
+    }
+    let basis = crate::quelle::badhub::api_basis(&push_url)?;
+    let daten = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let kopplung =
+        crate::quelle::badhub::koppeln(&basis, &daten, &code, &install_id, &geraet_name).await?;
+    let turnier = kopplung.turnier.clone();
+    mutate_config(&app, &state, move |cfg| {
+        cfg.badhub_turnier = turnier;
+        Ok(())
+    })?;
+    Ok(kopplung)
+}
+
+/// Gekoppeltes badhub-Turnier (für den Einrichtungsassistenten); `None`, wenn
+/// keins gekoppelt ist.
+#[tauri::command]
+pub fn badhub_turnier_info(
+    state: State<'_, AppState>,
+) -> Option<crate::config::BadhubTurnierConfig> {
+    let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+    cfg.badhub_turnier
+        .gekoppelt()
+        .then(|| cfg.badhub_turnier.clone())
 }
 
 /// Testet die Verbindung zu BTP und liefert bei Erfolg den Turniernamen.
@@ -2152,6 +2204,12 @@ pub(crate) fn pruefe_startbedingungen(config: &crate::config::AppConfig) -> Resu
     if config.slave_mode {
         return Ok(());
     }
+    if config.quelle == crate::config::QuelleArt::Badhub && !config.badhub_turnier.gekoppelt() {
+        return Err(
+            "Kein badhub-Turnier gekoppelt — im Setup unter „Quelle“ den Kopplungscode eingeben."
+                .to_string(),
+        );
+    }
     if config.badhub.password.is_empty() {
         return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
     }
@@ -2254,6 +2312,13 @@ pub(crate) fn pruefe_upload_bedingungen(config: &AppConfig) -> Result<UploadVorg
         // der Text erreicht nur einen direkten Command-Aufruf.
         return Err(
             "Nur der Master lädt die TP-Datei hoch — diese Instanz läuft als Slave.".to_string(),
+        );
+    }
+    if !crate::quelle::btp_dienste(config) {
+        // Quelle badhub (Paket L2): Das Turnier liegt schon in badhub, eine
+        // TP-Datei gibt es nicht (badhub-Spec „Turnierseite und Liveticker“).
+        return Err(
+            "Dieses Turnier kommt aus badhub — eine TP-Datei wird nicht hochgeladen.".to_string(),
         );
     }
     if config.badhub.password.is_empty() {
@@ -3585,6 +3650,10 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
         &config.auto_assign_paused_tournament,
     );
 
+    // Turnierquelle (Paket L2): die eine Stelle, an der sich BTP- und
+    // badhub-Turniere trennen. Bei BTP startet hier nichts Neues.
+    let quellen_start = crate::quelle::starten(&config, app.path().app_data_dir().ok().as_deref());
+
     // Poll-Push-Schleife BTP → Badhub.
     let app_handle = app.clone();
     let mut sync_config = config.clone();
@@ -3666,7 +3735,14 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
         // Wächter. Liest die Config über das geteilte `Arc` (Schalter wirkt
         // sofort), der Zustand lebt im Status-Merker von `AppState`. Nur am
         // Master — der Slave hat weder Datei noch Upload.
-        let _tp_takt = (!slave_mode).then(|| {
+        // Abgleich mit badhub (nur Quelle badhub, Paket L2): Ereignisse alle
+        // 5 s, Paket alle 60 s; endet mit dieser Schleife.
+        let _kern_abgleich = quellen_start.kern_abgleich.then(|| {
+            TaktWaechter(tauri::async_runtime::spawn(
+                crate::quelle::badhub::abgleich_schleife(),
+            ))
+        });
+        let _tp_takt = (!slave_mode && quellen_start.btp_dienste).then(|| {
             let st = app_handle.state::<AppState>();
             let cfg = st.config.clone();
             let status = st.tp_upload.clone();
@@ -3684,7 +3760,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
         // TP-Datei-Automatik (Spec `tp-datei-finden`): sucht beim Start der
         // Übertragung und danach im 60-s-Takt die in BTP geöffnete Datei.
         // Nur am Master; ob sie arbeitet, liest sie je Takt aus der Config.
-        let _tp_finden = (!slave_mode).then(|| {
+        let _tp_finden = (!slave_mode && quellen_start.btp_dienste).then(|| {
             let st = app_handle.state::<AppState>();
             TaktWaechter(tauri::async_runtime::spawn(tp_finden_schleife(
                 st.config.clone(),

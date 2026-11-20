@@ -10,6 +10,8 @@ import type {
   MeetingpointLink,
   AnsageQuellen,
   AppConfig,
+  BadhubKopplung,
+  BadhubTurnierConfig,
   CheckinView,
   CloudAnnounce,
   CourtAd,
@@ -58,6 +60,18 @@ export const loadConfig = (): Promise<AppConfig> => invoke("load_config");
 
 export const saveConfig = (config: AppConfig): Promise<void> =>
   invoke("save_config", { config });
+
+/** Koppelt diesen PC mit dem Code aus badhub an ein badhub-Turnier und lädt
+ *  das Turnierpaket (Quelle badhub, Paket L2). */
+export const badhubKoppeln = (
+  code: string,
+  geraetName: string,
+): Promise<BadhubKopplung> =>
+  invoke("badhub_koppeln", { code, geraetName });
+
+/** Das gekoppelte badhub-Turnier, `null` ohne Kopplung. */
+export const badhubTurnierInfo = (): Promise<BadhubTurnierConfig | null> =>
+  invoke("badhub_turnier_info");
 
 /** Testet die BTP-Verbindung, liefert bei Erfolg den Turniernamen. */
 export const testBtp = (

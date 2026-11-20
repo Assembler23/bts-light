@@ -146,6 +146,48 @@ badhub, die Hintergrundfarbe bleibt hier einstellbar. Entfernt badhub das Logo,
 verschwindet es auch hier. Hat badhub keins, gilt das hier hochgeladene und geht
 wie bisher an badhub.
 
+### Turnierquelle
+
+*Nicht im Ansage-Slave-Modus.*
+<!-- pruef: "Turnierquelle" in src/pages/SetupWizard.tsx -->
+
+Woher bts-light das Turnier liest. **BTP** ist vorausgewählt — so läuft jede
+bestehende Einrichtung nach einem Update unverändert weiter.
+<!-- pruef: /#\[default\]\s*#\[serde\(other\)\]\s*Btp/ in src-tauri/src/config.rs -->
+
+| Wahl | Bedeutung |
+|---|---|
+| **BTP** | Das Turnier läuft im Tournament Planner (die Abschnitte „BTP-Verbindung“ und „TP-Datei“ darunter). |
+| **badhub-Turnier** | Das Turnier ist in badhub organisiert. Die BTP-Abschnitte verschwinden. |
+<!-- pruef: "badhub-Turnier" in src/pages/SetupWizard.tsx -->
+
+**badhub-Turnier koppeln:** In badhub im Bereich **Turniertag** auf **„bts-light
+koppeln“** klicken, den angezeigten Code hier unter **Kopplungscode** eintragen,
+<!-- pruef: "Kopplungscode" in src/pages/SetupWizard.tsx -->
+einen Namen für diesen PC vergeben (voreingestellt „Turnier-PC“) und
+<!-- pruef: "Turnier-PC" in src/pages/SetupWizard.tsx -->
+**Koppeln** drücken. bts-light lädt das Turnierpaket und meldet „Gekoppelt mit
+<!-- pruef: "Gekoppelt mit" in src/pages/SetupWizard.tsx -->
+…“ samt Zahl der Konkurrenzen und Spiele. Gespeichert werden darf erst mit
+gekoppeltem Turnier.
+
+- Das Paket liegt danach auf diesem PC; fällt das Internet aus, zeigt die Halle
+  den letzten Stand weiter. Mit Netz holt bts-light neue Ergebnisse aus badhub
+  alle 5 Sekunden und die übrigen Angaben (Namen, Vereine, Schiedsrichter) jede
+  Minute nach.
+  <!-- pruef: /EREIGNIS_TAKT: Duration = Duration::from_secs\(5\)/ in src-tauri/src/quelle/badhub/mod.rs -->
+  <!-- pruef: /PAKET_TAKT: Duration = Duration::from_secs\(60\)/ in src-tauri/src/quelle/badhub/mod.rs -->
+- Namen und Vereine liegen **verschlüsselt** auf der Platte, gebunden an das
+  Windows-Benutzerkonto.
+- **In dieser Version nur anzeigen:** Ergebnisse vom Tablet, Feldvergabe,
+  Schiedsrichter und Farben gehen noch nicht von bts-light an badhub — die
+  Turnierleitung trägt sie in badhub ein. Ein Tablet bekommt beim Abschließen
+  den Hinweis „Schreiben über badhub folgt“ und behält sein Ergebnis.
+  <!-- pruef: "Schreiben über badhub folgt" in src-tauri/src/quelle/mod.rs -->
+- Die Kopplung gilt für diesen PC. Beim Umzug auf einen neuen PC (Identität
+  übernehmen) wird dort neu gekoppelt.
+- Ein **Ansage-Slave** kann badhub-Turniere noch nicht lesen.
+
 ### 2 · BTP-Verbindung
 
 | Feld | Voreinstellung | Bedeutung |

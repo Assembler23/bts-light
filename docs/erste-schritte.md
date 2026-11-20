@@ -105,6 +105,11 @@ ein, alles andere kannst du zunächst überspringen:
    Voreinstellung `127.0.0.1` bereits. Trag das BTP-Passwort aus Schritt 1
    ein, falls es eines gibt.
 
+> **Turnier in badhub statt in BTP?** Dann unter **Turnierquelle** „badhub-Turnier“
+> wählen und den Kopplungscode aus badhub eintragen; die BTP-Verbindung entfällt.
+> Wie das geht, steht in der [Einstellungs-Referenz](einstellungen.md#turnierquelle).
+<!-- pruef: "Turnierquelle" in src/pages/SetupWizard.tsx -->
+
 > **Bei Liga- und Mannschaftswettbewerben ist der Port ein anderer.** Für
 > Einzelturniere (BTP) gilt `9901` — das ist die Voreinstellung. Für Liga
 > (BLP) ist es **`9911`**. Mit dem falschen Port bekommst du genau den
@@ -259,6 +264,7 @@ Hast du „Beim Beenden einbauen" gewählt und es dir anders überlegt, nimmt
 | Einstellungen | `%APPDATA%\de.badhub.btslight\config.json` |
 | Diagnose-Logs | eigenes Log-Verzeichnis, erreichbar über **Wartung → Logs öffnen** |
 | Werbebilder, Zettel, Punktverlauf | im Datenverzeichnis der App |
+| badhub-Turnier (Turnierpaket, Namen verschlüsselt) | `turniere\` im Datenverzeichnis der App |
 
 Die Logs liegen bewusst **nicht** im Programmverzeichnis — dort würde ein
 Update sie überschreiben.
