@@ -51,7 +51,7 @@ nicht die eingestellte Quelle.
 | Kopplung | Tauri-Command `badhub_koppeln(code, geraet_name)` → `POST koppeln {code, install_id, name}` → `GET turnier/paket` → Ablage → `config.badhub_turnier`. `badhub_turnier_info` für den Assistenten |
 | Abgleich | alle 5 s `GET turnier/ereignisse?ab=<n>&max=500`, alle 60 s `GET turnier/paket` mit `If-None-Match` (ETag-Header, sonst `stammdaten_etag`). Offline bleibt der letzte Stand; 401/403 hält den Abgleich bis zum nächsten Start an |
 | API-Basis | aus der Push-Adresse (`badhub.url`, folgt damit dem Testsystem-Schalter) + `/api/torg/v1`, beim Koppeln in `badhub_turnier.basis` festgehalten — das Token geht nie an das andere System. Nur `https://` (Ausnahme `localhost`/`127.0.0.1` für Tests) |
-| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.12.0`), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht trotzdem (das Ereignisschema wächst nur additiv), Schreiben (L3) verlangt Gleichstand |
+| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.14.0`), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht, solange das Protokoll keine Ereignisarten enthält, die diese Version nicht kennt (neue Befehle eines neueren Kerns, z. B. `zaehlweise_festlegen` ab 0.14.0, lassen das Falten scheitern — deshalb bts-light zusammen mit dem Kern in badhub aktualisieren), Schreiben (L3) verlangt Gleichstand |
 
 ### Ablage und Verschlüsselung
 
@@ -92,7 +92,7 @@ nicht die eingestellte Quelle.
 | `draw_name`, `class_label`, `discipline` | Konkurrenz-Schlüssel, Klasse aus Name/Schlüssel, Disziplin-Kürzel | |
 | `match_num` | Spielnummer der Konkurrenz | „aus Spiel 3“ gilt innerhalb der Konkurrenz |
 | `official1_id`/`official2_id`, `officials` | Kern-Offizielle, Namen aus `schiedsrichter` | |
-| `scoring` | Zählweise der Konkurrenz (Vorgabe Badminton) | ohne Deckel `cap_score` 999 |
+| `scoring` | Zählweise **je Spiel** (`spiele[].zaehlweise`, Kern ab 0.14.0: Spiel → Konkurrenz/KO-Phase → Turnier → 3×21); `best_of` = 2 × Gewinnsätze − 1, Pause bei 11 (bis 21) bzw. 8 (bis 15), bei 11er-Sätzen (5×11, Bundesliga) keine | ohne Deckel `cap_score` 999 |
 | `rest_minutes` | `rahmen.mindestpause_min`, sonst `planung.rahmen.pause` | |
 | `events`, `entries` | `konkurrenzen`, Personenauszug | |
 | `highlight`, `shuttles` | 0 | nur BTP; bei Kern-Turnieren gilt der lokale Aufrufzustand |
