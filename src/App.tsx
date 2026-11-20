@@ -12,7 +12,7 @@ import {
   wifiStatus,
 } from "./api";
 import { setLegacyOutput, setSharedOverrides } from "./io/announcer";
-import { isTournamentGuid } from "./tournamentGuid";
+import { wirksameTurnierGuid } from "./tournamentGuid";
 import { AlertBanner } from "./components/AlertBanner";
 import { AzureFallbackBanner } from "./components/AzureFallbackBanner";
 import { AnsageAusgabeBanner } from "./components/AnsageAusgabeBanner";
@@ -231,7 +231,8 @@ function App() {
         // und zeigt direkt das Dashboard. Ohne die GUID würde „Starten“ erst
         // beim Klick scheitern (ADR 0054, C1) — der Assistent führt stattdessen
         // sofort zum fehlenden Feld. Ein Ansage-Slave braucht keine GUID.
-        const brauchtGuid = !c.slave_mode && !isTournamentGuid(c.tournament_uuid);
+        // Quelle badhub: die GUID kommt aus der Kopplung (wirksameTurnierGuid).
+        const brauchtGuid = !c.slave_mode && wirksameTurnierGuid(c) === "";
         const eingerichtet = Boolean(c.badhub.password) && !brauchtGuid;
         setView(eingerichtet ? "dashboard" : "wizard");
         // Wiederanlauf nach einem Update: Den Start übernimmt seit

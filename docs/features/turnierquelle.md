@@ -141,8 +141,17 @@ zur Generalprobe E1 nicht produktiv.
 - `runden`: Schlüssel = Spielnummer (als Text).
 - Feldnamen in `rahmen.hallen[].felder`: mit oder ohne Hallenpräfix; maßgeblich ist das Kern-Feld aus `spiel_aufrufen`.
 - `POST koppeln`: 400/401/403/404/409/410/422 gelten als „Code ungültig“, 429 als Drossel.
-- Liveticker-GUID: bleibt Pflicht im Assistenten (`tournament_uuid`); ob badhub dort die Turnier-UUID annimmt
-  (GUID-Brücke ADR-0080), ist mit B1 zu klären.
+- Liveticker-GUID (geklärt v0.9.453, 21.11.2026): Bei Quelle badhub mit gekoppeltem Turnier gilt die GUID aus der
+  Kopplung — `turnier.guid` aus dem Turnierpaket (turnier.de-GUID des Turniers, sonst seine `public_guid`, wie
+  `tournaments.tournament_uuid` der Turnierseite), gespeichert als `BadhubTurnierConfig.guid`; fehlt sie (Kopplung
+  vor v0.9.453, älteres badhub), die `uuid`. `AppConfig::tournament_uuid_kanonisch` (Liveticker, Aushang, Logo) und
+  `checkin_guid`/`checkin_bereit` (Meldeliste, Check-In-Stand, Punktverlauf, Zettel) lesen sie; das Feld
+  `tournament_uuid` bleibt unangetastet und gilt bei BTP unverändert. Der Assistent zeigt die GUID statt des Felds
+  und verlangt es nicht. Anlass: Köpi-Cup 2027 auf Test lief unter der GUID eines älteren Testturniers, die noch im
+  Feld stand — der Stand landete auf dessen Turnierseite. Ändert sich die turnier.de-GUID in badhub nach der
+  Kopplung, gilt sie erst nach erneutem Koppeln. Die Oberfläche liest dieselbe GUID über `wirksameTurnierGuid()`
+  (`src/tournamentGuid.ts`). Bei Quelle badhub gibt es keine TP-Datei: `tp_datei_fuer_turnier` liefert `None`, die
+  TP-Automatik (`tp_finden::entscheide`) bleibt still.
 
 ## Paket L3 (umgesetzt, schreibend)
 

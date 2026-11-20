@@ -2844,10 +2844,10 @@ impl PushTeil {
         config: &AppConfig,
         snapshot: &BtpSnapshot,
     ) -> Option<CheckinRosterMessage> {
-        if !config.checkin.is_ready() || !self.tor_darf(Kanal::Meldeliste) {
+        if !config.checkin_bereit() || !self.tor_darf(Kanal::Meldeliste) {
             return None;
         }
-        let roster = build_checkin_roster(snapshot, &config.checkin.tournament_uuid, self.rid);
+        let roster = build_checkin_roster(snapshot, &config.checkin_guid(), self.rid);
         // Nur bei echter Änderung senden — die Meldeliste sind Stammdaten,
         // kein Live-Stand (kein Heartbeat).
         roster_update(self.last_roster.as_ref(), roster)
@@ -3406,7 +3406,7 @@ pub async fn checkin_lese_tick(
     // Einziger Konsument ist die TL-Web-Seite — ohne sie holte der Host
     // minütlich volle Klassenstände samt Spielerlisten, die nichts je
     // anzeigen kann (Review 17.08.2026).
-    if !config.tl_web.enabled || !config.checkin.is_ready() {
+    if !config.tl_web.enabled || !config.checkin_bereit() {
         tablet.set_checkin_classes(None);
         return;
     }
@@ -3432,7 +3432,8 @@ pub async fn checkin_lese_tick(
     // Getrimmt wie im Desktop-Pfad (`commands.rs`): `is_ready()` prüft
     // ebenfalls getrimmt — eine GUID mit Leerzeichen aus der Zwischenablage
     // ergäbe sonst still eine 404-URL (Review-Fund 17.08.2026).
-    let uuid = config.checkin.tournament_uuid.trim();
+    let uuid = config.checkin_guid();
+    let uuid = uuid.as_str();
     let view = checkin_state::fetch_state(&client, &origin, &config.badhub.password, uuid).await;
     match view.availability {
         Availability::Ready => {
