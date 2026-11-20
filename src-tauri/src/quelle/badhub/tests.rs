@@ -376,6 +376,92 @@ fn gruppe_mit_eigenen_rundentexten_und_aufgabe() {
     assert_eq!(snap.officials[0].display_name(), "Sabine Pfiff");
 }
 
+/// Zählweise je Spiel (Kern 0.14.0): Turnier 3×15, KO-Phase der Konkurrenz 3×21, Finale 5×11 —
+/// jedes Spiel bekommt sein eigenes Zählformat (Tablet: Satzziel, Deckel, Pause).
+#[test]
+fn zaehlweise_je_spiel_turnier_phase_spiel() {
+    let mut log = turnier(
+        6,
+        System::GruppenKo {
+            gruppengroesse: 3,
+            aufsteiger: 2,
+            platz3: false,
+        },
+        &[("H1", 2)],
+    );
+    let regeln = |z: Zaehlweise, ko: Option<Zaehlweise>| Regeln {
+        zaehlweise: z,
+        gruppenregeln: Gruppenregeln::untereinander(),
+        zaehlweise_ko: ko,
+    };
+    befehl(
+        &mut log,
+        TurnierBefehl::TurnierRegelnFestlegen {
+            id: "zt".into(),
+            regeln: Some(regeln(Zaehlweise::badminton_15(), None)),
+        },
+    )
+    .unwrap();
+    let st = falten_turnier(&log);
+    let ko: Vec<u32> = st.durchfuehrung["HE"]
+        .spiele
+        .iter()
+        .filter(|s| s.phase == Phase::Ko)
+        .map(|s| s.nr)
+        .collect();
+    let finale = *ko.last().unwrap();
+    befehl(
+        &mut log,
+        TurnierBefehl::RegelnFestlegen {
+            id: "zk".into(),
+            konkurrenz: "HE".into(),
+            regeln: Some(regeln(
+                Zaehlweise::badminton_15(),
+                Some(Zaehlweise::badminton()),
+            )),
+        },
+    )
+    .unwrap();
+    befehl(
+        &mut log,
+        TurnierBefehl::ZaehlweiseFestlegen {
+            id: "zs".into(),
+            konkurrenz: "HE".into(),
+            spiel: finale,
+            zaehlweise: Some(Zaehlweise::badminton_11()),
+        },
+    )
+    .unwrap();
+    let st = falten_turnier(&log);
+    let snap = abbilden(&st, &paket_fuer(log.clone(), 6, eine_halle()));
+    let fmt = |nr: u32| {
+        let m = snap
+            .matches
+            .iter()
+            .find(|m| m.id % super::abbildung::ID_FAKTOR == i64::from(nr))
+            .unwrap();
+        (
+            m.scoring.best_of,
+            m.scoring.target_score,
+            m.scoring.cap_score,
+            m.scoring.interval_at,
+        )
+    };
+    let gruppe = st.durchfuehrung["HE"]
+        .spiele
+        .iter()
+        .find(|s| s.phase == Phase::Gruppe)
+        .unwrap()
+        .nr;
+    assert_eq!(fmt(gruppe), (3, 15, 21, Some(8)), "Gruppe 3×15");
+    assert_eq!(fmt(ko[0]), (3, 21, 30, Some(11)), "KO 3×21");
+    assert_eq!(
+        fmt(finale),
+        (5, 11, 15, None),
+        "Finale 5×11 ohne Pause im Satz"
+    );
+}
+
 #[test]
 fn mehrere_hallen_mit_kern_feldnamen() {
     let mut log = turnier(4, System::Ko { platz3: false }, &[("H1", 2), ("H2", 2)]);
