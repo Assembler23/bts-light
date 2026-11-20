@@ -13,7 +13,6 @@ use crate::badhub::diff::{diff, roster_update, Update};
 use crate::badhub::payload::{build_checkin_roster, CheckinRosterMessage};
 use crate::badhub::push;
 use crate::badhub::strecke::{Anzeige, HaltGrund, Kanal, Klasse, Strecke, Tor};
-use crate::btp::client;
 use crate::btp::model::{BtpSnapshot, MatchResult, MatchStatus};
 use crate::config::{AppConfig, PrintTrigger};
 use crate::tablet::state::TabletState;
@@ -2423,15 +2422,11 @@ impl SyncEngine {
             tracing::info!("{zeile}");
         }
 
-        let mut snapshot = match client::fetch_snapshot(
-            &config.btp.host,
-            config.btp.port,
-            config.btp.password.as_deref(),
-        )
-        .await
-        {
+        // Lesen über die Turnierquelle (Paket L1): bei BTP genau der
+        // bisherige `client::fetch_snapshot`-Abruf samt Fehlertext.
+        let mut snapshot = match crate::quelle::stand(config).await {
             Ok(snapshot) => snapshot,
-            Err(e) => return SyncOutcome::BtpError(e.to_string()),
+            Err(e) => return SyncOutcome::BtpError(e),
         };
 
         // Leer-Snapshot-Guard: verdächtig leere Stände verwerfen, BEVOR

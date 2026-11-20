@@ -117,6 +117,7 @@ Ohne Anker veraltet die Aussage still.
 | Code-Pfad | Doku-Datei |
 |---|---|
 | `src-tauri/src/btp/*` | `docs/btp_protocol.md` |
+| **Turnierquelle** (`src-tauri/src/quelle/*` (`stand`, BTP-Schreibwege in `quelle/btp.rs`), `config.rs` `QuelleArt`/`AppConfig.quelle`; BTP-Turniere müssen unverändert laufen) | `docs/features/turnierquelle.md` · `docs/btp_protocol.md` · badhub `docs/features/bts_light_steuerung.md` |
 | `src-tauri/src/tablet/server.rs`, `assets/tablet.html` | `docs/tablet.md` |
 | **Verschlüsselte LAN-Strecke** (`tablet/tls.rs` `laden_oder_erzeugen`/`server_config`/`TlsListener`, `server.rs` `router`+`run_tls` und `?tls=1` in `qr_svg`, `config.rs` `TlsConfig`, `commands.rs` `tablet_server_tls` + `TabletInfo.server_host_tls`, `installer/firewall-hooks.nsh` Port 8443, `pages/TabletPanel.tsx` zweiter QR je Feld) | `docs/features/lan-tls-verschluesselt.md` (Spec) · `docs/tablet.md` (Bedienung) · ADR 0047/0005 |
 | `src-tauri/src/tablet/relay_client.rs`, `relay/`, `relay-proto/` | `docs/cloud-relay.md` |

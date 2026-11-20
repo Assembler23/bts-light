@@ -1180,9 +1180,27 @@ impl MeetingpointConfig {
     }
 }
 
+/// Turnierquelle. Heute nur BTP; der badhub-Turnierkern folgt (ADR-0084 in
+/// badhub).
+///
+/// Ein unbekannter Wert (etwa aus einer neueren Version nach einem Downgrade)
+/// wird als BTP gelesen, statt die ganze Konfiguration unlesbar zu machen.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QuelleArt {
+    /// Badminton Tournament Planner über TP-Network (`config.btp`).
+    #[default]
+    #[serde(other)]
+    Btp,
+}
+
 /// Gesamte App-Konfiguration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
+    /// Woher der Turnierstand kommt (badhub `docs/features/bts_light_steuerung.md`).
+    /// Fehlt der Eintrag — jede Konfiguration von vor Paket L1 —, gilt BTP.
+    #[serde(default)]
+    pub quelle: QuelleArt,
     pub btp: BtpConfig,
     pub badhub: BadhubConfig,
     /// Diagnose-Logs automatisch an badhub.de hochladen, damit Fehler über
@@ -2096,6 +2114,30 @@ mod sprachdienst_tests {
 mod tests {
     use super::*;
 
+    // ── Turnierquelle (Paket L1, badhub ADR-0084): BTP bleibt Vorgabe ──
+
+    #[test]
+    fn quelle_fehlt_in_alter_konfiguration_ergibt_btp() {
+        // Jede Konfiguration von vor Paket L1 kennt das Feld nicht.
+        let alt = serde_json::to_value(AppConfig::default()).unwrap();
+        let mut alt = alt.as_object().unwrap().clone();
+        alt.remove("quelle");
+        let gelesen: AppConfig = serde_json::from_value(alt.into()).unwrap();
+        assert_eq!(gelesen.quelle, QuelleArt::Btp);
+        assert_eq!(AppConfig::default().quelle, QuelleArt::Btp);
+    }
+
+    #[test]
+    fn quelle_unbekannter_wert_ergibt_btp_statt_lesefehler() {
+        // Downgrade nach einer Version mit weiterer Quelle: die Konfiguration
+        // bleibt lesbar, es gilt BTP.
+        let q: QuelleArt = serde_json::from_str(r#""badhub""#).unwrap();
+        assert_eq!(q, QuelleArt::Btp);
+        let q: QuelleArt = serde_json::from_str(r#""btp""#).unwrap();
+        assert_eq!(q, QuelleArt::Btp);
+        assert_eq!(serde_json::to_string(&QuelleArt::Btp).unwrap(), r#""btp""#);
+    }
+
     // ── Druckzeitpunkt des Autodrucks (Spec `zettel-druck-bei-aufruf`) ──
 
     #[test]
@@ -2797,6 +2839,7 @@ mod tests {
         let path = dir.path().join("nested").join("config.json");
 
         let config = AppConfig {
+            quelle: QuelleArt::Btp,
             btp: BtpConfig {
                 host: "192.168.1.50".to_string(),
                 port: 9901,
