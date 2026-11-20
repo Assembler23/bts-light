@@ -1086,7 +1086,7 @@ export function SetupWizard({
       checkin: {
         // Ohne gültige Turnier-Kennung bleibt der Check-In aus — sonst stünde
         // er als „aktiv" im Dashboard, ohne dass badhub je etwas erhielte.
-        enabled: ciEnabled && isTournamentGuid(tournamentGuid),
+        enabled: ciEnabled && (quelleBadhubGuid !== null || isTournamentGuid(tournamentGuid)),
         tournament_uuid: extractTournamentGuid(tournamentGuid),
         // Negative/leere Eingabe abfangen; 0 ist erlaubt (nie Namen nennen).
         missing_names_max:

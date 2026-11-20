@@ -2044,6 +2044,10 @@ impl AppConfig {
     /// Schreibweise nicht grundlos „Datei neu wählen" auslöst. Leerer Pfad,
     /// fehlende oder abweichende GUID → `None`.
     pub fn tp_datei_fuer_turnier(&self) -> Option<std::path::PathBuf> {
+        // Für badhub-Turniere gibt es keinen TP-Datei-Upload.
+        if self.quelle == QuelleArt::Badhub {
+            return None;
+        }
         let pfad = self.tp_upload.path.trim();
         if pfad.is_empty() {
             return None;
@@ -2312,6 +2316,22 @@ mod tests {
         // Check-In braucht weiter den Schalter.
         cfg.checkin.enabled = false;
         assert!(!cfg.checkin_bereit());
+    }
+
+    /// badhub-Turniere haben keine TP-Datei: auch eine passend gebundene
+    /// Datei gilt bei Quelle badhub nicht (sonst Upload/Rückfragen im Takt).
+    #[test]
+    fn quelle_badhub_hat_keine_tp_datei() {
+        const G: &str = "0EA5FD86-A64F-4445-A8DE-BAE3DBF762BA";
+        let mut cfg = AppConfig {
+            tournament_uuid: G.into(),
+            ..AppConfig::default()
+        };
+        cfg.tp_upload.path = "C:/t.tp".into();
+        cfg.tp_upload.tournament_uuid = G.into();
+        assert!(cfg.tp_datei_fuer_turnier().is_some());
+        cfg.quelle = QuelleArt::Badhub;
+        assert!(cfg.tp_datei_fuer_turnier().is_none());
     }
 
     #[test]
