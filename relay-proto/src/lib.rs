@@ -2666,6 +2666,18 @@ pub enum TlAction {
     /// dafür ausgestellte Gerät [`TL_GERAET_KERN`] darf diese Aktion senden,
     /// und dieses Gerät darf nichts anderes (Relay und Host prüfen beides).
     KernBefehl { befehl: serde_json::Value },
+    /// „Turnier beenden / Steuerung an badhub zurückgeben“ aus dem TL-Web —
+    /// derselbe Weg wie der Knopf im Hauptfenster (Paket L3): nur bei Quelle
+    /// badhub mit aktiver Lease und **leerer Outbox**, dann `DELETE
+    /// turnier/lease` und der Personenauszug wird gelöscht.
+    ///
+    /// Ohne Felder: Was zurückgegeben wird, steht am Turnier-PC fest (das
+    /// eine gekoppelte Turnier). Der Kern-Zugang [`TL_GERAET_KERN`] darf
+    /// diese Aktion **nicht** senden — badhub holt die Steuerung über seine
+    /// eigene Oberfläche zurück, nicht über den Turnier-PC (Relay und Host
+    /// prüfen beides). Ein älterer Host kennt die Aktion nicht; die Seite
+    /// zeigt den Knopf nur bei `can_return_badhub`.
+    BadhubZurueckgeben,
 }
 
 /// Kennung des Turnierleitungs-Zugangs, den bts-light beim Nehmen der Lease
@@ -6579,6 +6591,25 @@ mod tests {
         );
         // Ohne Befehl kein Kernbefehl — kein still ergänztes `null`.
         assert!(serde_json::from_str::<TlAction>(r#"{"action":"kern_befehl"}"#).is_err());
+    }
+
+    #[test]
+    fn badhub_zurueckgeben_roundtrips_without_fields() {
+        let action = TlAction::BadhubZurueckgeben;
+        let json = serde_json::to_string(&action).unwrap();
+        assert_eq!(json, r#"{"action":"badhub_zurueckgeben"}"#);
+        roundtrip(&action);
+        // Zusatzfelder einer neueren Seite stören nicht.
+        let gelesen: TlAction =
+            serde_json::from_str(r#"{"action":"badhub_zurueckgeben","egal":1}"#).unwrap();
+        assert_eq!(gelesen, TlAction::BadhubZurueckgeben);
+        roundtrip(&RelayFrame::TlCommand {
+            req_id: 9,
+            device_id: "tl-1".to_string(),
+            op_id: "badhub-zurueck-1".to_string(),
+            view_rev: 4,
+            action,
+        });
     }
 
     #[test]

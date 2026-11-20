@@ -460,6 +460,30 @@ struct Attrappe {
     nicht_geaendert: AtomicUsize,
     letztes_ab: StdMutex<Option<String>>,
     widerrufen: std::sync::atomic::AtomicBool,
+    /// Paket in Teilen: höchstens so viele Ereignisse im Paket, dazu Kopf
+    /// `n` und `ereignisse_bis_n`; die Ereignis-Antwort trägt dann `{ab, n}`.
+    kappen: StdMutex<Option<usize>>,
+    /// Höchstens so viele Ereignisse je Seite (0 = so viele wie `max`).
+    seite: AtomicUsize,
+    /// Nach so vielen Seiten antwortet `GET turnier/ereignisse` mit 503
+    /// (Netz bricht mittendrin ab); `None` = nie.
+    ausfall_nach: StdMutex<Option<usize>>,
+    seiten_abrufe: AtomicUsize,
+}
+
+impl Attrappe {
+    /// Alle Ereignisse in badhub: Paket + Nachzügler.
+    fn alle(&self) -> Vec<TurnierEreignis> {
+        let mut alle = self
+            .paket
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|p| p.ereignisse.clone())
+            .unwrap_or_default();
+        alle.extend(self.nachzuegler.lock().unwrap().iter().cloned());
+        alle
+    }
 }
 
 const TOKEN: &str = "tok-123";
@@ -498,7 +522,17 @@ async fn attrappe_starten(a: Arc<Attrappe>) -> String {
             return StatusCode::NOT_MODIFIED.into_response();
         }
         let p = a.paket.lock().unwrap().clone().unwrap();
-        ([("ETag", "\"s1\"")], Json(p)).into_response()
+        let Some(k) = *a.kappen.lock().unwrap() else {
+            return ([("ETag", "\"s1\"")], Json(p)).into_response();
+        };
+        // Gekappt wie badhub: die ersten k Ereignisse, Kopf daneben.
+        let kopf = a.alle().iter().map(TurnierEreignis::n).max().unwrap_or(0);
+        let mut v = serde_json::to_value(&p).unwrap();
+        let teil: Vec<TurnierEreignis> = p.ereignisse.into_iter().take(k).collect();
+        v["ereignisse_bis_n"] = serde_json::json!(teil.last().map_or(0, TurnierEreignis::n));
+        v["ereignisse"] = serde_json::to_value(teil).unwrap();
+        v["n"] = serde_json::json!(kopf);
+        ([("ETag", "\"s1\"")], Json(v)).into_response()
     }
     async fn ereignisse(
         State(a): State<Arc<Attrappe>>,
@@ -510,15 +544,41 @@ async fn attrappe_starten(a: Arc<Attrappe>) -> String {
         }
         let ab: u64 = q.get("ab").and_then(|v| v.parse().ok()).unwrap_or(0);
         *a.letztes_ab.lock().unwrap() = q.get("ab").cloned();
-        let neu: Vec<TurnierEreignis> = a
-            .nachzuegler
-            .lock()
-            .unwrap()
-            .iter()
+        if a.kappen.lock().unwrap().is_none() {
+            // B1: nur die Nachzügler, ohne Kopf.
+            let neu: Vec<TurnierEreignis> = a
+                .nachzuegler
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e.n() > ab)
+                .cloned()
+                .collect();
+            return Json(serde_json::json!({ "ereignisse": neu })).into_response();
+        }
+        {
+            let mut ausfall = a.ausfall_nach.lock().unwrap();
+            match *ausfall {
+                Some(0) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+                Some(k) => *ausfall = Some(k - 1),
+                None => {}
+            }
+        }
+        a.seiten_abrufe.fetch_add(1, Ordering::SeqCst);
+        let max: usize = q.get("max").and_then(|v| v.parse().ok()).unwrap();
+        assert_eq!(max, api::SEITE, "max wie vereinbart");
+        let seite = match a.seite.load(Ordering::SeqCst) {
+            0 => max,
+            s => s.min(max),
+        };
+        let alle = a.alle();
+        let kopf = alle.iter().map(TurnierEreignis::n).max().unwrap_or(0);
+        let neu: Vec<TurnierEreignis> = alle
+            .into_iter()
             .filter(|e| e.n() > ab)
-            .cloned()
+            .take(seite)
             .collect();
-        Json(serde_json::json!({ "ereignisse": neu })).into_response()
+        Json(serde_json::json!({ "ab": ab, "n": kopf, "ereignisse": neu })).into_response()
     }
 
     let app = Router::new()
@@ -567,6 +627,8 @@ async fn kopplung_paket_etag_ereignisse_und_widerruf() {
     assert_eq!(k.turnier.basis, basis);
     assert_eq!(k.spiele, 3);
     assert!(k.kern_hinweis.is_none());
+    // badhub ohne `ereignisse_bis_n`: das Paket gilt als vollständig.
+    assert!(k.nachlade_hinweis.is_none());
 
     // Laden wie beim Start und Stand lesen.
     let mut q = KernQuelle::laden(daten.path(), &k.turnier).unwrap();
@@ -584,7 +646,7 @@ async fn kopplung_paket_etag_ereignisse_und_widerruf() {
 
     // Ein neues Ergebnis in badhub → Ereignisse ab n.
     *a.nachzuegler.lock().unwrap() = nachzuegler;
-    let neu = api::ereignisse(&b, &t, n).await.unwrap();
+    let neu = api::ereignisse(&b, &t, n).await.unwrap().ereignisse;
     assert_eq!(
         a.letztes_ab.lock().unwrap().as_deref(),
         Some(n.to_string().as_str())
@@ -674,4 +736,62 @@ fn laden_verlangt_https_basis() {
         ..BadhubTurnierConfig::default()
     };
     assert!(KernQuelle::laden(daten.path(), &cfg).is_err());
+}
+
+// ── Paket in Teilen (badhub kappt auf 2000 Ereignisse) ─────────────────────
+
+/// Attrappe mit einem Turnier, das mehr Ereignisse hat, als das gekappte
+/// Paket trägt.
+async fn gekappt(kappen: usize, seite: usize) -> (Arc<Attrappe>, String, Vec<TurnierEreignis>) {
+    let (basis_log, nachzuegler) = mit_nachzuegler();
+    let mut voll = basis_log.clone();
+    voll.extend(nachzuegler);
+    let a = Arc::new(Attrappe::default());
+    *a.paket.lock().unwrap() = Some(paket_fuer(voll.clone(), 4, eine_halle()));
+    *a.kappen.lock().unwrap() = Some(kappen);
+    a.seite.store(seite, Ordering::SeqCst);
+    let basis = attrappe_starten(a.clone()).await;
+    (a, basis, voll)
+}
+
+#[tokio::test]
+async fn gekapptes_paket_wird_beim_koppeln_seitenweise_nachgeladen() {
+    let (a, basis, voll) = gekappt(5, 4).await;
+    assert!(voll.len() > 13, "mehrere Seiten nötig: {}", voll.len());
+    let daten = tempfile::tempdir().unwrap();
+    let k = koppeln(&basis, daten.path(), "ABCD2345", "inst-1", "PC")
+        .await
+        .unwrap();
+    assert!(k.nachlade_hinweis.is_none(), "{:?}", k.nachlade_hinweis);
+    // Mehrere Seiten, obwohl jede kürzer als `max` war — maßgeblich ist `n`.
+    let seiten = (voll.len() - 5).div_ceil(4);
+    assert_eq!(a.seiten_abrufe.load(Ordering::SeqCst), seiten);
+    let mut q = KernQuelle::laden(daten.path(), &k.turnier).unwrap();
+    assert_eq!(
+        q.paket.ereignisse, voll,
+        "lückenlos und vollständig abgelegt"
+    );
+    assert_eq!(q.stand().matches[0].status, MatchStatus::Finished);
+}
+
+#[tokio::test]
+async fn abbruch_beim_nachladen_laesst_einen_lueckenlosen_anfang_den_der_abgleich_ergaenzt() {
+    let (a, basis, voll) = gekappt(5, 4).await;
+    *a.ausfall_nach.lock().unwrap() = Some(2);
+    let daten = tempfile::tempdir().unwrap();
+    let k = koppeln(&basis, daten.path(), "ABCD2345", "inst-1", "PC")
+        .await
+        .unwrap();
+    // Die Kopplung gilt (Code ist eingelöst), mit Hinweis.
+    let hinweis = k.nachlade_hinweis.clone().unwrap();
+    assert!(hinweis.contains("bis Ereignis 13"), "{hinweis}");
+    let q = KernQuelle::laden(daten.path(), &k.turnier).unwrap();
+    assert_eq!(q.paket.ereignisse, voll[..13].to_vec(), "Anfang ohne Lücke");
+
+    // Netz wieder da: der Abgleich holt den Rest seitenweise ab n.
+    *a.ausfall_nach.lock().unwrap() = None;
+    let z = StdMutex::new(Some(q));
+    abgleich_schritt_in(&z, false, None).await;
+    let g = z.lock().unwrap();
+    assert_eq!(g.as_ref().unwrap().paket.ereignisse, voll);
 }

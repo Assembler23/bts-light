@@ -39,6 +39,8 @@ export interface BadhubKopplung {
   konkurrenzen: number;
   spiele: number;
   kern_hinweis: string | null;
+  /** Paket nur teilweise geladen (Netz brach beim Nachladen ab); der Rest kommt mit der Übertragung. */
+  nachlade_hinweis?: string | null;
 }
 
 export interface BadhubConfig {

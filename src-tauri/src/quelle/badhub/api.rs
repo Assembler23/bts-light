@@ -71,13 +71,53 @@ pub struct KopplungTurnier {
     pub name: String,
 }
 
-/// Antwort auf `GET /turnier/ereignisse` — als Liste oder als Objekt mit
-/// `ereignisse` (die Spec legt die Hülle nicht fest).
+/// Höchstzahl Ereignisse je `GET /turnier/ereignisse` (`max=`). badhub darf
+/// weniger liefern — maßgeblich für „fertig“ ist der Kopf `n`.
+pub const SEITE: usize = 500;
+
+/// Antwort auf `GET /turnier/ereignisse` — als Liste (B1), als Objekt mit
+/// `ereignisse` oder seit dem Paket in Teilen als `{ab, n, ereignisse}` mit
+/// dem Kopf `n` (höchstes Ereignis in badhub).
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum EreignisAntwort {
     Liste(Vec<TurnierEreignis>),
-    Objekt { ereignisse: Vec<TurnierEreignis> },
+    Objekt {
+        ereignisse: Vec<TurnierEreignis>,
+        #[serde(default)]
+        n: Option<u64>,
+    },
+}
+
+/// Eine Seite Ereignisse samt Kopf (`None` bei einem badhub ohne Kopf).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EreignisSeite {
+    pub ereignisse: Vec<TurnierEreignis>,
+    pub kopf: Option<u64>,
+}
+
+/// Kopf eines gekappten Pakets (badhub liefert höchstens 2000 Ereignisse):
+/// `ereignisse_bis_n` = letztes enthaltene Ereignis, `n` = Kopf. Bewusst
+/// nicht Teil von [`Paket`] — das wird so gespeichert, wie es ist, und
+/// gilt nach dem Nachladen als vollständig.
+#[derive(Debug, Default, Deserialize)]
+struct PaketKopf {
+    #[serde(default)]
+    n: Option<u64>,
+    #[serde(default)]
+    ereignisse_bis_n: Option<u64>,
+}
+
+impl PaketKopf {
+    /// Bis wohin nachzuladen ist; `None` = vollständig. Fehlt
+    /// `ereignisse_bis_n` (badhub vor dem Paket in Teilen), gilt das Paket
+    /// als vollständig.
+    fn nachladen_bis(&self) -> Option<u64> {
+        match (self.ereignisse_bis_n, self.n) {
+            (Some(bis), Some(kopf)) if bis < kopf => Some(kopf),
+            _ => None,
+        }
+    }
 }
 
 /// Ergebnis von `GET /turnier/paket`.
@@ -88,6 +128,9 @@ pub enum PaketAntwort {
     Neu {
         paket: Box<Paket>,
         etag: Option<String>,
+        /// Gekapptes Paket: Kopf `n`, bis zu dem über
+        /// `GET turnier/ereignisse` nachzuladen ist. `None` = vollständig.
+        nachladen_bis: Option<u64>,
     },
 }
 
@@ -194,21 +237,21 @@ pub async fn paket(
             e.column()
         ))
     })?;
+    let nachladen_bis = serde_json::from_slice::<PaketKopf>(&text)
+        .unwrap_or_default()
+        .nachladen_bis();
     let etag = header_etag.or_else(|| paket.stammdaten_etag.clone());
     Ok(PaketAntwort::Neu {
         paket: Box::new(paket),
         etag,
+        nachladen_bis,
     })
 }
 
-/// Holt die Ereignisse mit Kern-`n > ab`.
-pub async fn ereignisse(
-    basis: &str,
-    token: &str,
-    ab: u64,
-) -> Result<Vec<TurnierEreignis>, ApiFehler> {
+/// Holt eine Seite Ereignisse mit Kern-`n > ab` (höchstens [`SEITE`]).
+pub async fn ereignisse(basis: &str, token: &str, ab: u64) -> Result<EreignisSeite, ApiFehler> {
     let antwort = client(Duration::from_secs(10))?
-        .get(format!("{basis}/turnier/ereignisse?ab={ab}&max=500"))
+        .get(format!("{basis}/turnier/ereignisse?ab={ab}&max={SEITE}"))
         .bearer_auth(token)
         .header("Accept", "application/json")
         .send()
@@ -222,7 +265,14 @@ pub async fn ereignisse(
     match serde_json::from_slice::<EreignisAntwort>(&text)
         .map_err(|_| ApiFehler::Format("Ereignisse".into()))?
     {
-        EreignisAntwort::Liste(l) | EreignisAntwort::Objekt { ereignisse: l } => Ok(l),
+        EreignisAntwort::Liste(ereignisse) => Ok(EreignisSeite {
+            ereignisse,
+            kopf: None,
+        }),
+        EreignisAntwort::Objekt { ereignisse, n } => Ok(EreignisSeite {
+            ereignisse,
+            kopf: n,
+        }),
     }
 }
 

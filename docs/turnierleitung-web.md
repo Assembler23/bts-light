@@ -522,6 +522,32 @@ geht es nur am Turnier-PC mit **Steuerung wieder übernehmen**
 Beispiel „Feld 2 ist belegt"), steht der Grund wie gewohnt an der Aktion.
 <!-- pruef: "bh-abgleich-rot" in src-tauri/assets/tl.html -->
 
+**Turnier beenden (seit v0.9.451).** Hält der Turnier-PC die Steuerung, steht
+im Kopf zusätzlich der Knopf **Turnier beenden** — derselbe Schritt wie
+**Turnier beenden / Steuerung an badhub zurückgeben** im Hauptfenster. Nach
+einer Rückfrage gibt der Turnier-PC die Steuerung an badhub zurück und löscht
+die Namen der Spieler und Schiedsrichter von seiner Platte; Eingaben gehen
+danach nur noch in badhub.
+<!-- pruef: "Turnier beenden" in src-tauri/assets/tl.html -->
+<!-- pruef: "Turnier beenden / Steuerung an badhub zurückgeben" in src-tauri/assets/tl.html -->
+<!-- pruef: "Steuerung an badhub zurückgegeben" in src-tauri/assets/tl.html -->
+
+- Das geht nur, wenn **alles bei badhub angekommen** ist („badhub: aktuell").
+  Warten noch Eingaben, sagt die Seite, wie viele: **„3 Ereignisse warten noch
+  auf den Abgleich mit badhub …"** — dann mit Internet kurz warten und erneut
+  drücken.
+  <!-- pruef: "noch auf den Abgleich" in src-tauri/assets/tl.html -->
+  <!-- pruef: "noch auf den Abgleich mit badhub" in src-tauri/src/quelle/badhub/mod.rs -->
+- Der Knopf erscheint nur bei einem badhub-Turnier, solange der Turnier-PC die
+  Steuerung hält — nicht nach der Rückgabe, nicht nach einer Rückholung in
+  badhub und nicht an einem Ansage-Slave.
+- Jedes gekoppelte TL-Gerät darf die Steuerung zurückgeben, so wie es auch
+  Ergebnisse eintragen darf: Das TL-Web kennt keine abgestuften Rechte, ein
+  Profil blendet nur aus. Der Zugang, über den badhub selbst Eingaben in die
+  Halle schickt, darf es **nicht**.
+- **Wieder übernehmen** geht nur am Turnier-PC (**Steuerung wieder
+  übernehmen**, [Oberflächen](oberflaechen.md)).
+
 Bei BTP-Turnieren erscheint nichts davon.
 
 ### Links zu badhub (seit v0.9.445)
