@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.452
+
+- **Zählweise je Spiel bei badhub-Turnieren.** badhub kann die Zählweise
+  jetzt für das Turnier, je Konkurrenz, getrennt für Gruppen- und KO-Phase und
+  für einzelne Spiele festlegen (3×21, 3×15, 5×11 wie in der Bundesliga …).
+  Tablet und TL-Web bekommen das Zählformat jedes Spiels einzeln: Satzziel,
+  Obergrenze und Pause (bei 11er-Sätzen keine Pause im Satz).
+- Turnierkern 0.14.0 (passend zu badhub). Ältere Versionen zeigen bei
+  badhub-Turnieren den Hinweis auf die abweichende Kern-Version.
+- BTP-Turniere laufen unverändert.
+
 ## v0.9.451
 
 - **Turnier beenden auch im TL-Web.** Bei einem badhub-Turnier steht im Kopf
