@@ -158,6 +158,9 @@ zur Generalprobe E1 nicht produktiv.
   Kopplung, gilt sie erst nach erneutem Koppeln. Die Oberfläche liest dieselbe GUID über `wirksameTurnierGuid()`
   (`src/tournamentGuid.ts`). Bei Quelle badhub gibt es keine TP-Datei: `tp_datei_fuer_turnier` liefert `None`, die
   TP-Automatik (`tp_finden::entscheide`) bleibt still.
+- Spielerlinks (v0.9.456, 21.11.2026): Der Personenauszug trägt je Person die DBV-Lizenz (`PaketPerson.lizenz`, badhub ab
+  21.11.2026); `abbildung::spieler` setzt sie als `member_id` (nur in der Form `LV-Nummer`). Daran hängen wie bei BTP die
+  Spielerlinks der TL-Sicht (`spielerLink`) und `p0/p1_member_ids` im Liveticker. Ohne Lizenz bleibt der Name unverlinkt.
 
 ## Paket L3 (umgesetzt, schreibend)
 

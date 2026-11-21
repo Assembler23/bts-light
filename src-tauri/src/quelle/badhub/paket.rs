@@ -146,6 +146,11 @@ pub struct PaketPerson {
     pub verein: Option<String>,
     #[serde(default)]
     pub nation: Option<String>,
+    /// DBV-Lizenz (`08-012002`), seit badhub 21.11.2026; `None` ohne Lizenz,
+    /// bei Anonymisierten und bei älterem badhub. Wird zur `member_id` — daran
+    /// hängen die Spielerlinks in TL-Sicht und Liveticker (wie bei BTP).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lizenz: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
