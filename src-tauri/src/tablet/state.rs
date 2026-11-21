@@ -1416,6 +1416,10 @@ struct PersistedMatchUpdate {
     sets: Vec<(i64, i64)>,
     team1_won: bool,
     duration_mins: i64,
+    /// Nettozeit (Kern 0.17.0). `#[serde(default)]`: ältere Queue-Dateien
+    /// laden ohne Messung.
+    #[serde(default)]
+    netto_mins: Option<i64>,
     score_status: i64,
     free_court_id: Option<i64>,
     player_ids: Vec<i64>,
@@ -1440,6 +1444,7 @@ impl From<&crate::btp::proto::MatchUpdate> for PersistedMatchUpdate {
             sets: u.sets.clone(),
             team1_won: u.team1_won,
             duration_mins: u.duration_mins,
+            netto_mins: u.netto_mins,
             score_status: u.score_status,
             free_court_id: u.free_court_id,
             player_ids: u.player_ids.clone(),
@@ -1459,6 +1464,7 @@ impl From<PersistedMatchUpdate> for crate::btp::proto::MatchUpdate {
             sets: p.sets,
             team1_won: p.team1_won,
             duration_mins: p.duration_mins,
+            netto_mins: p.netto_mins,
             score_status: p.score_status,
             free_court_id: p.free_court_id,
             player_ids: p.player_ids,
@@ -8250,6 +8256,7 @@ pub(crate) mod tests {
             sets: vec![(21, 10)],
             team1_won: true,
             duration_mins: duration,
+            netto_mins: None,
             score_status: 0,
             free_court_id: None,
             player_ids: Vec::new(),

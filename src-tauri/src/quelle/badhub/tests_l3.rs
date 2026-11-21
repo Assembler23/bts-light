@@ -36,6 +36,7 @@ fn update(id: i64, sets: Vec<(i64, i64)>, team1_won: bool, status: i64) -> Match
         sets,
         team1_won,
         duration_mins: 0,
+        netto_mins: None,
         score_status: status,
         free_court_id: None,
         player_ids: vec![],
@@ -143,6 +144,35 @@ fn feld_zuweisen_umhaengen_und_raeumen_werden_aufruf_und_ruecknahme() {
         JETZT
     )
     .is_err());
+}
+
+#[test]
+fn ergebnis_traegt_die_nettozeit() {
+    // Kern 0.17.0: gemessene Nettozeit geht mit, nie bei kampflos
+    let (log, p) = ko4();
+    let st = falten_turnier(&log);
+    let e = |u: MatchUpdate| schreiben::ergebnis(&st, &p, &u, JETZT).unwrap().unwrap();
+    let mut u = update(300_001, vec![(21, 15), (21, 19)], true, 0);
+    u.end_ts_ms = Some(1_765_015_800_000);
+    u.duration_mins = 30;
+    u.netto_mins = Some(24);
+    let TurnierBefehl::ErgebnisMelden { netto_min, .. } = e(u) else {
+        panic!()
+    };
+    assert_eq!(netto_min, Some(24));
+    let mut wo = update(300_001, vec![], false, 1);
+    wo.netto_mins = Some(3);
+    let TurnierBefehl::ErgebnisMelden { netto_min, .. } = e(wo) else {
+        panic!()
+    };
+    assert_eq!(netto_min, None);
+    // ohne Messung: nichts
+    let TurnierBefehl::ErgebnisMelden { netto_min, .. } =
+        e(update(300_001, vec![(21, 15), (21, 19)], true, 0))
+    else {
+        panic!()
+    };
+    assert_eq!(netto_min, None);
 }
 
 #[test]

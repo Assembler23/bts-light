@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.458
+
+- **Nettospielzeit an badhub.** Bei badhub-Turnieren geht mit jedem Ergebnis vom
+  Tablet die gemessene Nettozeit (erster Punkt bis Spielende) mit; badhub zeigt
+  im Spiel-Dialog Brutto und Netto. Dafür Turnierkern 0.17.0 – gleiche Version
+  wie badhub, ohne dieses Update lehnt bts-light Eingaben in badhub-Turnieren mit
+  „bitte bts-light aktualisieren“ ab.
+- BTP-Turniere laufen unverändert (BTP bekommt weiter nur die Bruttozeit).
+
 ## v0.9.457
 
 - **Turnierkern 0.16.0** für badhub-Turniere – gleiche Version wie badhub. Ohne
