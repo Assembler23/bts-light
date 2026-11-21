@@ -4,7 +4,7 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
-## v0.9.458
+## v0.9.459
 
 - **Nettospielzeit an badhub.** Bei badhub-Turnieren geht mit jedem Ergebnis vom
   Tablet die gemessene Nettozeit (erster Punkt bis Spielende) mit; badhub zeigt
@@ -12,6 +12,15 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   wie badhub, ohne dieses Update lehnt bts-light Eingaben in badhub-Turnieren mit
   „bitte bts-light aktualisieren“ ab.
 - BTP-Turniere laufen unverändert (BTP bekommt weiter nur die Bruttozeit).
+
+## v0.9.458
+
+- **Tablet: Federball im Aufschlagfeld.** Der Ball, der den Aufschläger
+  markiert, sitzt jetzt im Aufschlagfeld selbst — direkt hinter der vorderen
+  Aufschlaglinie an der Mittellinie — statt am Netz. Wechselt der Aufschlag,
+  gleitet er mit einer kurzen Animation ins neue Feld.
+- **Tablet: Vereinsname ausgeschrieben.** Ist die Vereinsanzeige an, steht der
+  Name voll da, solange das Feld Platz hat; erst danach wird mit „…" gekürzt.
 
 ## v0.9.457
 
