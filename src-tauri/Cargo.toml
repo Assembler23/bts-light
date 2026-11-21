@@ -1,6 +1,6 @@
 [package]
 name = "bts-light"
-version = "0.9.459"
+version = "0.9.460"
 description = "Plug-and-play liveticker bridge between BTP (Tournament Planner) and badhub.de"
 authors = ["Badhub"]
 edition = "2021"
@@ -64,7 +64,7 @@ minisign-verify = "0.3"
 # `TURNIERKERN_LESE_TOKEN` (insteadOf vor jedem cargo-Aufruf). Version gleich
 # dem Kern-Dienst in badhub, sonst meldet badhub beim Hochladen (L3)
 # `abweichung`. Der Kern-Code wird NICHT ins öffentliche Repo kopiert.
-turnierkern = { git = "https://github.com/Assembler23/turnierkern", tag = "v0.17.0" }
+turnierkern = { git = "https://github.com/Assembler23/turnierkern", tag = "v0.18.0" }
 # Offline-Stimme (ADR 0104), bisher NUR für das Messwerkzeug E0
 # `tests/offline_stimme_probe.rs`: hinter dem Feature `offline-probe`, das
 # weder die CI noch der Release-Build einschaltet. Apache-2.0, ohne GPL
