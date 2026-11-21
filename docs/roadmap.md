@@ -677,8 +677,9 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
   verschwinden Verbindungen still (ADR 0105). **E1 (Ausfall erkennen) ist
   umgesetzt** (v0.9.443): harte Frist 4 s, Merker je Dienst, Prüfung im
   Hintergrund. Gemini hat seit v0.9.444 eine eigene Frist von 10 s. Das zweite
-  Werkzeug (`tests/offline_stimme_probe.rs`) ist gebaut, ein Vorlauf unter Linux
-  steht in ADR 0104. **Offen:** Lauf am Windows-Turnier-PC und Hörvergleich, danach
+  Werkzeug (`tests/offline_stimme_probe.rs`) ist gebaut. Runde 1 am Windows-PC
+  (18.11.2026): Zeiten, Größe, Speicher und Dauerlauf passen, der Hörvergleich
+  nicht (ADR 0104). **Offen:** Runde 2 mit Abstimmung und espeak-Gegenprobe, danach
   die Entscheidung über den Weg V1 und E2.
 - **Pi-Fernupdate** — Spec:
   [features/pi-fernupdate.md](features/pi-fernupdate.md)
