@@ -1266,6 +1266,11 @@ pub struct AppConfig {
     /// Gekoppeltes badhub-Turnier (nur bei `quelle = badhub` wirksam).
     #[serde(default)]
     pub badhub_turnier: BadhubTurnierConfig,
+    /// Ordner für die Notfall-Sicherung eines badhub-Turniers
+    /// (`notfall-<uuid>.btsk`, Paket S2), z. B. USB-Stick oder Netzlaufwerk.
+    /// Leer = keine Sicherung (Vorgabe).
+    #[serde(default)]
+    pub badhub_notfall_ordner: String,
     pub btp: BtpConfig,
     pub badhub: BadhubConfig,
     /// Diagnose-Logs automatisch an badhub.de hochladen, damit Fehler über
@@ -3050,6 +3055,7 @@ mod tests {
         let config = AppConfig {
             quelle: QuelleArt::Btp,
             badhub_turnier: BadhubTurnierConfig::default(),
+            badhub_notfall_ordner: String::new(),
             btp: BtpConfig {
                 host: "192.168.1.50".to_string(),
                 port: 9901,

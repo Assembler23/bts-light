@@ -1295,6 +1295,87 @@ pub fn badhub_slave_schluessel(state: State<'_, AppState>) -> Option<String> {
         .flatten()
 }
 
+/// Lage des Standby (Paket S2) für das Hauptfenster eines badhub-Slaves;
+/// `None` bei BTP, am Hauptrechner oder ohne geladenes Turnier.
+#[tauri::command]
+pub fn badhub_standby_lage(
+    state: State<'_, AppState>,
+) -> Option<crate::quelle::badhub::standby::StandbyLage> {
+    let slave = {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        cfg.quelle == crate::config::QuelleArt::Badhub && cfg.slave_mode
+    };
+    slave.then(crate::quelle::badhub::standby_lage).flatten()
+}
+
+/// Notfall-Sicherung (`notfall-<uuid>.btsk`) einlesen (Paket S2). Der Pfad
+/// kommt aus dem Dateidialog; gelesen wird nur diese eine Datei.
+#[tauri::command]
+pub fn badhub_sicherung_einlesen(
+    state: State<'_, AppState>,
+    pfad: String,
+) -> Result<String, String> {
+    {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        if cfg.quelle != crate::config::QuelleArt::Badhub {
+            return Err("Dieser PC ist nicht mit einem badhub-Turnier gekoppelt.".into());
+        }
+    }
+    crate::quelle::badhub::sicherung_einlesen(std::path::Path::new(pfad.trim()))
+}
+
+/// „Hauptrechner ausgefallen – Turnier übernehmen“ (Paket S2, nur am
+/// Desktop): Spiegel → Protokoll, Lease unter der bisherigen Epoche, dann
+/// läuft dieser PC als Turnier-PC (kein Slave mehr) — die Übertragung
+/// startet neu, Tablet-Server, TL-Web und Auto-Vergabe wie beim
+/// Hauptrechner.
+#[tauri::command]
+pub fn badhub_standby_uebernehmen(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    {
+        let cfg = state.config.lock().expect("Config-Mutex nicht vergiftet");
+        if cfg.quelle != crate::config::QuelleArt::Badhub || !cfg.slave_mode {
+            return Err("Übernehmen geht nur an einem Standby-PC eines badhub-Turniers.".into());
+        }
+    }
+    // Schon übernommen (z. B. ein früherer Versuch scheiterte erst beim
+    // Speichern der Einstellungen)? Dann nur noch auf den Master-Betrieb
+    // umstellen — ein zweiter Klick soll das zu Ende bringen.
+    let text = if crate::quelle::badhub::haelt_lease() {
+        "Turnier war schon übernommen — dieser PC läuft jetzt als Turnier-PC.".to_string()
+    } else {
+        crate::quelle::badhub::standby_uebernehmen()?
+    };
+    let lief = state
+        .sync_task
+        .lock()
+        .expect("Task-Mutex nicht vergiftet")
+        .is_some();
+    let weiter = |e: String| {
+        format!(
+            "Das Turnier ist übernommen, aber {e} — bitte noch einmal „Hauptrechner ausgefallen – \
+             Turnier übernehmen“ drücken oder im Assistenten „Ansage-Slave“ ausschalten."
+        )
+    };
+    mutate_config(&app, &state, |cfg| {
+        cfg.slave_mode = false;
+        Ok(())
+    })
+    .map_err(|e| {
+        weiter(format!(
+            "die Einstellungen ließen sich nicht speichern ({e})"
+        ))
+    })?;
+    if lief {
+        stop_sync_kern(&state);
+        start_sync_kern(&app, &state)
+            .map_err(|e| weiter(format!("die Übertragung startete nicht neu ({e})")))?;
+    }
+    Ok(text)
+}
+
 /// Slave-Schlüssel am Ansage-Slave eintragen (vom Turnier-PC abgelesen).
 #[tauri::command]
 pub fn badhub_slave_schluessel_setzen(
@@ -3707,6 +3788,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
     let quellen_start = crate::quelle::starten(&config, app.path().app_data_dir().ok().as_deref());
     // Relay-Namespace für die Lease eines badhub-Turniers: Über ihn leitet
     // badhub seine Eingaben an diesen PC — nur mit Cloud-Weg.
+    let notfall_ordner = config.badhub_notfall_ordner.trim().to_string();
     let kern_relay_ns = (!config.slave_mode && config.connection_mode.cloud_enabled())
         .then(|| config.install_id.trim().to_string())
         .filter(|ns| !ns.is_empty());
@@ -3806,6 +3888,16 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
                 crate::quelle::badhub::outbox_schleife(),
             ))
         });
+        // Notfall-Sicherung (Paket S2): nur am Hauptrechner eines
+        // badhub-Turniers und nur mit eingestelltem Ordner.
+        let _kern_notfall =
+            (quellen_start.kern_abgleich && !notfall_ordner.is_empty()).then(|| {
+                TaktWaechter(tauri::async_runtime::spawn(
+                    crate::quelle::badhub::notfall_schleife(std::path::PathBuf::from(
+                        notfall_ordner.clone(),
+                    )),
+                ))
+            });
         let _tp_takt = (!slave_mode && quellen_start.btp_dienste).then(|| {
             let st = app_handle.state::<AppState>();
             let cfg = st.config.clone();
@@ -5026,6 +5118,22 @@ pub fn stop_sync(state: State<'_, AppState>) {
 /// Das Anhalten der Übertragung ohne Tauri-`State` — auch für den
 /// Kernwechsel, der es von einem Arbeits-Thread aus ruft.
 pub(crate) fn stop_sync_kern(state: &AppState) {
+    // Notfall-Sicherung beim Anhalten (Paket S2): einmal sofort, falls sich
+    // seit der letzten etwas geändert hat. Nur badhub am Hauptrechner.
+    // Ordner kopieren und die Sperre lösen, bevor geschrieben wird: Ein
+    // hängendes Netzlaufwerk darf nicht jeden `config.lock()` aufhalten.
+    let notfall = {
+        let cfg = state
+            .config
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let ordner = cfg.badhub_notfall_ordner.trim().to_string();
+        (cfg.quelle == crate::config::QuelleArt::Badhub && !cfg.slave_mode && !ordner.is_empty())
+            .then_some(ordner)
+    };
+    if let Some(ordner) = notfall {
+        crate::quelle::badhub::notfall_sichern(std::path::Path::new(&ordner), true);
+    }
     if let Some(handle) = state
         .sync_task
         .lock()

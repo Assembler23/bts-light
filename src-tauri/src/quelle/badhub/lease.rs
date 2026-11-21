@@ -53,6 +53,23 @@ pub struct Lease {
     /// Letzte erfolgreiche Antwort von badhub (Unix-ms), für die Anzeige.
     #[serde(default)]
     pub letzter_kontakt_ms: u64,
+    /// Standby-Übernahme ohne Netz (Paket S2): Dieser PC schreibt unter der
+    /// Epoche des ausgefallenen Hauptrechners; der erste Upload geht mit
+    /// `standby: true` und bringt die neue Epoche.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub standby: bool,
+    /// Nach der Standby-Übernahme passt der eigene Stand nicht zu badhub
+    /// (abgewiesene Posten oder badhub weiter): Stand neu laden, bis dahin
+    /// keine Eingaben.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub neu_laden: bool,
+    /// Posten, die badhub bei der Standby-Übernahme abgewiesen hat (Anzeige).
+    #[serde(default, skip_serializing_if = "ist_null")]
+    pub abgewiesen: u64,
+}
+
+fn ist_null(v: &u64) -> bool {
+    *v == 0
 }
 
 impl Lease {
@@ -112,6 +129,7 @@ mod tests {
             relay_ns: Some("ns-1".into()),
             seit_ms: 1,
             letzter_kontakt_ms: 2,
+            ..Default::default()
         };
         speichern(dir.path(), &l).unwrap();
         assert_eq!(laden(dir.path()), Some(l));

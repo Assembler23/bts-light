@@ -1448,6 +1448,7 @@ body.offline .fin-row button { opacity: .45; }
 
 /* Rückzug-Dialog (badhub-Turnier) */
 .rz-dlg { max-width: 34rem; width: 92vw; }
+.bh-abgleich.bh-warnung { color: #b45309; font-weight: 600; }
 .rz-dlg form { display: flex; flex-direction: column; gap: .5rem; }
 .rz-dlg select { width: 100%; }
 .rz-hinweis { font-size: .85em; opacity: .8; margin: 0; }
@@ -10540,8 +10541,12 @@ function renderBadhubAbgleich() {
     if (band) band.remove();
     return;
   }
-  zeile.hidden = !!a.rot;
-  zeile.textContent = a.text;
+  zeile.hidden = !!a.rot && !a.warnung;
+  // Standby-Übernahme (Paket S2): „k Eingaben abgewiesen“ bzw. „Hauptrechner
+  // war vor x s noch online“ steht mit im Kopf, damit die Turnierleitung es
+  // sieht.
+  zeile.textContent = a.warnung ? (a.rot ? a.warnung : `${a.text} — ${a.warnung}`) : a.text;
+  zeile.classList.toggle("bh-warnung", !!a.warnung);
   if (a.rot) {
     if (!band) {
       band = document.createElement("div");

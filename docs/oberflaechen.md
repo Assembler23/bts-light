@@ -157,6 +157,37 @@ Darunter steht der **Slave-Schlüssel** für einen Ansage-Slave im Hallennetz
 (siehe [Einstellungen](einstellungen.md)).
 <!-- pruef: "Slave-Schlüssel für einen Ansage-Slave im Hallennetz" in src/components/BadhubAbgleichPanel.tsx -->
 
+### Standby-PC (badhub-Turniere, seit v0.9.455)
+
+Läuft ein PC als Ansage-Slave eines badhub-Turniers, steht auf der Seite
+**Status** ein Kasten mit dem Standby-Stand. Ist der PC in badhub als Standby
+eingetragen, lautet er etwa **„Standby für Halle 1 PC, gespiegelt bis n = 412,
+vor 3 s"**. Sonst steht dort, dass der PC nicht als Standby eingetragen ist.
+<!-- pruef: "Standby für {}, gespiegelt bis n = {}" in src-tauri/src/quelle/badhub/standby.rs -->
+
+- **Notfall-Sicherung einlesen** liest eine `notfall-….btsk` des Turnier-PCs
+  ein, zum Beispiel vom USB-Stick. Das ist nötig, wenn die Spiegelung im
+  Hallennetz fehlt oder älter ist. Eine abgeschnittene Datei oder die Datei
+  eines anderen Turniers wird abgelehnt.
+  <!-- pruef: "Notfall-Sicherung einlesen" in src/components/StandbyPanel.tsx -->
+- **Hauptrechner ausgefallen – Turnier übernehmen:** Erst nach einer Rückfrage
+  mit Warnung. Nur drücken, wenn der Turnier-PC **wirklich aus** ist. Schreiben
+  beide weiter, nimmt badhub nur die Eingaben der Seite an, die zuerst hochlädt;
+  die der anderen werden abgewiesen. Danach ist dieser PC der Turnier-PC:
+  Tablet-Server, TL-Web und automatische Feldvergabe laufen hier. **Tablets und
+  Monitore müssen neu gekoppelt werden** (QR-Codes dieses PCs; mit
+  Cloud-Verbindung gilt ein anderer Namensraum).
+  <!-- pruef: "Hauptrechner ausgefallen – Turnier übernehmen" in src/components/StandbyPanel.tsx -->
+- Sobald Internet da ist, meldet der PC die Übernahme an badhub. Hat badhub
+  Eingaben abgewiesen, steht im badhub-Abgleich und im TL-Web **„… beim
+  Übernehmen von badhub abgewiesen"**; die Eingaben stehen in badhub als
+  Aufgabe. War der alte Turnier-PC eben noch online, steht dort
+  **„Hauptrechner war vor x s noch online …"**. badhub nimmt die Übernahme erst
+  an, wenn der alte Turnier-PC 2 Minuten nicht mehr da war; bis dahin gelten die
+  Eingaben hier weiter.
+  <!-- pruef: "beim Übernehmen von badhub abgewiesen" in src-tauri/src/quelle/badhub/mod.rs -->
+  <!-- pruef: "noch online – badhub nimmt die Übernahme erst an" in src-tauri/src/quelle/badhub/mod.rs -->
+
 Bei einem badhub-Turnier sagt die Statuszeile nie „BTP nicht erreichbar“,
 sondern **„badhub-Turnier: …“** mit dem Grund.
 <!-- pruef: "badhub-Turnier: {e}" in src-tauri/src/commands.rs -->

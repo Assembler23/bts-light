@@ -155,7 +155,7 @@ wie bisher an badhub.
 
 ### Turnierquelle
 
-*Nicht im Ansage-Slave-Modus.*
+*Im Ansage-Slave-Modus nur, wenn schon „badhub-Turnier“ gewählt ist (Standby-PC, seit v0.9.455).*
 <!-- pruef: "Turnierquelle" in src/pages/SetupWizard.tsx -->
 
 Woher bts-light das Turnier liest. **BTP** ist vorausgewählt — so läuft jede
@@ -205,6 +205,21 @@ gekoppeltem Turnier.
   Namen und Felder), übernimmt aber keine Steuerung: Er liest den Stand vom
   Turnier-PC, dessen Adresse im Feld **Adresse des Turnier-PCs (Master)** steht.
   <!-- pruef: "Adresse des Turnier-PCs (Master)" in src/pages/SetupWizard.tsx -->
+- **Notfall-Sicherung (seit v0.9.455):** Am Turnier-PC unter **Ordner für die
+  Notfall-Sicherung (leer = aus)** einen Ordner eintragen oder mit **Ordner
+  wählen** aussuchen, am besten einen USB-Stick oder ein Netzlaufwerk.
+  Voreingestellt ist keiner. bts-light schreibt dort höchstens alle 30 Sekunden
+  nach einer Eingabe und beim Anhalten die Datei `notfall-<Turnier>.btsk`. Sie
+  enthält nur die Eingaben, keine Namen und keine Zugangsdaten.
+  <!-- pruef: "Ordner für die Notfall-Sicherung (leer = aus)" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: "Ordner wählen" in src/pages/SetupWizard.tsx -->
+  <!-- pruef: /SICHERUNG_TAKT_MS: u64 = 30_000/ in src-tauri/src/quelle/badhub/standby.rs -->
+  <!-- pruef: "notfall-{}.btsk" in src-tauri/src/quelle/badhub/standby.rs -->
+- **Standby-PC (seit v0.9.455):** Ein zweiter PC kann als Ansage-Slave des
+  Turnier-PCs laufen und in badhub (Bereich Turniertag) als **Standby**
+  eingetragen werden. Er spiegelt dann laufend die Eingaben des Turnier-PCs und
+  kann das Turnier übernehmen, wenn dieser ausfällt — auch ganz ohne Internet.
+  Die Bedienung steht unter [Oberflächen](oberflaechen.md) („Standby-PC“).
   Dazu gehört der **Slave-Schlüssel**: Er steht am Turnier-PC auf der Seite Status im Kasten „badhub-Abgleich“ und
   wird am Slave eingetragen und mit **Schlüssel übernehmen** gespeichert. Ohne ihn gibt der Turnier-PC keinen Stand
   heraus.

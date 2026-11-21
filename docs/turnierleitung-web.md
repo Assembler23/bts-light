@@ -577,6 +577,12 @@ Knopf **Rückzug** im Kopf ein — statt jedes Spiel einzeln als kampflos.
   Steuerung hält. Einen Rückzug aus badhub selbst nimmt der Turnier-PC als
   Kernbefehl an.
 
+**Nach einer Standby-Übernahme (seit v0.9.455)** steht neben dem Abgleich im
+Kopf gegebenenfalls ein orangefarbener Hinweis. Er sagt, wie viele Eingaben
+badhub abgewiesen hat, oder dass der alte Turnier-PC eben noch online war
+(siehe [Oberflächen](oberflaechen.md), „Standby-PC“).
+<!-- pruef: "bh-warnung" in src-tauri/assets/tl.html -->
+
 ### Links zu badhub (seit v0.9.445)
 
 Die Seite verlinkt an mehreren Stellen auf die öffentlichen badhub-Seiten

@@ -66,7 +66,14 @@ impl Protokoll {
     /// (gemeldet ohne Inhalt). Posten, deren Ereignisse nicht lückenlos an
     /// die vorigen anschließen, werden ebenfalls übergangen.
     pub fn laden(dir: &Path) -> Result<Self, String> {
-        let datei = dir.join(DATEI);
+        Self::laden_als(dir, DATEI)
+    }
+
+    /// Wie [`Self::laden`], aber aus einer anderen Datei im Turnierordner
+    /// (der Standby spiegelt die Posten des Hauptrechners nach
+    /// `spiegel.jsonl`, Paket S2).
+    pub fn laden_als(dir: &Path, name: &str) -> Result<Self, String> {
+        let datei = dir.join(name);
         let roh = match std::fs::read(&datei) {
             Ok(r) => r,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -213,6 +220,22 @@ impl Protokoll {
         super::schluessel::schreiben_privat(&self.datei, &zeilen(&bleiben)?)?;
         self.posten = bleiben;
         Ok(zahl)
+    }
+
+    /// Ersetzt alle Posten (ein Schreibvorgang über eine temporäre Datei).
+    /// Scheitert die Platte, bleibt der Stand im Speicher wie auf der Platte.
+    pub fn ersetzen(&mut self, posten: Vec<Posten>) -> Result<(), String> {
+        let mut b = Vec::new();
+        for p in &posten {
+            serde_json::to_writer(&mut b, p).map_err(|e| e.to_string())?;
+            b.push(b'\n');
+        }
+        if let Some(dir) = self.datei.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("Turnierordner: {e}"))?;
+        }
+        super::schluessel::schreiben_privat(&self.datei, &b)?;
+        self.posten = posten;
+        Ok(())
     }
 
     /// Leert das Protokoll ohne Sicherungskopie — nur für Posten, die

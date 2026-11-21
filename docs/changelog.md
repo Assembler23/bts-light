@@ -4,6 +4,22 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.455
+
+- **Standby-PC für badhub-Turniere.** Ein zweiter PC kann als Ansage-Slave des
+  Turnier-PCs laufen und in badhub als Standby eingetragen werden. Er spiegelt
+  laufend alle Eingaben. Fällt der Turnier-PC aus, übernimmt er mit
+  **Hauptrechner ausgefallen – Turnier übernehmen** — auch ganz ohne Internet.
+  Sobald wieder Netz da ist, meldet er die Übernahme an badhub. Was badhub dabei
+  abweist, zeigen Dashboard und TL-Web an. Tablets und Monitore koppeln danach
+  neu.
+- **Notfall-Sicherung:** Im Assistenten lässt sich ein Ordner wählen,
+  z. B. ein USB-Stick. Der Turnier-PC legt dort laufend eine Sicherung der
+  Eingaben ab (ohne Namen), die ein Standby-PC einlesen kann. Voreingestellt
+  aus.
+- BTP-Turniere laufen unverändert.
+
+## v0.9.452
 ## v0.9.454
 
 - **Rückzug während des Turniers** (badhub-Turniere). Im TL-Web trägt der neue

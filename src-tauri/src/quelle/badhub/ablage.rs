@@ -176,6 +176,7 @@ mod tests {
                 name: "Testturnier".into(),
                 beginn: None,
                 ende: None,
+                lease: None,
             },
             meldungen: vec![PaketMeldung {
                 meldung: 1,

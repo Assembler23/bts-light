@@ -64,6 +64,34 @@ pub struct PaketTurnier {
     /// Personenauszugs (14 Tage danach).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ende: Option<String>,
+    /// Lease aus Sicht dieses Geräts (badhub Paket S1): Epoche, Inhaber,
+    /// Standby und die eigene Rolle. Nur Anzeige und Standby-Rolle — das
+    /// Schreibrecht hängt an `lease.json`, nicht hieran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<PaketLease>,
+}
+
+/// `turnier.lease` im Paket bzw. `lease` in `GET /turnier/lease` (badhub S1):
+/// `{epoche, geraet, standby: <install_id>|null, du_bist: "inhaber"|"standby"|null}`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PaketLease {
+    #[serde(default)]
+    pub epoche: u64,
+    /// Name des Geräts, das die Lease hält.
+    #[serde(default)]
+    pub geraet: String,
+    /// `install_id` des Standby-Geräts.
+    #[serde(default)]
+    pub standby: Option<String>,
+    #[serde(default)]
+    pub du_bist: Option<String>,
+}
+
+impl PaketLease {
+    /// Ist dieses Gerät laut badhub der Standby der laufenden Lease?
+    pub fn ist_standby(&self) -> bool {
+        self.du_bist.as_deref() == Some("standby")
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
