@@ -1353,7 +1353,11 @@ async fn auslosung_aendern_von_badhub_unter_der_lease() {
     mit(&z, |q| {
         let st = q.kern_stand();
         let d = &st.durchfuehrung["HE"];
-        assert_eq!(d.spiel(1).unwrap().oben, Some(b), "Spiel 1 folgt dem Tausch");
+        assert_eq!(
+            d.spiel(1).unwrap().oben,
+            Some(b),
+            "Spiel 1 folgt dem Tausch"
+        );
         assert_eq!(d.spiel(2).unwrap().oben, Some(a));
         assert_eq!(q.stand().matches.len(), d.spiele.len(), "Abbildung steht");
     });

@@ -385,9 +385,7 @@ pub fn befehl_begrenzt(roh: &serde_json::Value) -> Result<(), String> {
         BEFEHL_MAX_BYTES
     };
     if laenge > max {
-        return Err(format!(
-            "Befehl zu groß ({laenge} Byte, höchstens {max})."
-        ));
+        return Err(format!("Befehl zu groß ({laenge} Byte, höchstens {max})."));
     }
     if roh
         .get("saetze")
