@@ -350,8 +350,10 @@
       background: #15803d;
       border-radius: .35rem;
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr 1fr;
+      /* minmax(0, …): Ein langer Vereinsname darf die Spalte nicht über die
+         Netzmitte schieben — er wird in der Zelle gekürzt. */
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
       overflow: hidden;
       box-shadow: inset 0 0 0 2px #f8fafc;
     }
@@ -374,30 +376,39 @@
     .court .cell.server { background: rgba(251, 191, 36, .22); }
     /* Federball statt gelbem Punkt (Wunsch 11.08.2026 — „sah aus wie ein
        Tennisball"). Seit 01.11.2026 dieselbe ruhige Form wie am Court-
-       Monitor (gerundete Federspitzen, Korkkopf), hier mit weißem Kranz,
-       damit er sich vom grünen Feld und vom gelb getönten Aufschlagfeld
-       abhebt. Die Grundform zeigt mit dem Korken nach RECHTS; jede Zelle
-       dreht sie so, dass der Korken — wie im Flug — zum diagonal
-       gegenüberliegenden Aufschlagfeld weist. Größe skaliert mit dem
-       Bildschirm (vmin), damit er auch aus Armlänge erkennbar ist, ohne
-       auf kleinen Geräten die Namen zu verdecken. */
-    .court .cell.server::after {
-      content: '';
-      position: absolute;
-      width: clamp(2.1rem, 6.5vmin, 3.4rem);
-      height: clamp(2.1rem, 6.5vmin, 3.4rem);
+       Monitor (gerundete Federspitzen, Korkkopf). Die Grundform zeigt mit
+       dem Korken nach RECHTS; JS dreht sie so, dass der Korken — wie im
+       Flug — zum diagonal gegenüberliegenden Aufschlagfeld weist.
+       Seit 21.11.2026 ein EIGENES Element über dem ganzen Court statt eines
+       ::after je Zelle: Es sitzt im Aufschlagfeld selbst, direkt hinter der
+       vorderen Aufschlaglinie an der Mittellinie (dort steht der
+       Aufschläger), und gleitet bei jedem Wechsel sichtbar ins neue Feld.
+       Lage in Prozent des Courts: vordere Aufschlaglinie bei 47,2 bzw.
+       86,8 von 134 (35,224 % / 64,776 %), Mittellinie bei 50 %. */
+    .court #aufschlag-ball {
+      --ball: clamp(2.1rem, 6.5vmin, 3.4rem);
+      --ab: calc(var(--ball) * .72);
+      position: absolute; z-index: 3; pointer-events: none;
+      width: var(--ball); height: var(--ball);
+      left: 0; top: 0;
+      transform: translate(-50%, -50%) rotate(45deg);
       background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cg transform='rotate%28-90 32 32%29'%3E%3Cpath d='M10 12 Q11.5 4.5 18 9 Q21.5 3 27 8 Q32 2 37 8 Q42.5 3 46 9 Q52.5 4.5 54 12 L39 40 H25 Z' fill='%23f8fafc'/%3E%3Cpath d='M25 40 H39 V43 A7 7 0 0 1 25 43 Z' fill='%23f59e0b'/%3E%3Cpath d='M25 41 H39' stroke='%23b45309' stroke-width='1.6'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
       animation: shuttlePulse 1.6s ease-in-out infinite;
+      transition: left 420ms cubic-bezier(.3,.7,.3,1), top 420ms cubic-bezier(.3,.7,.3,1),
+                  transform 420ms cubic-bezier(.3,.7,.3,1), opacity 160ms ease;
     }
-    /* Beim Spielfeld-Innenwinkel (Netz + Mittellinie) platzieren und in
-       Flugrichtung drehen: leftTop schlägt diagonal nach rightBottom auf
-       (Südost, 45°), leftBottom nach rightTop (Nordost, -45°) usw. */
-    .court #cell-leftTop.server::after     { bottom: .35rem; right: .35rem; transform: rotate(45deg); }
-    .court #cell-leftBottom.server::after  { top: .35rem;    right: .35rem; transform: rotate(-45deg); }
-    .court #cell-rightTop.server::after    { bottom: .35rem; left: .35rem;  transform: rotate(135deg); }
-    .court #cell-rightBottom.server::after { top: .35rem;    left: .35rem;  transform: rotate(-135deg); }
-    /* Pulsieren über den Schein statt über box-shadow: Das ::after ist
-       jetzt eine Form, kein Kreis — ein eckiger Schatten fiele auf. */
+    .court #aufschlag-ball[hidden] { display: block; opacity: 0; }
+    /* Erstes Erscheinen / Ansichtswechsel: ohne Flug an die Stelle setzen. */
+    .court #aufschlag-ball.sofort { transition: none; }
+    .court #aufschlag-ball[data-zelle="leftTop"]     { left: calc(35.224% - var(--ab)); top: calc(50% - var(--ab)); }
+    .court #aufschlag-ball[data-zelle="leftBottom"]  { left: calc(35.224% - var(--ab)); top: calc(50% + var(--ab)); }
+    .court #aufschlag-ball[data-zelle="rightTop"]    { left: calc(64.776% + var(--ab)); top: calc(50% - var(--ab)); }
+    .court #aufschlag-ball[data-zelle="rightBottom"] { left: calc(64.776% + var(--ab)); top: calc(50% + var(--ab)); }
+    @media (prefers-reduced-motion: reduce) {
+      .court #aufschlag-ball { transition: opacity 160ms ease; }
+    }
+    /* Pulsieren über den Schein statt über box-shadow: Der Ball ist eine
+       Form, kein Kreis — ein eckiger Schatten fiele auf. */
     @keyframes shuttlePulse {
       0%, 100% { filter: drop-shadow(0 0 2px rgba(251, 191, 36, .9)); }
       50%      { filter: drop-shadow(0 0 7px rgba(251, 191, 36, .45)); }
@@ -418,8 +429,10 @@
       text-shadow: 0 1px 2px rgba(0,0,0,.6);
     }
     .court .cell .player-club.show { display: inline-flex; }
+    /* Vereinsname ausgeschrieben, solange die Zelle Platz hat; erst an der
+       Zellbreite wird mit „…" gekürzt (bis 21.11.2026 fest nach 14 Zeichen). */
     .court .cell .player-club .club-name {
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14ch;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
     }
     .court .cell .player-club img {
       height: 1.2em; width: 1.2em; object-fit: contain; flex: none;
@@ -1027,13 +1040,14 @@
     .play.uebereinander #cell-rightBottom { order: 1; }
     .play.uebereinander #cell-leftTop     { order: 2; }
     .play.uebereinander #cell-leftBottom  { order: 3; }
-    /* Federball im Innenwinkel (Netz + Mittellinie) der gedrehten Zellen,
-       Korken zum diagonal gegenüberliegenden Aufschlagfeld: rightTop (oben
-       links) → leftBottom (unten rechts) = Südost usw. */
-    .play.uebereinander .court #cell-rightTop.server::after    { top: auto; left: auto; bottom: .35rem; right: .35rem; transform: rotate(45deg); }
-    .play.uebereinander .court #cell-rightBottom.server::after { top: auto; right: auto; bottom: .35rem; left: .35rem; transform: rotate(135deg); }
-    .play.uebereinander .court #cell-leftTop.server::after     { bottom: auto; left: auto; top: .35rem; right: .35rem; transform: rotate(-45deg); }
-    .play.uebereinander .court #cell-leftBottom.server::after  { bottom: auto; right: auto; top: .35rem; left: .35rem; transform: rotate(-135deg); }
+    /* Federball im Aufschlagfeld der gedrehten Zellen, direkt hinter der
+       vorderen Aufschlaglinie an der Mittellinie: rightTop oben links,
+       rightBottom oben rechts, leftTop unten links, leftBottom unten rechts.
+       Die Drehung (Korken diagonal übers Netz) setzt JS. */
+    .play.uebereinander .court #aufschlag-ball[data-zelle="rightTop"]    { left: calc(50% - var(--ab)); top: calc(35.224% - var(--ab)); }
+    .play.uebereinander .court #aufschlag-ball[data-zelle="rightBottom"] { left: calc(50% + var(--ab)); top: calc(35.224% - var(--ab)); }
+    .play.uebereinander .court #aufschlag-ball[data-zelle="leftTop"]     { left: calc(50% - var(--ab)); top: calc(64.776% + var(--ab)); }
+    .play.uebereinander .court #aufschlag-ball[data-zelle="leftBottom"]  { left: calc(50% + var(--ab)); top: calc(64.776% + var(--ab)); }
     .play.uebereinander .court .team-label-left { top: auto; bottom: .25rem; }
     /* Die Zellen sind hochkant schmal: Namen an vmin statt vw deckeln. */
     .play.uebereinander .court .cell .player-name { font-size: clamp(.8rem, 2.2vmin, 1.6rem); }
@@ -1268,6 +1282,7 @@
             <div class="cell" id="cell-rightTop"><span class="player-name"></span><span class="player-club"></span></div>
             <div class="cell" id="cell-leftBottom"><span class="player-name"></span><span class="player-club"></span></div>
             <div class="cell" id="cell-rightBottom"><span class="player-name"></span><span class="player-club"></span></div>
+            <div id="aufschlag-ball" hidden aria-hidden="true"></div>
           </div>
         </div>
       </div>
@@ -2623,6 +2638,7 @@ const els = {
   setHistory: document.getElementById('set-history'),
   court: document.getElementById('court'),
   cellLeftTop: document.getElementById('cell-leftTop'),
+  aufschlagBall: document.getElementById('aufschlag-ball'),
   cellRightTop: document.getElementById('cell-rightTop'),
   cellLeftBottom: document.getElementById('cell-leftBottom'),
   cellRightBottom: document.getElementById('cell-rightBottom'),
@@ -7185,10 +7201,39 @@ function renderCourt() {
   }
 
   // Aufschläger-Highlight: gelblicher Hintergrund des Service-Courts plus
-  // pulsierender gelber Punkt im Innenwinkel (Netz + Mittellinie) der Zelle.
-  if (serverCell && STATE.setup === 'playing' && !STATE.finished) {
-    serverCell.classList.add('server');
-  }
+  // Federball im Aufschlagfeld, der beim Wechsel ins neue Feld gleitet.
+  const zeigen = serverCell && STATE.setup === 'playing' && !STATE.finished;
+  if (zeigen) serverCell.classList.add('server');
+  setzeAufschlagBall(zeigen ? serverCell.id.replace('cell-', '') : null);
+}
+
+// Drehung je Zelle: Korken zeigt diagonal übers Netz auf das gegenüber-
+// liegende Aufschlagfeld. Hochkant sind die Zellen umsortiert (siehe CSS).
+const BALL_DREHUNG = {
+  nebeneinander: { leftTop: 45, leftBottom: -45, rightTop: 135, rightBottom: -135 },
+  uebereinander: { rightTop: 45, rightBottom: 135, leftTop: -45, leftBottom: -135 },
+};
+let ballDrehung = 45;
+let ballAnordnung = null;
+
+// Setzt den Federball in die Zelle (null = ausblenden). Die Drehung wird auf
+// den kürzesten Weg gelegt (sonst dreht er bei 135° → −135° eine Dreiviertel-
+// runde). Nach dem Ausblenden und nach einem Ansichtswechsel springt er ohne
+// Flug an die Stelle — die Animation zeigt nur den echten Aufschlagwechsel.
+function setzeAufschlagBall(zelle) {
+  const ball = els.aufschlagBall;
+  if (!ball) return;
+  if (!zelle) { ball.hidden = true; return; }
+  const anordnung = uebereinander() ? 'uebereinander' : 'nebeneinander';
+  const sofort = ball.hidden || anordnung !== ballAnordnung;
+  const ziel = BALL_DREHUNG[anordnung][zelle];
+  ballDrehung = sofort ? ziel : ziel + 360 * Math.round((ballDrehung - ziel) / 360);
+  ballAnordnung = anordnung;
+  if (sofort) ball.classList.add('sofort');
+  ball.dataset.zelle = zelle;
+  ball.style.transform = 'translate(-50%, -50%) rotate(' + ballDrehung + 'deg)';
+  ball.hidden = false;
+  if (sofort) { void ball.offsetWidth; ball.classList.remove('sofort'); }
 }
 
 function setPlayer(cell, playerId) {

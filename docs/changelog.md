@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.458
+
+- **Tablet: Federball im Aufschlagfeld.** Der Ball, der den Aufschläger
+  markiert, sitzt jetzt im Aufschlagfeld selbst — direkt hinter der vorderen
+  Aufschlaglinie an der Mittellinie — statt am Netz. Wechselt der Aufschlag,
+  gleitet er mit einer kurzen Animation ins neue Feld.
+- **Tablet: Vereinsname ausgeschrieben.** Ist die Vereinsanzeige an, steht der
+  Name voll da, solange das Feld Platz hat; erst danach wird mit „…" gekürzt.
+
 ## v0.9.457
 
 - **Turnierkern 0.16.0** für badhub-Turniere – gleiche Version wie badhub. Ohne

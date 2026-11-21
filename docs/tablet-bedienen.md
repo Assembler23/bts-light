@@ -129,8 +129,10 @@ Aufschlagwechsel selbst nach — du musst nicht mitdenken, wer dran ist.
 Auf dem Schirm steht dabei:
 
 - die **Court-Grafik** mit den Namen auf ihren Hälften. Der **Federball**
-  markiert den Aufschläger; sein Korken zeigt in Flugrichtung auf das
-  diagonal gegenüberliegende Aufschlagfeld.
+  markiert den Aufschläger. Er liegt in dessen Aufschlagfeld, direkt hinter
+  der vorderen Aufschlaglinie; sein Korken zeigt in Flugrichtung auf das
+  diagonal gegenüberliegende Aufschlagfeld. Wechselt der Aufschlag, gleitet
+  der Ball sichtbar ins neue Feld.
 - die **Spieldauer** als Uhr in der Kopfzeile. Sie läuft ab dem Moment, in dem
   die Aufstellung bestätigt ist — nicht schon ab der Feldzuweisung.
 - auf Wunsch **Vereinsname und Wappen** unter den Spielernamen. Das schaltet
