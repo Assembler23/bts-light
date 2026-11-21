@@ -116,6 +116,7 @@ pub(super) fn turnier(n: u32, s: System, hallen: &[(&str, u32)]) -> Vec<TurnierE
                 dauer_je: BTreeMap::new(),
                 pause: 20,
                 reihenfolge: vec![],
+                tage_je: Default::default(),
             },
         },
     )

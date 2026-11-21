@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.457
+
+- **Turnierkern 0.16.0** für badhub-Turniere – gleiche Version wie badhub. Ohne
+  dieses Update lehnt bts-light Eingaben in badhub-Turnieren mit „bitte
+  bts-light aktualisieren“ ab.
+- Neu im Kern: Spieltage je Konkurrenz im Zeitplan (eine Konkurrenz spielt nur
+  an ihren Tagen) und das Setzschema nach DBV-Spielordnung (Kern 0.15.0).
+- BTP-Turniere laufen unverändert.
+
 ## v0.9.455
 
 - **Standby-PC für badhub-Turniere.** Ein zweiter PC kann als Ansage-Slave des
