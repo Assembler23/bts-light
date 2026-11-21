@@ -10,8 +10,11 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
   Auslosung jetzt auch nach der Freigabe ändern (Plätze tauschen, Meldung
   ersetzen, im KO eine Rast besetzen). bts-light liest solche Turniere damit
   richtig; ohne dieses Update lehnt es Eingaben in badhub-Turnieren mit „bitte
-  bts-light aktualisieren“ ab. Ändern lässt sich die Auslosung weiter nur in
-  badhub, solange bts-light das Turnier nicht steuert.
+  bts-light aktualisieren“ ab.
+- **Auslosung ändern, während bts-light steuert.** badhub schickt die drei
+  Änderungen übers Relay an den Turnier-PC; er prüft sie im Kern wie jede
+  Eingabe der Halle und lädt sie hoch. Gesperrt bleibt, was ein gespieltes oder
+  laufendes Spiel verändern würde.
 - Eine nachträglich besetzte Rast bringt ein Spiel der ersten Runde mit der
   höchsten Spielnummer – die Nummer sagt nichts mehr über die Runde.
 - BTP-Turniere laufen unverändert.

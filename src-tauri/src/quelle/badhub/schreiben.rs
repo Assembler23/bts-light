@@ -332,7 +332,7 @@ pub fn mit_id(befehl: TurnierBefehl, neu: String) -> TurnierBefehl {
 
 /// Die Befehle, die badhub unter der Lease annimmt (badhub `Lease::BEFEHLE`);
 /// seit Kern 0.13.0 auch der Rückzug während des Turniers und seine Rücknahme.
-pub const ERLAUBTE_ARTEN: [&str; 8] = [
+pub const ERLAUBTE_ARTEN: [&str; 11] = [
     "ergebnis_melden",
     "ergebnis_loeschen",
     "spiel_aufrufen",
@@ -341,7 +341,25 @@ pub const ERLAUBTE_ARTEN: [&str; 8] = [
     "gruppenrang_entscheiden",
     "rueckzug",
     "rueckzug_zuruecknehmen",
+    // Auslosung am Turniertag ändern (Kern 0.18.0): Plätze tauschen, Meldung
+    // ersetzen, Rast im KO besetzen — auch während bts-light steuert.
+    "auslosung_tauschen",
+    "auslosung_ersetzen",
+    "startplatz_besetzen",
 ];
+
+/// Befehle mit `merkmale` (Verein/Verband/Land je Person der Konkurrenz, für
+/// die Konfliktzahl der Auslosung): sie wachsen mit der Teilnehmerzahl.
+pub const ARTEN_MIT_MERKMALEN: [&str; 3] = [
+    "auslosung_tauschen",
+    "auslosung_ersetzen",
+    "startplatz_besetzen",
+];
+
+/// Höchstgröße eines Befehls mit `merkmale`, unter der Grenze des Relays für
+/// TL-Kommandos (32 KiB). 512 Teilnahmen im Doppel mit je
+/// einem kurzen Merkmal bleiben darunter.
+pub const BEFEHL_MAX_BYTES_MERKMALE: usize = 24 * 1024;
 
 /// Befehle, deren `jetzt` dieser PC setzt (ADR-0084: die Zeit der Halle).
 pub const ARTEN_MIT_JETZT: [&str; 3] = ["spiel_aufrufen", "ergebnis_melden", "rueckzug"];
@@ -354,15 +372,21 @@ pub const SAETZE_MAX: usize = 5;
 pub const TEXT_MAX: usize = 64;
 
 /// Begrenzt einen rohen Kernbefehl aus badhub, bevor er gelesen wird:
-/// höchstens [`BEFEHL_MAX_BYTES`], höchstens [`SAETZE_MAX`] Sätze, jede
+/// höchstens [`BEFEHL_MAX_BYTES`] (mit `merkmale` [`BEFEHL_MAX_BYTES_MERKMALE`]), höchstens [`SAETZE_MAX`] Sätze, jede
 /// Zeichenkette höchstens [`TEXT_MAX`] Zeichen.
 pub fn befehl_begrenzt(roh: &serde_json::Value) -> Result<(), String> {
     let laenge = serde_json::to_vec(roh)
         .map(|v| v.len())
         .unwrap_or(usize::MAX);
-    if laenge > BEFEHL_MAX_BYTES {
+    let art = roh.get("art").and_then(|a| a.as_str()).unwrap_or("");
+    let max = if ARTEN_MIT_MERKMALEN.contains(&art) {
+        BEFEHL_MAX_BYTES_MERKMALE
+    } else {
+        BEFEHL_MAX_BYTES
+    };
+    if laenge > max {
         return Err(format!(
-            "Befehl zu groß ({laenge} Byte, höchstens {BEFEHL_MAX_BYTES})."
+            "Befehl zu groß ({laenge} Byte, höchstens {max})."
         ));
     }
     if roh
