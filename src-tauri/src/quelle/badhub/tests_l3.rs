@@ -1334,6 +1334,50 @@ async fn weiterleitung_von_badhub_b2_genau_so_wie_gesendet() {
     assert_eq!(mit(&z, |q| q.befehl_von_badhub(ergebnis)), Ok(1));
 }
 
+#[tokio::test]
+async fn auslosung_aendern_von_badhub_unter_der_lease() {
+    // Kern 0.18.0: badhub ändert die Auslosung auch, während bts-light steuert –
+    // der Befehl kommt übers Relay und läuft durch denselben Schreibpfad.
+    let (_d, _b, _c, z) = gekoppelt().await;
+    lease_schritt(&z, Some("ns")).await;
+    let (a, b) = mit(&z, |q| {
+        let st = q.kern_stand();
+        let d = &st.durchfuehrung["HE"];
+        (
+            d.spiel(1).unwrap().oben.unwrap(),
+            d.spiel(2).unwrap().oben.unwrap(),
+        )
+    });
+    let tausch = serde_json::json!({"id": "bh-900", "art": "auslosung_tauschen", "konkurrenz": "HE", "a": a, "b": b});
+    assert_eq!(mit(&z, |q| q.befehl_von_badhub(tausch)), Ok(1));
+    mit(&z, |q| {
+        let st = q.kern_stand();
+        let d = &st.durchfuehrung["HE"];
+        assert_eq!(
+            d.spiel(1).unwrap().oben,
+            Some(b),
+            "Spiel 1 folgt dem Tausch"
+        );
+        assert_eq!(d.spiel(2).unwrap().oben, Some(a));
+        assert_eq!(q.stand().matches.len(), d.spiele.len(), "Abbildung steht");
+    });
+    // Merkmale wachsen mit der Teilnehmerzahl: weit über 4 KiB bleibt erlaubt.
+    let merkmale: serde_json::Map<String, serde_json::Value> = (1..=512)
+        .map(|p: u32| (p.to_string(), serde_json::json!("verein-12345")))
+        .collect();
+    let gross = serde_json::json!({"id": "bh-901", "art": "auslosung_tauschen", "konkurrenz": "HE", "a": a, "b": b, "merkmale": merkmale});
+    assert!(serde_json::to_vec(&gross).unwrap().len() > schreiben::BEFEHL_MAX_BYTES);
+    assert_eq!(mit(&z, |q| q.befehl_von_badhub(gross)), Ok(1));
+    // Ein gespieltes Spiel sperrt: Ablehnung des Kerns mit Text.
+    let ergebnis = serde_json::json!({"id": "bh-902", "art": "ergebnis_melden", "konkurrenz": "HE", "spiel": 1, "saetze": [[21, 10], [21, 12]]});
+    assert_eq!(mit(&z, |q| q.befehl_von_badhub(ergebnis)), Ok(1));
+    let nochmal = serde_json::json!({"id": "bh-903", "art": "auslosung_tauschen", "konkurrenz": "HE", "a": a, "b": b});
+    assert!(matches!(
+        mit(&z, |q| q.befehl_von_badhub(nochmal)),
+        Err(SchreibFehler::Kern { .. })
+    ));
+}
+
 #[test]
 fn uebernahme_nicht_freigegeben_wird_verstaendlich() {
     assert!(lease_ablehnung_text("uebernahme_nicht_freigegeben").contains("Turniertag freigeben"));
