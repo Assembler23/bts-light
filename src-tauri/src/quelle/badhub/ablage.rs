@@ -187,6 +187,7 @@ mod tests {
                     nachname: "Geheimname".into(),
                     verein: Some("TSV Beispiel".into()),
                     nation: Some("GER".into()),
+                    lizenz: None,
                 }],
             }],
             ..Paket::default()

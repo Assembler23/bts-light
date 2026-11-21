@@ -191,10 +191,22 @@ fn spieler(p: &PaketPerson) -> BtpPlayer {
         name,
         first: p.vorname.trim().to_string(),
         last: p.nachname.trim().to_string(),
-        member_id: None,
+        member_id: lizenz(p.lizenz.as_deref()),
         nationality: p.nation.clone().filter(|n| !n.trim().is_empty()),
         club: p.verein.clone().filter(|v| !v.trim().is_empty()),
     }
+}
+
+/// DBV-Lizenz aus dem Paket als `member_id` (wie die MemberID aus BTP): nur
+/// in der Form `LV-Nummer` (`08-012002`), sonst keine — sie landet in Links
+/// und im Liveticker, badhub löst sie dort über dieselbe Form auf.
+fn lizenz(roh: Option<&str>) -> Option<String> {
+    let l = roh?.trim();
+    let (lv, nr) = l.split_once('-')?;
+    let ziffern = |t: &str, max: usize| {
+        !t.is_empty() && t.len() <= max && t.bytes().all(|b| b.is_ascii_digit())
+    };
+    (ziffern(lv, 4) && ziffern(nr, 8)).then(|| l.to_string())
 }
 
 /// Setzplatz-Text wie auf dem Auslosungsbogen.
@@ -477,5 +489,61 @@ pub fn abbilden(stand: &TurnierStand, paket: &Paket) -> BtpSnapshot {
                 nationality: None,
             })
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod lizenz_tests {
+    use super::*;
+
+    fn person(lizenz: Option<&str>) -> PaketPerson {
+        PaketPerson {
+            person: 7,
+            vorname: "Ada".into(),
+            nachname: "Muster".into(),
+            lizenz: lizenz.map(String::from),
+            ..PaketPerson::default()
+        }
+    }
+
+    /// Spielerlinks bei badhub-Turnieren (21.11.2026): die DBV-Lizenz aus dem
+    /// Paket wird zur `member_id`, wie die MemberID aus BTP.
+    #[test]
+    fn lizenz_wird_member_id() {
+        assert_eq!(
+            spieler(&person(Some("08-012002"))).member_id.as_deref(),
+            Some("08-012002")
+        );
+        assert_eq!(
+            spieler(&person(Some(" 08-012002 "))).member_id.as_deref(),
+            Some("08-012002")
+        );
+        assert_eq!(
+            spieler(&person(None)).member_id,
+            None,
+            "ohne Lizenz (älteres badhub, Anonymisierte)"
+        );
+        for kaputt in [
+            "",
+            "08012002",
+            "08-",
+            "-012002",
+            "ab-12",
+            "08-012002<x>",
+            "12345-1",
+        ] {
+            assert_eq!(spieler(&person(Some(kaputt))).member_id, None, "{kaputt}");
+        }
+    }
+
+    #[test]
+    fn paket_ohne_lizenz_bleibt_lesbar() {
+        let p: PaketPerson =
+            serde_json::from_str(r#"{"person":3,"vorname":"A","nachname":"B"}"#).unwrap();
+        assert_eq!(p.lizenz, None);
+        let p: PaketPerson =
+            serde_json::from_str(r#"{"person":3,"vorname":"A","nachname":"B","lizenz":"06-1"}"#)
+                .unwrap();
+        assert_eq!(p.lizenz.as_deref(), Some("06-1"));
     }
 }

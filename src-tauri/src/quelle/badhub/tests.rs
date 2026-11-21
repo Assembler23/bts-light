@@ -185,6 +185,7 @@ pub(super) fn paket_fuer(log: Vec<TurnierEreignis>, n: u32, hallen: Vec<PaketHal
                     nachname: format!("N{m}"),
                     verein: Some(format!("Verein {m}")),
                     nation: Some("GER".into()),
+                    lizenz: None,
                 }],
             })
             .collect(),
