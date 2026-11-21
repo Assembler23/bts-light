@@ -225,6 +225,7 @@ pub(super) fn melden(
             jetzt: T2.into(),
             beginn: None,
             bis: None,
+            netto_min: None,
         },
     )
     .unwrap();

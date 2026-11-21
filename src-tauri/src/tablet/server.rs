@@ -3507,12 +3507,34 @@ pub(crate) fn build_manual_result_update_opt(
         sets,
         team1_won,
         duration_mins,
+        netto_mins: None,
         score_status,
         free_court_id,
         player_ids,
         end_ts_ms,
         officials,
         shuttles: ballzahl_fuer_write(true, shuttles, m.shuttles),
+    })
+}
+
+/// Nettospielzeit eines Tablet-Ergebnisses in Minuten: vom ersten Punkt bis
+/// zum Spielende, höchstens die Bruttozeit (`duration_mins`, 0 = unbekannt →
+/// keine Klemme), plausibel wie überall. Kampflos und ohne ersten Punkt:
+/// `None`.
+pub(crate) fn netto_minuten(
+    score_status: i64,
+    first_point_ms: Option<u64>,
+    end_ms: u64,
+    duration_mins: i64,
+) -> Option<i64> {
+    if score_status == 1 {
+        return None;
+    }
+    let netto = crate::tablet::match_times::plausible_duration_mins(first_point_ms?, end_ms)?;
+    Some(if duration_mins > 0 {
+        netto.min(duration_mins)
+    } else {
+        netto
     })
 }
 
@@ -3604,6 +3626,7 @@ pub(crate) fn build_manual_dq_update(
         sets,
         team1_won,
         duration_mins,
+        netto_mins: None,
         score_status,
         free_court_id,
         player_ids,
@@ -3810,6 +3833,17 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
             .and_then(|since| crate::tablet::match_times::plausible_duration_mins(since, end_ms))
             .unwrap_or(0)
     };
+    // Nettozeit (badhub, Kern 0.17.0): erster Punkt bis Spielende, wie in der
+    // Spielzeiten-Statistik auf die Bruttozeit geklemmt.
+    let netto_mins = netto_minuten(
+        score_status,
+        ctx.tablet
+            .match_times_store()
+            .entry(m.id)
+            .and_then(|e| e.first_point_ms),
+        end_ms,
+        duration_mins,
+    );
     // Spielende stempeln (E3): genau einmal, beim ersten Host-Eingang —
     // eine spätere Korrektur ändert weder Zeit noch Einstufung. Regulär
     // (E11, Messwert für die Prognose) ist nur der ausgespielte Tablet-Weg
@@ -3833,6 +3867,7 @@ pub(crate) async fn process_result(ctx: &ServerCtx, body: &ResultBody) -> Result
         sets,
         team1_won,
         duration_mins,
+        netto_mins,
         score_status,
         // Ergebnis + Feldfreigabe in EINEM Request: Courts-Block gibt das
         // Feld frei, das Match BEHÄLT seine CourtID (Turnier-Doku „wo
@@ -4806,6 +4841,20 @@ pub(crate) async fn handle_score(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn netto_minuten_erster_punkt_bis_ende_auf_brutto_geklemmt() {
+        let min = 60_000u64;
+        // 30 min brutto, erster Punkt 6 min nach dem Aufruf → 24 min netto
+        assert_eq!(netto_minuten(0, Some(6 * min), 30 * min, 30), Some(24));
+        // erster Punkt vor dem Aufruf-Stempel (Score kam vor dem Sync): auf brutto geklemmt
+        assert_eq!(netto_minuten(0, Some(0), 40 * min, 30), Some(30));
+        // brutto unbekannt (0): keine Klemme
+        assert_eq!(netto_minuten(2, Some(0), 12 * min, 0), Some(12));
+        // kampflos oder ohne ersten Punkt: unbekannt
+        assert_eq!(netto_minuten(1, Some(0), 5 * min, 5), None);
+        assert_eq!(netto_minuten(0, None, 5 * min, 5), None);
+    }
     use crate::btp::model::{BtpPlayer, BtpSnapshot, Discipline, MatchResult, ScoringFormat};
     use crate::btp::wire;
     use crate::btp::xml::{self, Node, Value};
@@ -6837,6 +6886,7 @@ mod tests {
             sets,
             team1_won,
             duration_mins: 0,
+            netto_mins: None,
             score_status,
             free_court_id: Some(101),
             player_ids: vec![],

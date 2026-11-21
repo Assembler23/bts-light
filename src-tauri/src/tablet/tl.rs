@@ -1784,6 +1784,7 @@ pub(crate) fn walkover_updates(
             // Bewusst 0 (Spec `spielzeiten-prognose`, E1): kampflos wurde
             // nicht gespielt — hier keine Dauer aus dem Zeiten-Store füllen.
             duration_mins: 0,
+            netto_mins: None,
             score_status: 1, // 1 = kampflos
             free_court_id: None,
             player_ids: Vec::new(),

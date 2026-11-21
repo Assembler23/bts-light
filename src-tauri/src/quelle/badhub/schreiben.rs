@@ -182,6 +182,12 @@ pub fn ergebnis(
         }
         _ => None,
     };
+    // Nettozeit (Kern 0.17.0): nur gemessen vom Tablet, nie bei kampflos; der
+    // Kern verwirft sie selbst, wenn sie nicht in die Bruttozeit passt.
+    let netto_min = u
+        .netto_mins
+        .filter(|_| u.score_status != 1)
+        .and_then(|n| u16::try_from(n).ok());
     Ok(Some(TurnierBefehl::ErgebnisMelden {
         id: String::new(),
         konkurrenz,
@@ -191,6 +197,7 @@ pub fn ergebnis(
         jetzt: jetzt.to_string(),
         beginn,
         bis,
+        netto_min,
     }))
 }
 
@@ -270,6 +277,7 @@ pub fn mit_id(befehl: TurnierBefehl, neu: String) -> TurnierBefehl {
             jetzt,
             beginn,
             bis,
+            netto_min,
             ..
         } => B::ErgebnisMelden {
             id: neu,
@@ -280,6 +288,7 @@ pub fn mit_id(befehl: TurnierBefehl, neu: String) -> TurnierBefehl {
             jetzt,
             beginn,
             bis,
+            netto_min,
         },
         B::OffizielleSetzen {
             konkurrenz,

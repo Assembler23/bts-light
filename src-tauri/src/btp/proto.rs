@@ -82,6 +82,10 @@ pub struct MatchUpdate {
     pub team1_won: bool,
     /// Spieldauer in Minuten; 0, falls unbekannt.
     pub duration_mins: i64,
+    /// Nettospielzeit in Minuten (erster Punkt bis Spielende, Zeiten-Store),
+    /// höchstens `duration_mins`. Nur der Tablet-Weg misst sie; `None` =
+    /// unbekannt. BTP kennt das Feld nicht (geht nur an badhub, Kern 0.17.0).
+    pub netto_mins: Option<i64>,
     /// BTP `ScoreStatus`: 0 = regulär ausgespielt, 2 = Aufgabe (Retired).
     pub score_status: i64,
     /// BTP-Feld, auf dem gespielt wurde: schreibt im selben Request einen
@@ -652,6 +656,7 @@ mod tests {
             sets: vec![(21, 19), (21, 15)],
             team1_won: true,
             duration_mins: 28,
+            netto_mins: None,
             score_status: 0,
             free_court_id: None,
             player_ids: Vec::new(),

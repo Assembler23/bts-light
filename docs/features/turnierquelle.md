@@ -56,7 +56,7 @@ nicht die eingestellte Quelle.
 | Kopplung | Tauri-Command `badhub_koppeln(code, geraet_name)` → `POST koppeln {code, install_id, name}` → `GET turnier/paket` → Ablage → `config.badhub_turnier`. `badhub_turnier_info` für den Assistenten |
 | Abgleich | alle 5 s `GET turnier/ereignisse?ab=<n>&max=500` (seitenweise bis zum Kopf, siehe „Paket in Teilen“), alle 60 s `GET turnier/paket` mit `If-None-Match` (ETag-Header, sonst `stammdaten_etag`). Offline bleibt der letzte Stand; 401/403 hält den Abgleich bis zum nächsten Start an |
 | API-Basis | aus der Push-Adresse (`badhub.url`, folgt damit dem Testsystem-Schalter) + `/api/torg/v1`, beim Koppeln in `badhub_turnier.basis` festgehalten — das Token geht nie an das andere System. Nur `https://` (Ausnahme `localhost`/`127.0.0.1` für Tests) |
-| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.16.0`, seit v0.9.457), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht, solange das Protokoll keine Ereignisarten enthält, die diese Version nicht kennt (neue Befehle eines neueren Kerns, z. B. `zaehlweise_festlegen` ab 0.14.0, lassen das Falten scheitern — deshalb bts-light zusammen mit dem Kern in badhub aktualisieren), Schreiben (L3) verlangt Gleichstand |
+| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.17.0`, seit v0.9.459), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht, solange das Protokoll keine Ereignisarten enthält, die diese Version nicht kennt (neue Befehle eines neueren Kerns, z. B. `zaehlweise_festlegen` ab 0.14.0, lassen das Falten scheitern — deshalb bts-light zusammen mit dem Kern in badhub aktualisieren), Schreiben (L3) verlangt Gleichstand |
 
 ### Ablage und Verschlüsselung
 
@@ -171,7 +171,7 @@ zur Generalprobe E1 nicht produktiv.
 | Feld zuweisen (`write_courts_to_btp`, Court mit Spiel) | `spiel_aufrufen {konkurrenz, spiel, feld, jetzt}` — Feld = Kern-Schreibweise aus dem Paket-Rahmen (`abbildung::feld_kern_name`) |
 | Umhängen (Court ohne Spiel + Court mit demselben Spiel) | nur `spiel_aufrufen` auf das neue Feld (der Kern behält den Beginn) |
 | Feld räumen ohne Ergebnis | `aufruf_zuruecknehmen` für das dort aufgerufene Spiel |
-| Ergebnis / Walkover / Aufgabe / Disqualifikation (`write_result_*`, ScoreStatus 0/1/2/3) | `ergebnis_melden {saetze, ende, jetzt, beginn, bis}`; kampflos = `ende: kampflos{sieger}` ohne Sätze, Aufgabe = `aufgabe{aufgebend: Verlierer}`, Disqualifikation (kennt der Kern nicht) mit Sätzen als Aufgabe, ohne als kampflos; `bis` = Spielende, `beginn` = Ende − gemessene Dauer |
+| Ergebnis / Walkover / Aufgabe / Disqualifikation (`write_result_*`, ScoreStatus 0/1/2/3) | `ergebnis_melden {saetze, ende, jetzt, beginn, bis, netto_min}`; kampflos = `ende: kampflos{sieger}` ohne Sätze, Aufgabe = `aufgabe{aufgebend: Verlierer}`, Disqualifikation (kennt der Kern nicht) mit Sätzen als Aufgabe, ohne als kampflos; `bis` = Spielende, `beginn` = Ende − gemessene Dauer; `netto_min` (seit v0.9.459, Kern 0.17.0) = erster Punkt bis Spielende aus dem Zeiten-Store, auf die Bruttozeit geklemmt, nur Tablet-Weg, nie kampflos |
 | Schiedsrichter (`write_officials_to_btp`) | je Spiel `offizielle_setzen {schiedsrichter, aufschlagrichter}` mit IDs aus `paket.schiedsrichter` und `person` von dort (`0` = kein Dienst) |
 | Zeilenfarbe (`write_highlight_to_btp`) | keiner — nur lokal |
 

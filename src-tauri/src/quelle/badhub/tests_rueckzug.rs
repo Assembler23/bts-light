@@ -107,6 +107,7 @@ fn ko_rueckzug_entscheidet_das_offene_spiel_kampflos() {
             jetzt: JETZT.into(),
             beginn: None,
             bis: None,
+            netto_min: None,
         },
     )
     .unwrap_err();

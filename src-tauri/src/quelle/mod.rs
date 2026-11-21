@@ -232,6 +232,7 @@ mod tests {
             sets: vec![(21, 10), (21, 10)],
             team1_won: true,
             duration_mins: 20,
+            netto_mins: None,
             score_status: 0,
             free_court_id: Some(1),
             player_ids: vec![],
