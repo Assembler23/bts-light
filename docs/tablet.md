@@ -578,7 +578,7 @@ Erweiterung 06.09.2026):
   steht hochkant mit dem Netz waagerecht, der Satzstand zeigt oben die ferne,
   unten die nahe Seite. Die Seitenwahl fragt „Welches Team steht vorne
   (unten)?", die Spielerwahl bei Karten sagt „vorne/hinten". Der Federball
-  sitzt weiterhin im Innenwinkel des Aufschlagfelds — die Zellen sind so
+  sitzt auch hier im Aufschlagfeld hinter der vorderen Aufschlaglinie — die Zellen sind so
   gedreht, dass die rechte Hand jedes Spielers stimmt (oben: rechtes
   Aufschlagfeld links, unten: rechtes Aufschlagfeld rechts).
 - **Platzaufteilung (seit v0.9.284):** Die Plus-Knöpfe sind bewusst
@@ -643,11 +643,16 @@ Erweiterung 06.09.2026):
 - **Spieldauer**: läuft als MM:SS in der Kopfzeile ab Matchstart.
 - **Court-Grafik**: zeigt Aufschläger (markiert mit einem **Federball**,
   dessen Korken in Flugrichtung zum diagonal gegenüberliegenden
-  Aufschlagfeld zeigt) und Annehmer auf
+  Aufschlagfeld zeigt; seit v0.9.458 ein eigenes Element `#aufschlag-ball`
+  im Aufschlagfeld hinter der vorderen Aufschlaglinie, das bei jedem
+  Wechsel ins neue Feld gleitet — `setzeAufschlagBall`, Drehung auf dem
+  kürzesten Weg, ohne Flug nach Ausblenden/Ansichtswechsel) und Annehmer auf
   dem Spielfeld – im Einzel ein Name je Hälfte, im Doppel zwei.
 - **Verein (optional)**: Ist die turnierweite Vereins-Anzeige im Setup
   („Vereine anzeigen") eingeschaltet, steht unter dem Spielernamen klein der
-  **Vereinsname** und/oder das **Vereinslogo**. Die beiden Schalter reisen
+  **Vereinsname** und/oder das **Vereinslogo**. Der Name steht voll da,
+  solange die Zelle Platz hat, und wird erst an der Zellbreite mit „…"
+  gekürzt (bis v0.9.457 fest nach 14 Zeichen). Die beiden Schalter reisen
   **in-band** mit der Paarung (`MatchBrief.show_club_names/logos`), das Tablet
   übernimmt eine Änderung also mit der nächsten Zuweisung ohne Neuladen.
   Standard aus. Logos laden im LAN vom Turnier-PC (`/info/club-logo`,
