@@ -1075,6 +1075,15 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Geplant
 
+- **Vorabzettel bei geänderter Paarung (badhub-Turniere, Kern 0.18.0)** — badhub kann seit Kern 0.18.0
+  die Auslosung nach der Freigabe ändern. Ein in bts-light nur „in Vorbereitung gerufenes" Spiel ist dafür
+  nicht gesperrt: Ist sein Vorabzettel schon gedruckt, trägt das Papier die alten Namen, und es gibt weder
+  Nachdruck noch Warnung (`print_log.rs` merkt je Zettel nur den Schiedsrichter). Vorschlag: je Zettel
+  zusätzlich die Seiten merken (`entry1_id`/`entry2_id`, keine Namen) und bei Abweichung wie beim
+  SR-Wechsel reagieren — ändert ein gespeichertes Format (`gedruckt.json`), braucht also den
+  Datenformat-Abdruck. Dazu mit badhub klären, ob die Auslosung geändert werden darf, während bts-light
+  die Lease hält. Einzelheiten: [features/turnierquelle.md](features/turnierquelle.md).
+
 - **Linux-Variante (Entwickeln zuerst, Betreiben später).** Der Kern ist
   plattformneutral, BTP dagegen ein Windows-Programm — ein bts-light auf
   Linux spricht immer ein BTP auf einem anderen Rechner an (`btp.host` ist

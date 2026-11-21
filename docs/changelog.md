@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.460
+
+- **Turnierkern 0.18.0 für badhub-Turniere.** badhub kann die Auslosung jetzt
+  auch nach der Freigabe ändern (Plätze tauschen, eine Meldung ersetzen, eine
+  Rast besetzen). bts-light braucht dafür dieselbe Kern-Version: Ohne dieses
+  Update lässt sich ein so geändertes Turnier nicht mehr lesen, und Eingaben in
+  badhub-Turnieren werden mit „bitte bts-light aktualisieren" abgelehnt.
+- Eine nachträglich besetzte Rast bringt ein Spiel der ersten Runde mit der
+  höchsten Spielnummer. In der Turnierleitungs-Liste steht es mit richtiger
+  Runde und richtigem Vorspiel; die bisherigen Spiele behalten Nummer, Feld,
+  Zeiten und Ergebnisse.
+- BTP-Turniere laufen unverändert.
+
 ## v0.9.459
 
 - **Nettospielzeit an badhub.** Bei badhub-Turnieren geht mit jedem Ergebnis vom

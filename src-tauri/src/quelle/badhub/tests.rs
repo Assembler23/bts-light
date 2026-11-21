@@ -304,6 +304,190 @@ fn ko_mit_fortschreiben_bildet_ids_kanten_und_namen_ab() {
     assert_eq!(snap.matches[2].team1, hf.team1);
 }
 
+/// Kern 0.18.0: Die Turnierleitung besetzt am Turniertag eine Rast. Das neue
+/// Spiel liegt in der ersten Runde, trägt aber die **höchste** Nummer — die
+/// Spielnummer sagt seither nichts mehr über die Runde. Die Abbildung darf
+/// sich deshalb nur auf Runde und Baumkanten des Kerns stützen.
+#[test]
+fn nachtraeglich_besetzte_rast_bringt_ein_erstrundenspiel_mit_hoechster_nummer() {
+    // Drei Meldungen im Vierer-KO: ein Halbfinale, eine Rast, das Finale.
+    let mut log = turnier(3, System::Ko { platz3: false }, &[("H1", 2)]);
+    let vorher = abbilden(
+        &falten_turnier(&log),
+        &paket_fuer(log.clone(), 4, eine_halle()),
+    );
+    assert_eq!(vorher.matches.len(), 2);
+    let finale_id = vorher
+        .matches
+        .iter()
+        .find(|m| m.round_name == "Finale")
+        .expect("Finale")
+        .id;
+
+    // Die freie Linie des Gerüsts.
+    let stand = falten_turnier(&log);
+    let geruest = &stand.planung.systeme["HE"].geruest;
+    let belegt: BTreeSet<u32> = geruest
+        .spiele
+        .iter()
+        .flat_map(|s| [&s.oben, &s.unten])
+        .filter_map(|q| match q {
+            Quelle::Los { platz } => Some(*platz),
+            _ => None,
+        })
+        .collect();
+    let frei = (1..=geruest.ko_groesse)
+        .find(|p| !belegt.contains(p))
+        .expect("eine Rast");
+
+    // Nachmeldung, bestätigt, auf die Rast.
+    befehl(
+        &mut log,
+        TurnierBefehl::Melden {
+            id: "m4".into(),
+            konkurrenz: "HE".into(),
+            personen: vec![PersonRef {
+                person: 104,
+                altersklasse: None,
+            }],
+            weg: Weg::Veranstalter,
+            akteur: Akteur::Veranstalter,
+            jetzt: VOR.into(),
+            partner_bestaetigung: false,
+        },
+    )
+    .unwrap();
+    befehl(
+        &mut log,
+        TurnierBefehl::StatusSetzen {
+            id: "b4".into(),
+            meldung: 4,
+            status: Status::Confirmed,
+        },
+    )
+    .unwrap();
+    befehl(
+        &mut log,
+        TurnierBefehl::StartplatzBesetzen {
+            id: "rast".into(),
+            konkurrenz: "HE".into(),
+            platz: frei,
+            meldung: 4,
+            merkmale: BTreeMap::new(),
+        },
+    )
+    .unwrap();
+
+    let snap = abbilden(
+        &falten_turnier(&log),
+        &paket_fuer(log.clone(), 4, eine_halle()),
+    );
+    assert_eq!(snap.matches.len(), 3, "ein Spiel ist dazugekommen");
+    // Die bisherigen Spiele behalten ihre IDs — an ihnen hängen alle Stores.
+    for m in &vorher.matches {
+        assert!(
+            snap.matches.iter().any(|n| n.id == m.id),
+            "ID {} bleibt",
+            m.id
+        );
+    }
+    let neu = snap
+        .matches
+        .iter()
+        .find(|m| vorher.matches.iter().all(|a| a.id != m.id))
+        .expect("das neue Spiel");
+    assert_eq!(
+        neu.id,
+        snap.matches.iter().map(|m| m.id).max().unwrap(),
+        "höchste Nummer"
+    );
+    // … und trotzdem erste Runde, mit beiden Seiten besetzt.
+    assert_eq!(neu.round_name, "Halbfinale");
+    assert!(!neu.team1.is_empty() && !neu.team2.is_empty());
+    assert_eq!((neu.from1, neu.from2), (None, None));
+    assert!(
+        neu.entry1_id == 4 || neu.entry2_id == 4,
+        "die Nachmeldung spielt mit"
+    );
+    // Das Finale wartet jetzt auf beide Halbfinals; die Kante zeigt auf die
+    // hohe Nummer, und das TL-Web findet das Vorspiel darüber.
+    let fin = snap.matches.iter().find(|m| m.id == finale_id).unwrap();
+    assert_eq!(fin.round_name, "Finale");
+    assert!(fin.team1.is_empty() && fin.team2.is_empty());
+    let kanten = [fin.from1, fin.from2];
+    assert!(kanten.contains(&Some(neu.planning_id)), "{kanten:?}");
+    let seite = if fin.from1 == Some(neu.planning_id) {
+        1
+    } else {
+        2
+    };
+    assert_eq!(
+        crate::tablet::tl::vorspiel_fuer(&snap, fin, seite).map(|m| m.id),
+        Some(neu.id)
+    );
+    // Das neue Spiel hat noch keine Zeit (der Plan ist veraltet).
+    assert_eq!(neu.planned_time, None);
+    assert_eq!(neu.display_order, None);
+}
+
+/// Kern 0.18.0: Tauschen geht auch nach der Freigabe. Ein Spiel ohne Ergebnis
+/// und ohne Feld behält dabei seine ID, bekommt aber andere Seiten — alles,
+/// was in bts-light an der ID hängt, zeigt danach die neue Paarung.
+#[test]
+fn auslosung_tauschen_nach_der_freigabe_aendert_die_seiten_bei_gleicher_id() {
+    let mut log = turnier(4, System::Ko { platz3: false }, &[("H1", 2)]);
+    let vorher = abbilden(
+        &falten_turnier(&log),
+        &paket_fuer(log.clone(), 4, eine_halle()),
+    );
+    let (a, b) = (vorher.matches[0].entry1_id, vorher.matches[1].entry1_id);
+    befehl(
+        &mut log,
+        TurnierBefehl::AuslosungTauschen {
+            id: "tausch".into(),
+            konkurrenz: "HE".into(),
+            a: a as u32,
+            b: b as u32,
+            merkmale: BTreeMap::new(),
+        },
+    )
+    .unwrap();
+    let snap = abbilden(
+        &falten_turnier(&log),
+        &paket_fuer(log.clone(), 4, eine_halle()),
+    );
+    let ids =
+        |s: &crate::btp::model::BtpSnapshot| s.matches.iter().map(|m| m.id).collect::<Vec<_>>();
+    assert_eq!(ids(&snap), ids(&vorher), "IDs und Anzahl bleiben");
+    assert_eq!(snap.matches[0].entry1_id, b);
+    assert_eq!(snap.matches[1].entry1_id, a);
+    assert_eq!(
+        snap.matches[0].team1, vorher.matches[1].team1,
+        "auch die Namen"
+    );
+    // Die jeweils andere Seite bleibt, Planzeit und Runde auch.
+    assert_eq!(snap.matches[0].entry2_id, vorher.matches[0].entry2_id);
+    assert_eq!(snap.matches[0].planned_time, vorher.matches[0].planned_time);
+    assert_eq!(snap.matches[0].round_name, "Halbfinale");
+
+    // Ein Spiel mit Ergebnis sperrt den Tausch seiner Seiten.
+    melden(&mut log, "e1", 1, OBEN, None);
+    let sperre = befehl(
+        &mut log,
+        TurnierBefehl::AuslosungTauschen {
+            id: "tausch2".into(),
+            konkurrenz: "HE".into(),
+            a: a as u32,
+            b: b as u32,
+            merkmale: BTreeMap::new(),
+        },
+    );
+    assert!(
+        sperre.is_err(),
+        "gespieltes Spiel bekommt keine anderen Seiten"
+    );
+}
+
 #[test]
 fn walkover_und_feld_belegt() {
     let mut log = turnier(4, System::Ko { platz3: false }, &[("H1", 2)]);

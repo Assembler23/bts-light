@@ -56,7 +56,7 @@ nicht die eingestellte Quelle.
 | Kopplung | Tauri-Command `badhub_koppeln(code, geraet_name)` → `POST koppeln {code, install_id, name}` → `GET turnier/paket` → Ablage → `config.badhub_turnier`. `badhub_turnier_info` für den Assistenten |
 | Abgleich | alle 5 s `GET turnier/ereignisse?ab=<n>&max=500` (seitenweise bis zum Kopf, siehe „Paket in Teilen“), alle 60 s `GET turnier/paket` mit `If-None-Match` (ETag-Header, sonst `stammdaten_etag`). Offline bleibt der letzte Stand; 401/403 hält den Abgleich bis zum nächsten Start an |
 | API-Basis | aus der Push-Adresse (`badhub.url`, folgt damit dem Testsystem-Schalter) + `/api/torg/v1`, beim Koppeln in `badhub_turnier.basis` festgehalten — das Token geht nie an das andere System. Nur `https://` (Ausnahme `localhost`/`127.0.0.1` für Tests) |
-| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.17.0`, seit v0.9.459), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht, solange das Protokoll keine Ereignisarten enthält, die diese Version nicht kennt (neue Befehle eines neueren Kerns, z. B. `zaehlweise_festlegen` ab 0.14.0, lassen das Falten scheitern — deshalb bts-light zusammen mit dem Kern in badhub aktualisieren), Schreiben (L3) verlangt Gleichstand |
+| Kern | Crate `turnierkern` (privates Repo `Assembler23/turnierkern`, Tag `v0.18.0`, seit v0.9.460), `KERN_VERSION` gleich dem Tag (Test). Weicht `paket.kern_version` ab, zeigt der Assistent einen Hinweis; Lesen geht, solange das Protokoll keine Ereignisarten enthält, die diese Version nicht kennt (neue Befehle eines neueren Kerns, z. B. `zaehlweise_festlegen` ab 0.14.0, lassen das Falten scheitern — deshalb bts-light zusammen mit dem Kern in badhub aktualisieren), Schreiben (L3) verlangt Gleichstand |
 
 ### Ablage und Verschlüsselung
 
@@ -276,6 +276,27 @@ abgewiesen, wandern auch die noch nicht gesendeten Posten in die Sicherungsdatei
 `zaehlweise_festlegen`) tragen, die v0.9.451 (Kern 0.12.0) nicht lesen kann. Das ist der schon in L3 entschiedene Fall
 „Kern-Version muss gleich sein“: Schreiben verlangt Gleichstand mit badhub, ein Rückweg während eines badhub-Turniers
 nimmt keine Eingaben an. `config.json` und BTP-Dateien sind unverändert — die Grenze bleibt.
+
+**Kern 0.18.0 (v0.9.460) — Auslosung nach der Freigabe ändern:** badhub kann nach der Freigabe Plätze tauschen
+(`auslosung_tauschen`), eine Meldung ersetzen (`auslosung_ersetzt`) und eine Rast besetzen (`startplatz_besetzt`).
+bts-light sendet keinen dieser Befehle; es faltet die Ereignisse mit dem Kern. Zwei Folgen:
+
+- **Die Spielnummer sagt nichts mehr über die Runde.** Eine besetzte Rast bringt ein Spiel der ersten Runde mit der
+  nächsten freien — also höchsten — Nummer. Die Abbildung stützt sich auf `runde` und die Baumkanten des Kerns, nie auf
+  die Nummer (Test `nachtraeglich_besetzte_rast_bringt_ein_erstrundenspiel_mit_hoechster_nummer`). Alle bisherigen
+  Spielnummern und damit die IDs bleiben; an ihnen hängen die Stores. `match_num` ist im Sortierschlüssel der Warteliste
+  nur ein später Gleichstandsbrecher (nach Planzeit und Reihenfolge im Zeitplan). Das neue Spiel hat zunächst keine
+  Planzeit und steht deshalb **ganz hinten in der Warteliste** (`assign.rs` `sort_key_parts`: ohne Planzeit zuletzt),
+  bis badhub den Zeitplan neu rechnet — obwohl es ein Spiel der ersten Runde ist.
+- **Die Paarung eines bestehenden Spiels kann sich ändern**, solange es weder Ergebnis noch Feld hat (Tausch, Ersetzen):
+  gleiche ID, andere Seiten (Test `auslosung_tauschen_nach_der_freigabe_aendert_die_seiten_bei_gleicher_id`). Anzeige,
+  Warteliste und TL-Web folgen dem neuen Schnappschuss; der Meetingpoint-Check-in hängt am Personen-Fingerabdruck und
+  wird entwertet. **Offen:** Ein in bts-light nur „in Vorbereitung gerufenes" Spiel ist für den Kern nicht gesperrt.
+  Ist sein **Vorabzettel schon gedruckt** oder der Aufruf schon angesagt, tragen Papier und Ansage die alten Namen —
+  `print_log.rs` merkt je Zettel nur den Schiedsrichter und druckt bei einer anderen Paarung nicht nach und warnt nicht.
+  Ebenfalls offen und Sache von badhub: ob die Auslosung geändert werden darf, während bts-light die Lease hält oder
+  offline erfasste Posten noch nicht hochgeladen sind.
+- **Ein Protokoll mit den neuen Ereignisarten kann v0.9.459 (Kern 0.17.0) nicht falten** — derselbe Fall wie oben.
 
 ## Rückgabe aus dem TL-Web (v0.9.451)
 
