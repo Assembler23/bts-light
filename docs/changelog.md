@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.466
+
+- **Punktspiele ohne PC: Monitore zeigen den Verein.** Feldmonitor und Stream zeigen
+  unter dem Namen die Mannschaft statt einer Flagge davor. Für den Betrieb in der Halle
+  ändert sich nichts.
+
 ## v0.9.465
 
 - **Punktspiele ohne PC: Dienst für den Server.** `bts-light --kopflos-dienst <spool>`

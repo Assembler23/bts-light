@@ -79,6 +79,13 @@ fn grundkonfiguration(a: &Auftrag) -> Result<AppConfig, String> {
     cfg.connection_mode = ConnectionMode::Cloud;
     cfg.install_id = a.install_id.trim().to_string();
     cfg.liveticker_aus = true;
+    // Anzeigen für ein Punktspiel: der Verein (die Mannschaft) unter dem Namen
+    // statt der Flagge davor — Nationen kennt das Paket nicht, die Seiten sind
+    // die beiden Mannschaften. Niemand kann das hier von Hand einstellen.
+    cfg.court_monitor.name_davor = crate::config::NamenDavor::Ohne;
+    cfg.court_monitor.name_darunter = crate::config::NamenDarunter::Verein;
+    cfg.court_monitor.stream_nations = false;
+    cfg.court_monitor.stream_clubs = true;
     cfg.tl_web.enabled = true;
     cfg.tl_web.devices.clear();
     cfg.tl_web.add_device(TlDevice {
@@ -294,6 +301,16 @@ mod tests {
         assert_eq!(cfg.connection_mode, ConnectionMode::Cloud);
         assert!(cfg.liveticker_aus && !cfg.upload_logs);
         assert!(cfg.tl_web.enabled);
+        // Monitore: Verein statt Flagge
+        assert_eq!(
+            cfg.court_monitor.name_davor,
+            crate::config::NamenDavor::Ohne
+        );
+        assert_eq!(
+            cfg.court_monitor.name_darunter,
+            crate::config::NamenDarunter::Verein
+        );
+        assert!(!cfg.court_monitor.stream_nations && cfg.court_monitor.stream_clubs);
         assert_eq!(cfg.tl_web.devices.len(), 1);
         assert_eq!(cfg.tl_web.devices[0].token, "geheim");
         assert_eq!(cfg.tl_web.devices[0].label, "Mein Badhub");

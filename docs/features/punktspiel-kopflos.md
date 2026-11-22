@@ -127,4 +127,6 @@ es sie ohne Fenster nie benutzt. Sie müssen installiert sein (`libwebkit2gtk-4.
   noch nicht ausprobiert.
 - Prozess von selbst beenden, wenn die Begegnung beendet ist oder nuLiga sie als gespielt führt (heute: Beenden in
   Mein Badhub oder die 14-Tage-Frist).
-- Monitore und Ansage ohne PC.
+- Monitore ohne PC mit einem laufenden Spiel ansehen. Die Seiten (Feldmonitor, Tafel, Übersicht) liefert der
+  Relay schon aus, badhub zeigt die Links; `grundkonfiguration()` stellt Verein statt Flagge ein (v0.9.466).
+- Ansage ohne PC (am PC läuft sie über dessen Lautsprecher).
