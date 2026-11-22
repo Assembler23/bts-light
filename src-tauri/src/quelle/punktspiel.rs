@@ -9,9 +9,9 @@
 //!   [`abbilden`] macht daraus den `BtpSnapshot`, mit dem der Rest der App
 //!   arbeitet (Tablets, Monitore, Liveticker). Abgefragt wird im Takt der
 //!   Sync-Schleife mit `If-None-Match`.
-//! - **Schreiben:** Feldvergabe und Ergebnis gehen als Zustandsmeldung je
-//!   Spiel an `POST /api/ls/v1/begegnung/spiel`. Die Antwort ist das neue
-//!   Paket.
+//! - **Schreiben:** Feldvergabe, Ergebnis und — nach jedem Zyklus — der
+//!   laufende Punktestand gehen als Zustandsmeldung je Spiel an
+//!   `POST /api/ls/v1/begegnung/spiel`. Die Antwort ist das neue Paket.
 //!
 //! Auf der Platte liegt nur das Gerätetoken (verschlüsselt, wie bei den
 //! badhub-Turnieren), unter `punktspiele/<uuid>/geraet.bin`. Das Paket wird
@@ -416,6 +416,9 @@ pub enum ApiFehler {
     Beendet,
     /// Der Kopplungscode wurde nicht angenommen.
     CodeAbgelehnt,
+    /// Ein vorgelagerter Server verlangt eine eigene Anmeldung (Passwortschutz
+    /// des Testsystems) — die Anfrage hat badhub gar nicht erreicht.
+    Wand,
     /// 422: badhub lehnt die Meldung ab (Text von badhub).
     Abgelehnt(String),
     /// 429: zu viele Anfragen.
@@ -439,6 +442,10 @@ impl std::fmt::Display for ApiFehler {
             ApiFehler::CodeAbgelehnt => write!(
                 f,
                 "Der Kopplungscode ist falsch, abgelaufen oder schon eingelöst. In Mein Badhub unter Live-Scoring einen neuen erzeugen."
+            ),
+            ApiFehler::Wand => write!(
+                f,
+                "Der Server verlangt vor badhub eine eigene Anmeldung (Passwortschutz, etwa am Testsystem) — die Anfrage ist dort nicht angekommen. Das muss am Server freigegeben werden; am Kopplungscode liegt es nicht."
             ),
             ApiFehler::Abgelehnt(t) => write!(f, "badhub hat abgelehnt: {t}"),
             ApiFehler::Drossel => write!(f, "Zu viele Anfragen an badhub — bitte kurz warten."),
@@ -533,6 +540,17 @@ async fn api_koppeln(
         .map_err(netz)?;
     let status = antwort.status();
     if !status.is_success() {
+        // Ein 401 mit „Basic“-Aufforderung kommt nicht von badhub, sondern von
+        // einem Passwortschutz davor (test.badhub.de, 22.11.2026: sah aus wie
+        // ein falscher Code und kostete eine Fehlersuche).
+        let basic = antwort
+            .headers()
+            .get("WWW-Authenticate")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.trim_start().to_ascii_lowercase().starts_with("basic"));
+        if status.as_u16() == 401 && basic {
+            return Err(ApiFehler::Wand);
+        }
         return Err(match status.as_u16() {
             400 | 401 | 403 | 404 | 409 | 410 | 422 => ApiFehler::CodeAbgelehnt,
             _ => status_fehler(status),
@@ -780,8 +798,20 @@ pub async fn stand() -> Result<BtpSnapshot, String> {
     }
 }
 
-async fn melden(meldungen: Vec<Meldung>) -> Result<(), String> {
-    for m in meldungen {
+/// Alle Meldungen an badhub gehen **nacheinander** hinaus, und jede wird erst
+/// unter dieser Sperre aus dem dann aktuellen Paket berechnet. Eine Meldung
+/// trägt immer den ganzen Zustand eines Spiels: Liefen Punktestand („läuft“)
+/// und Ergebnis („beendet“) nebeneinander, könnte der später eintreffende
+/// Punktestand das Ergebnis wieder aufheben — und das Ergebnis geht nur
+/// einmal hinaus.
+static SENDEN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Berechnet die Meldungen aus dem aktuellen Paket und sendet sie, alles
+/// unter der Sende-Sperre.
+async fn melden_aus(bauen: impl FnOnce(&Paket) -> Vec<Meldung>) -> Result<(), String> {
+    let _sperre = SENDEN.lock().await;
+    let paket = paket_kopie()?;
+    for m in bauen(&paket) {
         let (basis, token, _, _) = zugang()?;
         let (paket, etag) = api_melden(&basis, &token, &m)
             .await
@@ -800,13 +830,94 @@ fn paket_kopie() -> Result<Paket, String> {
 
 /// Feldvergabe an badhub melden.
 pub async fn feld_vergabe(courts: &[proto::CourtAssignment]) -> Result<(), String> {
-    let paket = paket_kopie()?;
-    melden(feld_meldungen(&paket, courts)).await
+    melden_aus(|paket| feld_meldungen(paket, courts)).await
 }
 
 /// Ergebnis an badhub melden.
 pub async fn ergebnis(update: &proto::MatchUpdate) -> Result<(), String> {
-    melden(vec![ergebnis_meldung(update)]).await
+    melden_aus(|_| vec![ergebnis_meldung(update)]).await
+}
+
+/// Meldungen für den laufenden Punktestand: je laufendem Spiel eine, wenn der
+/// Stand am Tablet von dem abweicht, den badhub zuletzt kennt. `stand_am_feld`
+/// liefert zu einem Feld die Spielnummer und die Sätze vom Tablet.
+pub fn punktestand_meldungen(
+    paket: &Paket,
+    stand_am_feld: impl Fn(i64) -> Option<(i64, Vec<(i64, i64)>)>,
+) -> Vec<Meldung> {
+    paket
+        .spiele
+        .iter()
+        .filter(|s| s.status == "laeuft")
+        .filter_map(|s| {
+            let feld = s.feld?;
+            let (nr, saetze_jetzt) = stand_am_feld(feld)?;
+            if nr != s.nr || saetze_jetzt.is_empty() || saetze_jetzt == s.saetze {
+                return None;
+            }
+            Some(Meldung {
+                nr: s.nr,
+                status: "laeuft",
+                feld: Some(feld),
+                saetze: saetze(&saetze_jetzt),
+                sieger: None,
+                ausgang: "normal",
+            })
+        })
+        .collect()
+}
+
+/// Läuft gerade eine Punktestand-Meldung? Höchstens eine zugleich.
+static PUNKTESTAND_UNTERWEGS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// Nach einem Fehler erst ab hier wieder versuchen — sonst wiederholte sich
+/// eine abgelehnte oder gedrosselte Meldung in jedem Zyklus.
+static PUNKTESTAND_PAUSE_BIS: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+const PUNKTESTAND_PAUSE: Duration = Duration::from_secs(30);
+
+/// Meldet nach einem Zyklus den laufenden Punktestand an badhub — so steht er
+/// öffentlich an der Begegnung, auch ohne Liveticker.
+///
+/// Der Zyklus wartet nicht darauf: gesendet wird in einer eigenen Aufgabe,
+/// höchstens eine zugleich, nach einem Fehler mit Pause. Die Meldungen werden
+/// erst unter der Sende-Sperre aus dem dann aktuellen Paket berechnet — ein
+/// Spiel, dessen Ergebnis inzwischen gemeldet ist, bekommt keinen Punktestand
+/// mehr.
+pub fn punktestand_melden(tablet: &crate::tablet::state::TabletState) {
+    use std::sync::atomic::Ordering;
+    let jetzt = std::time::Instant::now();
+    let pause = *PUNKTESTAND_PAUSE_BIS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if pause.is_some_and(|bis| jetzt < bis) {
+        return;
+    }
+    let Ok(paket) = paket_kopie() else { return };
+    // Stand der Tablets jetzt festhalten (die Aufgabe hat keinen Zugriff auf
+    // den Tablet-Zustand); nichts zu melden → gar nicht erst starten.
+    let staende: std::collections::HashMap<i64, (i64, Vec<(i64, i64)>)> =
+        (1..=paket.felder.clamp(1, 8))
+            .filter_map(|feld| tablet.laufende_saetze(feld).map(|s| (feld, s)))
+            .collect();
+    if punktestand_meldungen(&paket, |feld| staende.get(&feld).cloned()).is_empty() {
+        return;
+    }
+    if PUNKTESTAND_UNTERWEGS.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tokio::spawn(async move {
+        let ergebnis =
+            melden_aus(|paket| punktestand_meldungen(paket, |feld| staende.get(&feld).cloned()))
+                .await;
+        if let Err(e) = ergebnis {
+            tracing::warn!(target: "punktspiel", "Punktestand nicht gemeldet, nächster Versuch in {} s: {e}", PUNKTESTAND_PAUSE.as_secs());
+            *PUNKTESTAND_PAUSE_BIS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) =
+                Some(std::time::Instant::now() + PUNKTESTAND_PAUSE);
+        }
+        PUNKTESTAND_UNTERWEGS.store(false, Ordering::SeqCst);
+    });
 }
 
 /// Ergebnis einer Kopplung, für die Anzeige im Einrichtungsassistenten.

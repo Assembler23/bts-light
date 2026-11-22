@@ -35,6 +35,7 @@ Alles in `src-tauri/src/quelle/punktspiel.rs`.
 | Abbildung | `abbilden()`: Match-ID = Spielnummer, Feld-ID = Feldnummer, je Spiel eine Klasse mit dem Disziplinnamen („1.HD“), Runde = „Heim – Gast“, Verein = Mannschaftsname. Eine Seite mit unvollständiger Aufstellung bleibt leer: das Spiel ist dann nicht spielbereit und wird weder von Hand noch automatisch aufgerufen |
 | Feldvergabe | `feld_meldungen()`: Aufruf = Spiel läuft auf Feld n, Freigabe = Spiel wieder offen. Ein beendetes Spiel wird nicht wieder geöffnet |
 | Ergebnis | `ergebnis_meldung()`: Sätze, Sieger (`heim`/`gast`), Ausgang (`normal`, `kampflos`, `aufgabe`, `disqualifikation`) |
+| Punktestand | `punktestand_melden()` nach jedem Zyklus (seit v0.9.464): je laufendem Spiel der Stand vom Tablet, wenn er von dem abweicht, den badhub kennt |
 | Meldung | `POST {basis}/begegnung/spiel` trägt immer den ganzen Zustand eines Spiels. Die Antwort ist das neue Paket |
 
 ### Gleichzeitigkeit

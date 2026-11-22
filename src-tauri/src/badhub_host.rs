@@ -82,6 +82,15 @@ pub fn url_fuer(url: &str, test: bool) -> String {
 /// Setzt den Prozess-Schalter aus der konfigurierten Push-URL. Aufrufer sind
 /// der App-Start und jedes Speichern der Konfiguration — mehr Stellen darf es
 /// nicht geben, sonst ist die Ableitung wieder eine zweite Wahrheit.
+/// Zeigt die Adresse auf badhub (Live oder Test)? Für den Betrieb ohne
+/// Oberfläche: dort bestimmt ein Auftrag, wohin Kopplungscode und Gerätetoken
+/// gehen — nur badhub selbst kommt in Frage.
+pub fn ist_badhub_adresse(url: &str) -> bool {
+    reqwest::Url::parse(url.trim())
+        .ok()
+        .is_some_and(|u| u.scheme() == "https" && u.host_str().is_some_and(ist_badhub_host))
+}
+
 pub fn set_aus_push_url(url: &str) {
     let test = ist_testsystem(url);
     if TESTSYSTEM.swap(test, Ordering::Relaxed) != test {

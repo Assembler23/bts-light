@@ -326,19 +326,95 @@ fn btp_fehler_loggen(flanke: &mut crate::badhub::strecke::Flanke, outcome: &Sync
     }
 }
 
+/// Woher die Übertragung ihre Verzeichnisse und den geteilten Zustand nimmt.
+///
+/// Am Desktop ist das die Tauri-App (`AppHandle`). Für den Betrieb ohne
+/// Oberfläche (`crate::kopflos`, ein Punktspiel auf dem Server) ist es ein
+/// fester Ordner — so startet `start_sync_kern` in beiden Fällen denselben
+/// Code, ohne ein Fenster zu brauchen.
+pub(crate) trait Ort: Clone + Send + Sync + 'static {
+    fn config_dir(&self) -> Result<std::path::PathBuf, String>;
+    fn data_dir(&self) -> Result<std::path::PathBuf, String>;
+    fn log_dir(&self) -> Result<std::path::PathBuf, String>;
+    /// Der prozessweite Zustand (`AppState`).
+    fn zustand(&self) -> &AppState;
+}
+
+impl Ort for AppHandle {
+    fn config_dir(&self) -> Result<std::path::PathBuf, String> {
+        self.path().app_config_dir().map_err(|e| e.to_string())
+    }
+    fn data_dir(&self) -> Result<std::path::PathBuf, String> {
+        self.path().app_data_dir().map_err(|e| e.to_string())
+    }
+    fn log_dir(&self) -> Result<std::path::PathBuf, String> {
+        self.path().app_log_dir().map_err(|e| e.to_string())
+    }
+    fn zustand(&self) -> &AppState {
+        self.state::<AppState>().inner()
+    }
+}
+
+/// Ort für den Betrieb ohne Oberfläche: ein fester Ordner mit `config/`,
+/// `daten/` und `logs/`, dazu ein Zustand, der für die Lebensdauer des
+/// Prozesses gilt.
+#[derive(Clone)]
+pub(crate) struct OrtKopflos {
+    wurzel: std::path::PathBuf,
+    zustand: &'static AppState,
+}
+
+impl OrtKopflos {
+    pub(crate) fn config_datei(wurzel: &std::path::Path) -> std::path::PathBuf {
+        wurzel.join("config").join("config.json")
+    }
+    pub(crate) fn daten_ordner(wurzel: &std::path::Path) -> std::path::PathBuf {
+        wurzel.join("daten")
+    }
+}
+
+impl Ort for OrtKopflos {
+    fn config_dir(&self) -> Result<std::path::PathBuf, String> {
+        Ok(self.wurzel.join("config"))
+    }
+    fn data_dir(&self) -> Result<std::path::PathBuf, String> {
+        Ok(Self::daten_ordner(&self.wurzel))
+    }
+    fn log_dir(&self) -> Result<std::path::PathBuf, String> {
+        Ok(self.wurzel.join("logs"))
+    }
+    fn zustand(&self) -> &AppState {
+        self.zustand
+    }
+}
+
+/// Startet die Übertragung ohne Oberfläche (`crate::kopflos`): derselbe
+/// `start_sync_kern` wie am Desktop, nur mit einem festen Ordner statt der
+/// Tauri-App. Der Zustand lebt bis zum Prozessende (bewusst nie freigegeben).
+pub(crate) fn kopflos_starten(wurzel: &std::path::Path, config: AppConfig) -> Result<(), String> {
+    for ordner in ["config", "daten", "logs"] {
+        std::fs::create_dir_all(wurzel.join(ordner)).map_err(|e| e.to_string())?;
+    }
+    let zustand: &'static AppState = Box::leak(Box::new(AppState::default()));
+    *zustand.config.lock().expect("Config-Mutex nicht vergiftet") = config;
+    let ort = OrtKopflos {
+        wurzel: wurzel.to_path_buf(),
+        zustand,
+    };
+    start_sync_kern(&ort, zustand)
+}
+
 /// Pfad zur Konfigurationsdatei im App-Config-Verzeichnis des Betriebssystems.
-fn config_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_config_dir()
+fn config_path(app: &impl Ort) -> std::path::PathBuf {
+    app.config_dir()
         .expect("App-Config-Verzeichnis ist verfügbar")
         .join("config.json")
 }
 
 /// Verzeichnis der hochgeladenen Court-Monitor-Werbebilder im
 /// App-Datenverzeichnis des Betriebssystems.
-fn monitor_ad_dir(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn monitor_ad_dir(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join(crate::tablet::monitor::AD_DIR_NAME)
 }
@@ -372,9 +448,8 @@ fn monitor_ad_style_path(app: &AppHandle) -> std::path::PathBuf {
 }
 
 /// Pfad zur Datei mit den Monitor-Feld-Zuweisungen (Gerät → Feld).
-fn monitor_assignments_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_config_dir()
+fn monitor_assignments_path(app: &impl Ort) -> std::path::PathBuf {
+    app.config_dir()
         .expect("App-Config-Verzeichnis ist verfügbar")
         .join(crate::tablet::monitor::MONITOR_ASSIGN_FILE)
 }
@@ -427,9 +502,8 @@ pub fn migrate_combo_dir_einmalig(app: &AppHandle) {
 /// Pfad zur Datei mit dem laufenden Live-Satzstand je Feld. Übersteht einen
 /// App-Neustart, damit der TV nach einem Absturz/Neustart nicht auf BTPs
 /// 0:0 zurückfällt, bis das Tablet wieder verbunden ist.
-fn tablet_scores_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_scores_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("live-scores.json")
 }
@@ -438,9 +512,8 @@ fn tablet_scores_path(app: &AppHandle) -> std::path::PathBuf {
 /// App-Neustart, damit ein noch nicht nach BTP geschriebenes Ergebnis nicht
 /// verloren geht. Geladen wird die Queue erst beim ersten Snapshot
 /// (turnier-gegated), geschrieben bei jedem `queue`/`clear`.
-fn tablet_btp_retry_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_btp_retry_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("btp-retry.json")
 }
@@ -448,9 +521,8 @@ fn tablet_btp_retry_path(app: &AppHandle) -> std::path::PathBuf {
 /// Pfad des Schiedsrichter-Rosters (ADR 0022). Bewusst **außerhalb** der
 /// config.json: Sperrlisten sind Personendaten und dürfen nicht ins
 /// Identitäts-Bündel wandern; der Stand gilt zudem nur für ein Turnier.
-fn tablet_officials_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_officials_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("officials-state.json")
 }
@@ -458,32 +530,28 @@ fn tablet_officials_path(app: &AppHandle) -> std::path::PathBuf {
 /// Pfad der Auto-Vergabe-Ausnahmeliste (Spec `feldvergabe-ausnahme`, Muster
 /// ADR 0022). Bewusst **außerhalb** der config.json: der Stand gilt nur für
 /// ein Turnier, wie beim Schiedsrichter-Roster.
-fn tablet_exclusions_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_exclusions_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("excluded-matches.json")
 }
 
 /// Ablage der Vorbereitungs-Aufrufe (Meetingpoint, ADR 0071).
-fn tablet_meetingpoint_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_meetingpoint_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("meetingpoint.json")
 }
 
 /// Ablage der Wunschfelder — turniergebunden wie die Ausnahmeliste.
-fn tablet_wish_courts_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_wish_courts_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("wish-courts.json")
 }
 
-fn tablet_queue_order_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_queue_order_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("queue-order.json")
 }
@@ -491,9 +559,8 @@ fn tablet_queue_order_path(app: &AppHandle) -> std::path::PathBuf {
 /// Pfad des Druck-Gedächtnisses (Spec `schiedsrichterzettel-autodruck`,
 /// Muster ADR 0022). Außerhalb der config.json: Der Stand gilt nur für ein
 /// Turnier und hat im Config-Export nichts verloren.
-fn tablet_print_log_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_print_log_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("gedruckt.json")
 }
@@ -501,18 +568,16 @@ fn tablet_print_log_path(app: &AppHandle) -> std::path::PathBuf {
 /// Pfad der Spielzeiten-Messung (Spec `spielzeiten-prognose`, Muster
 /// ADR 0022). Bewusst **außerhalb** der config.json: der Stand gilt nur
 /// für ein Turnier.
-fn tablet_match_times_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_match_times_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("match-times.json")
 }
 
 /// Pfad der automatisch vorverteilten Hallen (Spec `hallen-vorverteilung`,
 /// ADR 0029). Turniergebunden wie die anderen ADR-0022-Stores.
-fn tablet_auto_halls_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .app_data_dir()
+fn tablet_auto_halls_path(app: &impl Ort) -> std::path::PathBuf {
+    app.data_dir()
         .expect("App-Datenverzeichnis ist verfügbar")
         .join("auto-halls.json")
 }
@@ -2398,7 +2463,7 @@ pub(crate) fn pruefe_startbedingungen(config: &crate::config::AppConfig) -> Resu
                 .to_string(),
         );
     }
-    if config.badhub.password.is_empty() {
+    if config.badhub.password.is_empty() && !config.liveticker_aus {
         return Err("Es ist kein Badhub-Passwort konfiguriert.".to_string());
     }
     if config.connection_mode.cloud_enabled() && config.install_id.is_empty() {
@@ -3711,7 +3776,7 @@ pub fn start_sync(app: AppHandle, state: State<'_, AppState>) -> Result<(), Stri
 /// im Fenster und für den Wiederanlauf nach einem Update, der schon in
 /// `.setup()` läuft, bevor das Fenster etwas geladen hat (Spec
 /// hotfix-ohne-neustart, E7).
-pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub(crate) fn start_sync_kern<O: Ort>(app: &O, state: &AppState) -> Result<(), String> {
     let mut slot = state.sync_task.lock().expect("Task-Mutex nicht vergiftet");
     if slot.is_some() {
         return Ok(()); // läuft bereits
@@ -3728,7 +3793,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
     // überleben so einen Neustart des Turnier-PCs. Ohne das wäre die Arbeit
     // eines ganzen Vormittags nach einem Absturz verloren — für
     // Vorbereitungs-Aufrufe wäre das verschmerzbar, für den Spielort nicht.
-    if let Ok(dir) = app.path().app_config_dir() {
+    if let Ok(dir) = app.config_dir() {
         state
             .tablet
             .use_manual_hall_file(&dir.join("spielorte.json"));
@@ -3811,7 +3876,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
     // im Slave-Betrieb totes Gepäck, kein Unterschied im Verhalten —
     // beide sind jetzt gleich behandelt (verifiziert im Review zu E8).
     if !config.slave_mode {
-        if let Ok(dir) = app.path().app_data_dir() {
+        if let Ok(dir) = app.data_dir() {
             tablet.timeline_store().set_dir(dir.join("punktverlauf"));
             // Zettel-Ereignisse: eigenes Verzeichnis neben dem Punktverlauf
             // (ADR 0037) — getrennte Datei, getrennte Deckel, getrennte Route.
@@ -3838,7 +3903,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
 
     // Turnierquelle (Paket L2): die eine Stelle, an der sich BTP- und
     // badhub-Turniere trennen. Bei BTP startet hier nichts Neues.
-    let quellen_start = crate::quelle::starten(&config, app.path().app_data_dir().ok().as_deref());
+    let quellen_start = crate::quelle::starten(&config, app.data_dir().ok().as_deref());
     // Relay-Namespace für die Lease eines badhub-Turniers: Über ihn leitet
     // badhub seine Eingaben an diesen PC — nur mit Cloud-Weg.
     let notfall_ordner = config.badhub_notfall_ordner.trim().to_string();
@@ -3853,18 +3918,25 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
     // Die Strecke zu badhub entsteht je Start neu — ein Halt (abgelehntes
     // Passwort) endet damit beim Speichern der Einstellungen. Geteilt
     // zwischen Sync-Zyklus und den Punkt-Arbeitern der Tablets.
-    let push_tor = crate::badhub::strecke::Strecke::neu(
-        state.push_merker.clone(),
-        &config.badhub.url,
-        &push_ziel(&config),
-        std::time::Instant::now(),
-    )
-    .als_tor();
+    // Ohne Liveticker (`liveticker_aus`, Punktspiel ohne Oberfläche): ein
+    // geschlossenes Tor — kein Kanal sendet, niemand probiert ein Passwort.
+    let liveticker_aus = config.liveticker_aus;
+    let push_tor = if liveticker_aus {
+        crate::badhub::strecke::Strecke::geschlossen().als_tor()
+    } else {
+        crate::badhub::strecke::Strecke::neu(
+            state.push_merker.clone(),
+            &config.badhub.url,
+            &push_ziel(&config),
+            std::time::Instant::now(),
+        )
+        .als_tor()
+    };
     let sync_tor = push_tor.clone();
     // Postfach des badhub-Senders: Der Zyklus legt seinen Stand ab und läuft
     // weiter; der Sender (unten, unter einem Wächter) holt ihn. Am Slave
     // gibt es beides nicht — dort pusht niemand.
-    let postfach = (!slave_mode).then(crate::badhub::sender::Griff::neu);
+    let postfach = (!slave_mode && !liveticker_aus).then(crate::badhub::sender::Griff::neu);
     let push_lage = crate::badhub::sender::LageSchlitz::default();
     *state
         .push_lage
@@ -3952,15 +4024,15 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
                 ))
             });
         let _tp_takt = (!slave_mode && quellen_start.btp_dienste).then(|| {
-            let st = app_handle.state::<AppState>();
+            let st = app_handle.zustand();
             let cfg = st.config.clone();
             let status = st.tp_upload.clone();
             TaktWaechter(tauri::async_runtime::spawn(tp_takt_schleife(cfg, status)))
         });
         // Turnierlogo von badhub (badhub ist Master): nur am Master, solange die
         // Übertragung läuft — das Passwort ist die Anmeldung.
-        let _logo_abruf = (!slave_mode).then(|| {
-            let st = app_handle.state::<AppState>();
+        let _logo_abruf = (!slave_mode && !liveticker_aus).then(|| {
+            let st = app_handle.zustand();
             TaktWaechter(tauri::async_runtime::spawn(logo_abruf_schleife(
                 st.config.clone(),
                 config_path(&app_handle),
@@ -3970,7 +4042,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
         // Übertragung und danach im 60-s-Takt die in BTP geöffnete Datei.
         // Nur am Master; ob sie arbeitet, liest sie je Takt aus der Config.
         let _tp_finden = (!slave_mode && quellen_start.btp_dienste).then(|| {
-            let st = app_handle.state::<AppState>();
+            let st = app_handle.zustand();
             TaktWaechter(tauri::async_runtime::spawn(tp_finden_schleife(
                 st.config.clone(),
                 config_path(&app_handle),
@@ -3990,7 +4062,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
             // Turnierlogo aus der GETEILTEN Config: der Logo-Abruf von badhub schreibt
             // dort hinein, der nächste tset soll es tragen (Review 19.11.2026).
             {
-                let st = app_handle.state::<AppState>();
+                let st = app_handle.zustand();
                 let neu = st
                     .config
                     .lock()
@@ -4006,7 +4078,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
             // Paarung erkannt → Takt-Termin vorziehen. Schalter und Drossel
             // aus der GETEILTEN Config (nicht der Wertkopie `sync_config`):
             // Abschalten im Setup wirkt so ab dem nächsten Abruf.
-            let app_state = app_handle.state::<AppState>();
+            let app_state = app_handle.zustand();
             // Vergifteter Mutex: weiterlesen statt den ganzen Sync-Loop
             // (Liveticker-Push) für einen optionalen Auslöser abzureißen.
             let abstand = app_state
@@ -4032,7 +4104,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
             let mut status = status_from(&outcome);
             status.running = true;
             *app_handle
-                .state::<AppState>()
+                .zustand()
                 .status
                 .lock()
                 .expect("Status-Mutex nicht vergiftet") = status;
@@ -4049,8 +4121,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
     let cfg_path = config_path(app);
     let assignments_path = monitor_assignments_path(app);
     let log_dir = app
-        .path()
-        .app_log_dir()
+        .log_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
     let ctx = Arc::new(
         crate::tablet::server::ServerCtx::new(
@@ -4208,7 +4279,7 @@ pub(crate) fn start_sync_kern(app: &AppHandle, state: &AppState) -> Result<(), S
             .lock()
             .expect("Log-Task-Mutex nicht vergiftet");
         if log_slot.is_none() {
-            if let Ok(log_dir) = app.path().app_log_dir() {
+            if let Ok(log_dir) = app.log_dir() {
                 *log_slot = Some(tauri::async_runtime::spawn(crate::log_upload::upload_loop(
                     push::build_client(),
                     log_dir,

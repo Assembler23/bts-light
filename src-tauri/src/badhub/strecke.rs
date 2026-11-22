@@ -370,6 +370,17 @@ impl Strecke {
         )
     }
 
+    /// Dauerhaft geschlossene Strecke: kein Kanal darf senden. Für den Betrieb
+    /// ohne Liveticker (`AppConfig::liveticker_aus`) — dort gibt es kein
+    /// Passwort, und ein Versuch wäre nur ein Fehlversuch bei badhub.
+    pub fn geschlossen() -> Self {
+        let mut s = Self::frisch();
+        s.lage = Lage::Angehalten {
+            grund: HaltGrund::Passwort,
+        };
+        s
+    }
+
     /// Als geteiltes Tor.
     pub fn als_tor(self) -> Tor {
         Arc::new(Mutex::new(self))
@@ -791,6 +802,27 @@ impl Flanke {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn geschlossene_strecke_laesst_keinen_kanal_durch() {
+        let jetzt = Instant::now();
+        let mut s = Strecke::geschlossen();
+        for kanal in [
+            Kanal::Tset,
+            Kanal::Tupdate,
+            Kanal::Meldeliste,
+            Kanal::Sched,
+            Kanal::Verlauf,
+        ] {
+            assert!(!s.darf(kanal, jetzt), "{}", kanal.name());
+            assert!(!s.beginnen(kanal, jetzt), "{}", kanal.name());
+            assert!(
+                !s.darf(kanal, jetzt + Duration::from_secs(3600)),
+                "auch später nicht"
+            );
+        }
+        assert!(!s.logo_erlaubt("x", jetzt));
+    }
+
     use super::*;
 
     /// Antwort von badhub selbst — auch seine Fehler sind JSON mit `type`.
