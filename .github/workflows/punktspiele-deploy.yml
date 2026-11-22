@@ -54,7 +54,9 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p /tmp/probe-kopflos
-          env -u DISPLAY -u WAYLAND_DISPLAY ./target/release/bts-light --kopflos /tmp/probe-kopflos; code=$?
+          # Der erwartete Ende-Code 1 darf den Schritt nicht abbrechen (die Shell läuft mit -e)
+          code=0
+          env -u DISPLAY -u WAYLAND_DISPLAY ./target/release/bts-light --kopflos /tmp/probe-kopflos || code=$?
           echo "Ende-Code: $code"
           test "$code" -eq 1
 
