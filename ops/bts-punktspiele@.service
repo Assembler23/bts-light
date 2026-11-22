@@ -1,0 +1,54 @@
+# systemd-Unit für Punktspiele ohne Windows-PC (docs/features/punktspiel-kopflos.md, ADR 0108).
+#
+# Eine Instanz je badhub-System: bts-punktspiele@prod und bts-punktspiele@test. Der Dienst sieht in den Spool des
+# Systems und hält zu jedem Auftrag von badhub einen Prozess `bts-light --kopflos <ordner>` am Leben.
+#
+# Installation (einmalig): ops/punktspiele-einrichten.sh.
+#
+# WICHTIG: eigener Benutzer bts-punktspiele, NICHT badhub (badhub hat NOPASSWD:ALL — wer die Programmdatei
+# austauschen und den Dienst neu starten darf, wäre sonst mit zwei erlaubten Schritten root; gleiche Überlegung
+# wie beim Relay, ops/bts-relay.service).
+
+[Unit]
+Description=bts-light ohne Oberflaeche - Punktspiele (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bts-punktspiele
+Group=bts-punktspiele
+# Spool des Systems: /etc/bts-punktspiele/%i.env setzt SPOOL=/var/www/badhub_data/ls-hosts[-test]
+EnvironmentFile=/etc/bts-punktspiele/%i.env
+ExecStart=/opt/bts-light-host/bts-light --kopflos-dienst ${SPOOL}
+# Dateien des Dienstes im Spool: für ihn und die Gruppe, sonst für niemanden.
+UMask=0007
+# Der Dienst selbst endet nur bei einem Fehler im Spool oder beim Tausch der Programmdatei.
+Restart=always
+RestartSec=5
+# Beim Stoppen enden alle Prozesse der Begegnungen mit (Vorgabe control-group). Sie halten ihren Stand laufend
+# auf der Platte und machen nach dem Start dort weiter, die Tablets verbinden sich neu.
+TimeoutStopSec=15
+
+# Speicher: je Begegnung ein Prozess (rund 60 MB), badhub begrenzt auf 30.
+MemoryHigh=2G
+MemoryMax=3G
+MemorySwapMax=0
+TasksMax=2048
+
+# Härtung: kein Zugriff auf Heimatverzeichnisse, System nur lesend, Schreiben nur im Spool.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+ReadWritePaths=/var/www/badhub_data/ls-hosts /var/www/badhub_data/ls-hosts-test
+
+[Install]
+WantedBy=multi-user.target

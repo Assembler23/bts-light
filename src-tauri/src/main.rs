@@ -14,6 +14,9 @@ fn main() {
         .collect();
     // Betrieb ohne Oberfläche (`--kopflos <ordner>`, ein Punktspiel auf dem
     // Server): ebenfalls vor Tauri — dort gibt es kein Display.
+    if let Some(code) = bts_light_lib::kopflos_dienst::einstieg(&args) {
+        std::process::exit(code);
+    }
     if let Some(code) = bts_light_lib::kopflos::einstieg(&args) {
         std::process::exit(code);
     }

@@ -25,6 +25,13 @@ Befund am Code: Tauri wird nur in `lib.rs` und `commands.rs` benutzt. Die Oberfl
    mit den Meldungen des Punktspiels an badhub. Das gilt für jede Punktspiel-Übertragung, auch am Desktop.
 5. **Nur die Quelle Punktspiel** läuft ohne Oberfläche.
 
+### Nachtrag 22.11.2026: der Dienst
+
+Die Prozesse startet und beendet ein eigener Modus desselben Programms (`--kopflos-dienst <spool>`), nicht badhub und
+nicht systemd je Begegnung. badhub (php-fpm) darf keine Dienste starten, und eine Unit je Begegnung bräuchte dafür
+eine sudo-Regel für den Webserver. Der Dienst und badhub teilen sich nur einen Ordner: badhub legt Auftrag und die
+Marke `ende` hinein, der Dienst handelt. Er läuft als eigener Benutzer ohne Anmeldung.
+
 ## Alternativen
 
 - **Eigene Zählseite in badhub** ohne bts-light. Einfacher im Betrieb, aber ein zweites Zählwerk mit eigenem Verhalten

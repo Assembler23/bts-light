@@ -1,10 +1,11 @@
 # Punktspiel ohne Windows-PC: bts-light ohne Oberfläche
 
-> **Status (22.11.2026):** Teil 1 umgesetzt mit v0.9.464 — bts-light startet mit `--kopflos <ordner>` ohne Fenster,
-> koppelt sich selbst an ein Punktspiel und hängt sich als Host an den Cloud-Relay. **Noch nicht gebaut:** der Dienst
-> auf dem badhub-Server, der je Begegnung einen solchen Prozess startet und beendet, und die Bedienung in Mein Badhub
-> (Links für Tablets und Turnierleitung). Entscheidung: [ADR 0108](../adr/0108-bts-light-ohne-oberflaeche-fuer-punktspiele.md),
-> badhub ADR-0092 Schritt 4. Auftrag von Tilo vom 22.11.2026, ohne den `/idee`-Ablauf.
+> **Status (22.11.2026):** umgesetzt. v0.9.464: `--kopflos <ordner>` (ein Prozess je Punktspiel). v0.9.465:
+> `--kopflos-dienst <spool>` (der Dienst, der die Prozesse startet, überwacht und beendet), systemd-Unit,
+> Einrichtungsskript und Workflow für die Auslieferung. **Noch nicht geschehen:** die Einrichtung auf dem Server
+> (braucht Root, `ops/punktspiele-einrichten.sh`) und ein Spieltag damit. Entscheidung:
+> [ADR 0108](../adr/0108-bts-light-ohne-oberflaeche-fuer-punktspiele.md), badhub ADR-0092 Schritt 4. Auftrag von Tilo
+> vom 22.11.2026, ohne den `/idee`-Ablauf.
 
 ## Ziel
 
@@ -72,6 +73,41 @@ Sperre aus dem dann aktuellen Paket berechnet. Eine Meldung trägt den ganzen Zu
 („läuft“), der nach dem Ergebnis ankäme, höbe es sonst wieder auf. Der Punktestand läuft in einer eigenen Aufgabe,
 höchstens eine zugleich, der Sync-Zyklus wartet nicht darauf. Nach einem Fehler pausiert er 30 Sekunden.
 
+## Der Dienst: `--kopflos-dienst <spool>`
+
+`src-tauri/src/kopflos_dienst.rs`. badhub legt je Begegnung einen Ordner `<spool>/<kennung>/` mit `auftrag.json` an.
+Der Dienst sieht alle drei Sekunden in den Spool und hält zu jedem Ordner genau einen Prozess
+`bts-light --kopflos <ordner>` am Leben:
+
+| Lage des Ordners | Der Dienst |
+|---|---|
+| `auftrag.json` oder `config/config.json`, kein Prozess | startet einen |
+| Prozess endet mit Code 70 oder durch ein Signal | startet neu, mit wachsender Pause (5 s bis 60 s) |
+| Prozess endet mit Code 1 oder 2 (Startfehler) | legt die Marke `fehler` ab und startet nicht mehr — es braucht einen neuen Auftrag |
+| Marke `ende` (von badhub) | beendet den Prozess und löscht den Ordner samt Gerätetoken und Konfiguration |
+| Marke `fehler` älter als ein Tag, Ordner älter als 14 Tage | räumt ab |
+| Prozess ohne Ordner | beendet ihn |
+
+Nur Ordner, deren Name eine Kennung (UUID) ist, werden angefasst. Höchstens 40 Prozesse zugleich (badhub begrenzt
+auf 30). Ein Prozess je Begegnung und nicht alle in einem: Der Kern hält seinen Zustand prozessweit, und ein Absturz
+trifft so nur eine Begegnung.
+
+## Einrichtung auf dem Server
+
+1. `sudo bash ops/punktspiele-einrichten.sh` (einmalig): Laufzeit-Bibliothek, Benutzer `bts-punktspiele`, Spool je
+   System (`/var/www/badhub_data/ls-hosts`, `…/ls-hosts-test`, `badhub:bts-punktspiele` 2770), `/opt/bts-light-host`,
+   systemd-Unit `bts-punktspiele@prod` und `@test` (`ops/bts-punktspiele@.service`), sudoers-Regel für den Neustart
+   durch `bts-deploy`.
+2. Workflow **„Punktspiel-Host deployen“** in GitHub von Hand starten (`.github/workflows/punktspiele-deploy.yml`):
+   baut bts-light für Linux, prüft den Start ohne Display, lädt die Programmdatei nach `/opt/bts-light-host/` und
+   startet beide Dienste neu. Nicht während eines Spieltags: Ein Neustart unterbricht laufende Begegnungen für einige
+   Sekunden, die Prozesse machen danach mit ihrem Stand weiter.
+3. In **beiden** `.env` von badhub `LS_HOST_SPOOL_DIR` setzen (Prod `…/ls-hosts`, Test `…/ls-hosts-test`) und
+   php-fpm neu starten. Erst dann erscheint „Ohne PC zählen“ in Mein Badhub.
+
+Prüfen: `systemctl status bts-punktspiele@prod`, Protokoll mit `journalctl -u bts-punktspiele@prod -f`.
+Rückweg nach einem Deploy: `/opt/bts-light-host/bts-light.rollback` zurückbenennen und die Dienste neu starten.
+
 ## Voraussetzungen auf dem Server
 
 Das Programm ist dieselbe Datei wie am Desktop und hängt an den Laufzeit-Bibliotheken von GTK und WebKit, auch wenn
@@ -87,6 +123,8 @@ es sie ohne Fenster nie benutzt. Sie müssen installiert sein (`libwebkit2gtk-4.
 
 ## Offen
 
-- Dienst auf dem badhub-Server: je Begegnung starten und beenden, Auslieferung des Programms, Benutzer und Rechte.
-- Mein Badhub: „Ohne PC zählen“ mit Links und QR-Codes für Felder und Turnierleitung.
-- Ende: Prozess beenden, wenn die Begegnung beendet ist oder nuLiga sie als gespielt führt.
+- Einrichtung auf dem Server und ein erster Spieltag ohne PC. Ein Tablet, das über den Serverprozess zählt, ist
+  noch nicht ausprobiert.
+- Prozess von selbst beenden, wenn die Begegnung beendet ist oder nuLiga sie als gespielt führt (heute: Beenden in
+  Mein Badhub oder die 14-Tage-Frist).
+- Monitore und Ansage ohne PC.
