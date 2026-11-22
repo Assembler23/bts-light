@@ -1,7 +1,7 @@
 {
   "name": "bts-light",
   "private": true,
-  "version": "0.9.468",
+  "version": "0.9.469",
   "type": "module",
   "scripts": {
     "dev": "vite",
