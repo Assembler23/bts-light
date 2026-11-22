@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.467
+
+- **Punktspiele: Punktverlauf direkt an badhub.** bts-light schickt Ballwechsel, Aufschlag
+  und Pausen der Spiele jetzt auch über die Kopplung der Begegnung. Damit zeigt badhub den
+  Punktverlauf auch, wenn ohne PC gezählt wird. Für Turniere ändert sich nichts.
+
 ## v0.9.466
 
 - **Punktspiele ohne PC: Monitore zeigen den Verein.** Feldmonitor und Stream zeigen

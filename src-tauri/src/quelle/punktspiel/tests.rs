@@ -557,3 +557,14 @@ async fn koppeln_lesen_melden_und_fehler() {
     assert!(!starten(&config, daten.path()));
     assert!(!schreiben_moeglich());
 }
+
+#[test]
+fn verlauf_meldung_traegt_die_eintraege_unter_matches() {
+    // Form, die badhub erwartet: {"matches": [...]} — ohne Typ, ohne Turnierkennung.
+    let json = serde_json::to_value(VerlaufMeldung { matches: &[] }).unwrap();
+    assert_eq!(json, serde_json::json!({ "matches": [] }));
+    let antwort: VerlaufAntwort =
+        serde_json::from_str(r#"{"ok":true,"gespeichert":1,"verworfen":2}"#).unwrap();
+    assert_eq!(antwort.verworfen, 2);
+    const { assert!(VERLAUF_MAX_JE_MELDUNG <= crate::badhub::verlauf::MAX_SPIELE_JE_NACHRICHT) };
+}

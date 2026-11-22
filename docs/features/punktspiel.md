@@ -59,6 +59,15 @@ Begegnung als gespielt, meldet die Übertragung das als Fehler, statt mit altem 
 - Ansage-Slave: Die Übertragung startet mit der Quelle „Punktspiel“ im Slave-Modus nicht und nennt den Grund.
 - Die Aufstellung ändert man in badhub, nicht in bts-light. Änderungen erscheinen nach wenigen Sekunden.
 
+### Punktverlauf (v0.9.467)
+
+Nach jedem Zyklus schickt `quelle::punktspiel::verlauf_melden` Ballwechsel, Aufschlag und Pausen der Spiele an
+`POST /api/ls/v1/begegnung/verlauf` — dieselben Einträge wie der Liveticker-Kanal `tverlauf`
+(`badhub::verlauf::eintrag_fuer`), mit derselben Buchführung (`VerlaufStand`: nur Geändertes, verworfene Einträge
+nach drei Versuchen geparkt). Eigene Aufgabe, höchstens eine zugleich, höchstens 16 Spiele je Meldung, nach einem
+Fehler 30 s Pause. So zeigt badhub den Punktverlauf auch ohne Liveticker, also beim Betrieb ohne Oberfläche. Am PC
+mit Liveticker geht der Verlauf auf beiden Wegen hinaus; badhub nimmt die direkte Meldung.
+
 ## Tests
 
 `src-tauri/src/quelle/punktspiel/tests.rs`: Paket aus badhub-JSON, Abbildung (Felder, Spieler, offene Plätze,
