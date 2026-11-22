@@ -167,6 +167,17 @@ bestehende Einrichtung nach einem Update unverändert weiter.
 | **BTP** | Das Turnier läuft im Tournament Planner (die Abschnitte „BTP-Verbindung“ und „TP-Datei“ darunter). |
 | **badhub-Turnier** | Das Turnier ist in badhub organisiert. Die BTP-Abschnitte verschwinden. |
 <!-- pruef: "badhub-Turnier" in src/pages/SetupWizard.tsx -->
+| **Punktspiel** | Ein Ligaspiel aus badhub live zählen (seit v0.9.463). Die BTP-Abschnitte verschwinden. |
+<!-- pruef: "Ein Ligaspiel aus badhub live zählen." in src/pages/SetupWizard.tsx -->
+
+**Punktspiel koppeln:** In **Mein Badhub** unter **Live-Scoring** das Heimspiel öffnen, Felder und Aufstellung
+eintragen und **„Kopplungscode erzeugen“** wählen. Den Code hier unter **Kopplungscode** eintragen, dem PC einen
+Namen geben und **Koppeln**. Der Code gilt 10 Minuten und nur einmal. Danach zeigt bts-light die Einzelspiele des
+Punktspiels wie Turnierspiele. Feldvergabe und Ergebnisse gehen direkt an badhub, der Turnier-PC braucht dafür am
+Spieltag Internet. Die Aufstellung ändert man in badhub; sie erscheint hier nach wenigen Sekunden. Ein Spiel, dessen Aufstellung noch nicht vollständig ist, lässt sich nicht aufrufen. Koppelt man einen
+zweiten PC an dasselbe Punktspiel, verliert der erste den Zugang. Im Ansage-Slave-Modus gibt es diese Wahl nicht.
+<!-- pruef: "Kopplungscode erzeugen" in src/pages/SetupWizard.tsx -->
+
 
 **badhub-Turnier koppeln:** In badhub im Bereich **Turniertag** auf **„bts-light
 koppeln“** klicken, den angezeigten Code hier unter **Kopplungscode** eintragen,

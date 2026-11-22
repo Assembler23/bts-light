@@ -62,6 +62,7 @@ const NICHT_GESPEICHERT: &[&str] = &[
     "quelle/badhub/api.rs",
     "quelle/badhub/mod.rs",
     "quelle/badhub/slave.rs",
+    "quelle/punktspiel.rs",
     "seiten_angebot.rs",
     "tablet/assign.rs",
     "tablet/server.rs",

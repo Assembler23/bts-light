@@ -2435,7 +2435,7 @@ impl SyncEngine {
         // bisherige `client::fetch_snapshot`-Abruf samt Fehlertext.
         let mut snapshot = match crate::quelle::stand(config).await {
             Ok(snapshot) => snapshot,
-            Err(e) if config.quelle == crate::config::QuelleArt::Badhub => {
+            Err(e) if config.quelle != crate::config::QuelleArt::Btp => {
                 return SyncOutcome::QuelleFehler(e)
             }
             Err(e) => return SyncOutcome::BtpError(e),

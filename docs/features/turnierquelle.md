@@ -12,6 +12,9 @@
 > Ziel und Gesamtplan: badhub `docs/features/bts_light_steuerung.md`, Entscheidung badhub ADR-0084 (bts-light hält am
 > Turniertag die Lease eines badhub-Turniers).
 
+> v0.9.463: dritte Quelle `punktspiel` (Ligabegegnung aus badhub, ohne Kern und Lease) — eigene Spec
+> [punktspiel](punktspiel.md), ADR 0107. Die Weichen in `quelle/mod.rs` haben dafür einen dritten Arm.
+
 ## Ziel
 
 bts-light soll Turniere, die in badhub organisiert werden (eigener Turnierkern in Rust, Repo `Assembler23/turnierkern`),

@@ -1192,6 +1192,9 @@ pub enum QuelleArt {
     /// badhub-Turnier über das Turnierpaket (`badhub_turnier`); lesend seit
     /// Paket L2, schreibend unter der Lease seit L3.
     Badhub,
+    /// Punktspiel (Ligabegegnung) aus badhub, Live-Scoring für Punktspiele
+    /// (`punktspiel`, `docs/features/punktspiel.md`). Ohne Kern und Lease.
+    Punktspiel,
     /// Badminton Tournament Planner über TP-Network (`config.btp`). Steht
     /// zuletzt, weil serde `other` nur an der letzten Variante erlaubt.
     #[default]
@@ -1256,6 +1259,37 @@ impl BadhubTurnierConfig {
     }
 }
 
+/// Gekoppeltes Punktspiel (Quelle `punktspiel`).
+///
+/// Wie beim badhub-Turnier **ohne** das Gerätetoken: das liegt verschlüsselt
+/// unter `punktspiele/<uuid>/` (`quelle::punktspiel`). Wird nur von der
+/// Kopplung gesetzt, nie vom Einrichtungsassistenten
+/// (`keep_host_managed_fields`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PunktspielConfig {
+    /// Kennung der Begegnung in badhub (`ls_begegnungen.uuid`). Unter ihr
+    /// läuft auch der Liveticker. Leer = nicht gekoppelt.
+    #[serde(default)]
+    pub uuid: String,
+    /// „Heim – Gast“ aus der Kopplung.
+    #[serde(default)]
+    pub name: String,
+    /// API-Basis zum Zeitpunkt der Kopplung, z. B.
+    /// `https://badhub.de/api/ls/v1`. Das Token gilt nur dort.
+    #[serde(default)]
+    pub basis: String,
+    /// Gerätename, unter dem dieser PC in badhub gekoppelt ist.
+    #[serde(default)]
+    pub geraet_name: String,
+}
+
+impl PunktspielConfig {
+    /// Ist ein Punktspiel gekoppelt?
+    pub fn gekoppelt(&self) -> bool {
+        !self.uuid.trim().is_empty() && !self.basis.trim().is_empty()
+    }
+}
+
 /// Gesamte App-Konfiguration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -1271,6 +1305,9 @@ pub struct AppConfig {
     /// Leer = keine Sicherung (Vorgabe).
     #[serde(default)]
     pub badhub_notfall_ordner: String,
+    /// Gekoppeltes Punktspiel (nur bei `quelle = punktspiel` wirksam).
+    #[serde(default)]
+    pub punktspiel: PunktspielConfig,
     pub btp: BtpConfig,
     pub badhub: BadhubConfig,
     /// Diagnose-Logs automatisch an badhub.de hochladen, damit Fehler über
@@ -2015,16 +2052,25 @@ impl AppConfig {
     /// GUID aus der badhub-Kopplung, wenn sie gilt (Quelle badhub, Turnier
     /// gekoppelt) — sonst `None`, und es bleibt beim Feld.
     fn badhub_guid(&self) -> Option<String> {
-        if self.quelle == QuelleArt::Badhub {
-            self.badhub_turnier.turnier_guid()
-        } else {
-            None
+        match self.quelle {
+            QuelleArt::Badhub => self.badhub_turnier.turnier_guid(),
+            // Punktspiel: die Kennung der Begegnung ist zugleich die GUID
+            // des Livetickers.
+            QuelleArt::Punktspiel if self.punktspiel.gekoppelt() => {
+                kanonische_guid(&self.punktspiel.uuid)
+            }
+            _ => None,
         }
     }
 
     /// Ist der Check-In einsatzbereit? Bei Quelle badhub mit der GUID aus der
     /// Kopplung, sonst unverändert [`CheckinConfig::is_ready`].
     pub fn checkin_bereit(&self) -> bool {
+        // Ein Punktspiel hat keinen Check-In: die Meldeliste eines früheren
+        // Turniers ginge sonst unter der Kennung der Begegnung an badhub.
+        if self.quelle == QuelleArt::Punktspiel {
+            return false;
+        }
         match self.badhub_guid() {
             Some(_) => self.checkin.enabled,
             None => self.checkin.is_ready(),
@@ -2049,8 +2095,8 @@ impl AppConfig {
     /// Schreibweise nicht grundlos „Datei neu wählen" auslöst. Leerer Pfad,
     /// fehlende oder abweichende GUID → `None`.
     pub fn tp_datei_fuer_turnier(&self) -> Option<std::path::PathBuf> {
-        // Für badhub-Turniere gibt es keinen TP-Datei-Upload.
-        if self.quelle == QuelleArt::Badhub {
+        // Für badhub-Turniere und Punktspiele gibt es keinen TP-Datei-Upload.
+        if self.quelle != QuelleArt::Btp {
             return None;
         }
         let pfad = self.tp_upload.path.trim();
@@ -3055,6 +3101,7 @@ mod tests {
         let config = AppConfig {
             quelle: QuelleArt::Btp,
             badhub_turnier: BadhubTurnierConfig::default(),
+            punktspiel: PunktspielConfig::default(),
             badhub_notfall_ordner: String::new(),
             btp: BtpConfig {
                 host: "192.168.1.50".to_string(),

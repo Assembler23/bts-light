@@ -26,6 +26,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   addCourtAd,
   badhubKoppeln,
+  punktspielKoppeln,
   badhubSlaveSchluesselSetzen,
   listCourtAds,
   readTournamentLogo,
@@ -65,6 +66,8 @@ import type {
   RotationMode,
   AppConfig,
   BadhubKopplung,
+  PunktspielConfig,
+  PunktspielKopplung,
   BadhubTurnierConfig,
   QuelleArt,
   AutoCallMode,
@@ -379,6 +382,16 @@ export function SetupWizard({
     | { kind: "idle" }
     | { kind: "laeuft" }
     | { kind: "ok"; info: BadhubKopplung }
+    | { kind: "fehler"; text: string }
+  >({ kind: "idle" });
+  // Punktspiel aus badhub (Live-Scoring für Punktspiele): eigene Kopplung.
+  const [punktspiel, setPunktspiel] = useState<PunktspielConfig | null>(
+    initialConfig.punktspiel?.uuid ? initialConfig.punktspiel : null,
+  );
+  const [punktspielKopplung, setPunktspielKopplung] = useState<
+    | { kind: "idle" }
+    | { kind: "laeuft" }
+    | { kind: "ok"; info: PunktspielKopplung }
     | { kind: "fehler"; text: string }
   >({ kind: "idle" });
   const [host, setHost] = useState(initialConfig.btp.host);
@@ -1204,15 +1217,21 @@ export function SetupWizard({
   // Bei Quelle badhub mit gekoppeltem Turnier gilt dessen GUID für Liveticker
   // und Check-In (Rust `AppConfig::tournament_uuid_kanonisch`), nicht das Feld
   // „Turnier bei turnier.de“.
+  // Dasselbe gilt für ein gekoppeltes Punktspiel: die Kennung der Begegnung.
   const quelleBadhubGuid =
     quelle === "badhub" && badhubTurnier
       ? (badhubTurnier.guid || badhubTurnier.uuid).toUpperCase()
-      : null;
+      : quelle === "punktspiel" && punktspiel
+        ? punktspiel.uuid.toUpperCase()
+        : null;
+  const quelleName = quelle === "punktspiel" ? punktspiel?.name : badhubTurnier?.name;
 
   const canSave =
     host.trim() !== "" &&
     // Quelle badhub braucht ein gekoppeltes Turnier.
     (quelle !== "badhub" || badhubTurnier !== null) &&
+    // Quelle Punktspiel braucht ein gekoppeltes Punktspiel.
+    (quelle !== "punktspiel" || punktspiel !== null) &&
     (!isManual || (badhubUrl.trim() !== "" && badhubPassword.trim() !== "")) &&
     // Ohne Turnier-GUID kann badhub das Turnier nicht von einem parallelen
     // desselben Verbands unterscheiden (ADR 0054). Ein Ansage-Slave pusht nie;
@@ -1233,6 +1252,19 @@ export function SetupWizard({
       setKopplung({ kind: "ok", info });
     } catch (e) {
       setKopplung({ kind: "fehler", text: String(e) });
+    }
+  }
+
+  /** Löst den Kopplungscode eines Punktspiels aus Mein Badhub ein. */
+  async function punktspielKoppelnStart() {
+    setPunktspielKopplung({ kind: "laeuft" });
+    try {
+      const info = await punktspielKoppeln(kopplungsCode.trim(), geraetName.trim());
+      setPunktspiel(info.punktspiel);
+      setKopplungsCode("");
+      setPunktspielKopplung({ kind: "ok", info });
+    } catch (e) {
+      setPunktspielKopplung({ kind: "fehler", text: String(e) });
     }
   }
 
@@ -1508,8 +1540,10 @@ export function SetupWizard({
                 {quelleBadhubGuid}
               </span>
               <span className="text-xs text-slate-500">
-                Kommt aus der Kopplung mit „{badhubTurnier?.name}" — Liveticker
-                und Check-In laufen unter diesem badhub-Turnier.
+                Kommt aus der Kopplung mit „{quelleName}" — der Liveticker
+                {quelle === "punktspiel"
+                  ? " läuft unter diesem Punktspiel."
+                  : " und der Check-In laufen unter diesem badhub-Turnier."}
               </span>
             </div>
           ) : (
@@ -1685,7 +1719,7 @@ export function SetupWizard({
         {(!slaveMode || quelle === "badhub") && (
           <section id="section-quelle" className="flex flex-col gap-3 scroll-mt-24">
             <SectionHeader icon={Database}>Turnierquelle</SectionHeader>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
               <ChoiceCard
                 icon={Server}
                 title="BTP"
@@ -1699,6 +1733,7 @@ export function SetupWizard({
                 description="Das Turnier ist in badhub organisiert."
                 active={quelle === "badhub"}
                 onClick={() => {
+                  if (quelle !== "badhub") setKopplungsCode("");
                   setQuelle("badhub");
                   // Vorgabe bei einem badhub-Turnier: Cloud-Weg an. Ohne ihn
                   // meldet die Lease keinen Rückweg, und badhub erreicht die
@@ -1706,7 +1741,76 @@ export function SetupWizard({
                   if (quelle !== "badhub" && !slaveMode) setCloudEnabled(true);
                 }}
               />
+              {!slaveMode && (
+                <ChoiceCard
+                  icon={Users}
+                  title="Punktspiel"
+                  description="Ein Ligaspiel aus badhub live zählen."
+                  active={quelle === "punktspiel"}
+                  onClick={() => {
+                    // Der Code gilt je Quelle: ein für das badhub-Turnier
+                    // eingetippter soll nicht hier eingelöst werden.
+                    if (quelle !== "punktspiel") setKopplungsCode("");
+                    setQuelle("punktspiel");
+                  }}
+                />
+              )}
             </div>
+            {quelle === "punktspiel" && (
+              <div className="flex flex-col gap-3">
+                <p className="text-xs text-slate-500">
+                  In <strong>Mein Badhub</strong> unter <strong>Live-Scoring</strong> das Heimspiel
+                  öffnen, Felder und Aufstellung eintragen und dort „Kopplungscode erzeugen“
+                  wählen. Der Code gilt 10 Minuten und nur einmal.
+                </p>
+                <Field
+                  label="Kopplungscode"
+                  value={kopplungsCode}
+                  onChange={setKopplungsCode}
+                  placeholder="z. B. ABCD-2345"
+                />
+                <Field
+                  label="Name dieses PCs in badhub"
+                  value={geraetName}
+                  onChange={setGeraetName}
+                  placeholder="Turnier-PC"
+                />
+                <button
+                  onClick={() => void punktspielKoppelnStart()}
+                  disabled={punktspielKopplung.kind === "laeuft" || kopplungsCode.trim() === ""}
+                  className="self-start rounded-lg bg-slate-100 px-3.5 py-1.5 text-sm font-medium
+                             text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+                >
+                  {punktspielKopplung.kind === "laeuft" ? "Kopple …" : "Koppeln"}
+                </button>
+                {punktspiel && (
+                  <p className="flex items-center gap-1.5 text-sm text-emerald-700">
+                    <Check size={16} /> Gekoppelt mit „{punktspiel.name}"
+                    {punktspielKopplung.kind === "ok" &&
+                      ` – ${punktspielKopplung.info.spiele} Spiele auf ${punktspielKopplung.info.felder} ${
+                        punktspielKopplung.info.felder === 1 ? "Feld" : "Feldern"
+                      }`}
+                  </p>
+                )}
+                {punktspielKopplung.kind === "ok" && punktspielKopplung.info.offen > 0 && (
+                  <p className="text-xs text-amber-700">
+                    Bei {punktspielKopplung.info.offen}{" "}
+                    {punktspielKopplung.info.offen === 1 ? "Spiel ist" : "Spielen ist"} die
+                    Aufstellung noch nicht vollständig. Sie lässt sich in Mein Badhub nachtragen und
+                    erscheint hier nach wenigen Sekunden.
+                  </p>
+                )}
+                {punktspielKopplung.kind === "fehler" && (
+                  <p className="flex items-start gap-1.5 text-sm text-rose-700">
+                    <X size={16} className="mt-0.5 shrink-0" /> {punktspielKopplung.text}
+                  </p>
+                )}
+                <p className="text-xs text-slate-500">
+                  Ergebnisse und Feldvergabe gehen direkt an badhub. Dafür braucht dieser PC
+                  während des Spieltags eine Internetverbindung.
+                </p>
+              </div>
+            )}
             {quelle === "badhub" && (
               <div className="flex flex-col gap-3">
                 <p className="text-xs text-slate-500">

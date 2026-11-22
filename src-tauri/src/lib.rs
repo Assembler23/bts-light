@@ -138,6 +138,8 @@ pub fn run() {
             commands::badhub_sicherung_einlesen,
             commands::badhub_standby_uebernehmen,
             commands::badhub_turnier_info,
+            commands::punktspiel_koppeln,
+            commands::punktspiel_info,
             commands::azure_tts_speak,
             commands::tts_dienste_pruefen,
             commands::tts_verbrauch,

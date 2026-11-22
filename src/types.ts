@@ -6,8 +6,29 @@ export interface BtpConfig {
   password: string | null;
 }
 
-/** Turnierquelle (Rust `QuelleArt`): BTP oder ein badhub-Turnier (Paket L2). */
-export type QuelleArt = "btp" | "badhub";
+/** Turnierquelle (Rust `QuelleArt`): BTP, ein badhub-Turnier (Paket L2) oder
+ *  ein Punktspiel aus badhub (Live-Scoring für Punktspiele). */
+export type QuelleArt = "btp" | "badhub" | "punktspiel";
+
+/** Gekoppeltes Punktspiel (Rust `PunktspielConfig`). Setzt nur die Kopplung;
+ *  das Token steht nie in der Konfiguration. */
+export interface PunktspielConfig {
+  /** Kennung der Begegnung in badhub; darunter läuft auch der Liveticker. */
+  uuid: string;
+  /** „Heim – Gast“. */
+  name: string;
+  basis: string;
+  geraet_name: string;
+}
+
+/** Ergebnis von `punktspiel_koppeln` (Rust `quelle::punktspiel::Kopplung`). */
+export interface PunktspielKopplung {
+  punktspiel: PunktspielConfig;
+  spiele: number;
+  felder: number;
+  /** Spiele mit noch unvollständiger Aufstellung. */
+  offen: number;
+}
 
 /** Abgleich mit badhub (Rust `quelle::badhub::Abgleich`, Paket L3). */
 export interface BadhubAbgleich {
@@ -863,6 +884,8 @@ export interface AppConfig {
   badhub_turnier?: BadhubTurnierConfig;
   /** Ordner der Notfall-Sicherung eines badhub-Turniers (leer = aus, Paket S2). */
   badhub_notfall_ordner?: string;
+  /** Vom Kern gepflegt (Kopplung eines Punktspiels), vom Assistenten nur gelesen. */
+  punktspiel?: PunktspielConfig;
   btp: BtpConfig;
   badhub: BadhubConfig;
   /** Diagnose-Logs automatisch an badhub.de hochladen. Bei einer

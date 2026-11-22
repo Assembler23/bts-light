@@ -4,6 +4,15 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.463
+
+- **Punktspiele live zählen.** Neue Turnierquelle „Punktspiel“: bts-light koppelt sich
+  mit einem Code aus Mein Badhub (Live-Scoring) an ein Ligaspiel und zeigt dessen
+  Einzelspiele mit der Aufstellung aus badhub. Aufrufen, auf dem Tablet zählen und
+  Ergebnis melden gehen wie bei einem Turnier; Feldvergabe und Ergebnisse stehen
+  sofort in badhub, der Liveticker läuft unter dem Punktspiel. Dafür braucht der
+  Turnier-PC am Spieltag Internet. BTP- und badhub-Turniere laufen unverändert.
+
 ## v0.9.462
 
 - **Cloud-Weg bei badhub-Turnieren von selbst an.** Wer im Setup die Quelle

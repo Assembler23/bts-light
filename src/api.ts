@@ -11,6 +11,7 @@ import type {
   AnsageQuellen,
   AppConfig,
   BadhubKopplung,
+  PunktspielKopplung,
   BadhubAbgleich,
   StandbyLage,
   BadhubTurnierConfig,
@@ -70,6 +71,14 @@ export const badhubKoppeln = (
   geraetName: string,
 ): Promise<BadhubKopplung> =>
   invoke("badhub_koppeln", { code, geraetName });
+
+/** Koppelt diesen PC mit dem Code aus Mein Badhub an ein Punktspiel
+ *  (Live-Scoring für Punktspiele, Quelle punktspiel). */
+export const punktspielKoppeln = (
+  code: string,
+  geraetName: string,
+): Promise<PunktspielKopplung> =>
+  invoke("punktspiel_koppeln", { code, geraetName });
 
 /** Abgleich mit badhub (Paket L3): Lease, wartende Ereignisse, Knöpfe.
  *  `null` bei BTP oder ohne geladenes badhub-Turnier. */

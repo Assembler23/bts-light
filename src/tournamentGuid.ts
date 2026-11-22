@@ -39,7 +39,13 @@ export function wirksameTurnierGuid(c: {
   quelle?: string;
   tournament_uuid: string;
   badhub_turnier?: { uuid: string; basis: string; guid?: string } | null;
+  punktspiel?: { uuid: string; basis: string } | null;
 }): string {
+  // Punktspiel: die Kennung der Begegnung ist die GUID des Livetickers.
+  const p = c.punktspiel;
+  if (c.quelle === "punktspiel" && p && p.basis.trim() !== "" && isTournamentGuid(p.uuid)) {
+    return extractTournamentGuid(p.uuid);
+  }
   const t = c.badhub_turnier;
   if (c.quelle === "badhub" && t && t.uuid.trim() !== "" && t.basis.trim() !== "") {
     const g = [t.guid ?? "", t.uuid].find((v) => isTournamentGuid(v));
