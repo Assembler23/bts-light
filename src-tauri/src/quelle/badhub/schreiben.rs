@@ -330,8 +330,9 @@ pub fn mit_id(befehl: TurnierBefehl, neu: String) -> TurnierBefehl {
     }
 }
 
-/// Die Befehle, die badhub unter der Lease annimmt (badhub `Lease::BEFEHLE`);
-/// seit Kern 0.13.0 auch der Rückzug während des Turniers und seine Rücknahme.
+/// Die Durchführungs-Befehle, die die Halle selbst erzeugt und die badhub von
+/// ihr annimmt (badhub `Lease::BEFEHLE`); seit Kern 0.13.0 auch der Rückzug,
+/// seit 0.18.0 die Auslosung am Turniertag.
 pub const ERLAUBTE_ARTEN: [&str; 11] = [
     "ergebnis_melden",
     "ergebnis_loeschen",
@@ -341,25 +342,65 @@ pub const ERLAUBTE_ARTEN: [&str; 11] = [
     "gruppenrang_entscheiden",
     "rueckzug",
     "rueckzug_zuruecknehmen",
-    // Auslosung am Turniertag ändern (Kern 0.18.0): Plätze tauschen, Meldung
-    // ersetzen, Rast im KO besetzen — auch während bts-light steuert.
     "auslosung_tauschen",
     "auslosung_ersetzen",
     "startplatz_besetzen",
 ];
 
-/// Befehle mit `merkmale` (Verein/Verband/Land je Person der Konkurrenz, für
-/// die Konfliktzahl der Auslosung): sie wachsen mit der Teilnehmerzahl.
-pub const ARTEN_MIT_MERKMALEN: [&str; 3] = [
-    "auslosung_tauschen",
-    "auslosung_ersetzen",
-    "startplatz_besetzen",
+/// Alles Weitere, das badhub übers Relay schicken darf (ab 0.9.461, badhub
+/// `Lease::WEITERLEITBAR`): Solange Halle und badhub sich erreichen, ist dort
+/// nichts gesperrt — Meldungen, Personen, Zeitplan, Zählweise, Setzliste,
+/// Auslosung, Konkurrenzen. Die Halle prüft jeden Befehl im Kern wie eine
+/// eigene Eingabe. Nicht dabei: `eroeffnen` und `absagen`.
+pub const ERLAUBTE_ARTEN_BADHUB: [&str; 32] = [
+    "melden",
+    "zurueckziehen",
+    "status_setzen",
+    "nachruecken",
+    "person_tauschen",
+    "partner_eintragen",
+    "partner_bestaetigen",
+    "partner_ablehnen",
+    "partner_widersprechen",
+    "altersklasse_korrigieren",
+    "konkurrenz_wechseln",
+    "konkurrenz_anlegen",
+    "konkurrenz_aendern",
+    "konkurrenz_begrenzen",
+    "konkurrenz_entfernen",
+    "regel_aendern",
+    "meldeschluss_aendern",
+    "nachmeldeschluss_aendern",
+    "schliessen",
+    "system_festlegen",
+    "system_entfernen",
+    "zeitplan_rahmen_festlegen",
+    "zeitplan_rechnen",
+    "zeit_setzen",
+    "zeiten_verschieben",
+    "setzliste_festlegen",
+    "auslosen",
+    "auslosung_freigeben",
+    "auslosung_zuruecknehmen",
+    "regeln_festlegen",
+    "turnier_regeln_festlegen",
+    "zaehlweise_festlegen",
 ];
 
-/// Höchstgröße eines Befehls mit `merkmale`, unter der Grenze des Relays für
-/// TL-Kommandos (32 KiB). 512 Teilnahmen im Doppel mit je
-/// einem kurzen Merkmal bleiben darunter.
+/// Darf badhub diesen Befehl übers Relay schicken?
+pub fn von_badhub_erlaubt(art: &str) -> bool {
+    ERLAUBTE_ARTEN.contains(&art) || ERLAUBTE_ARTEN_BADHUB.contains(&art)
+}
+
+/// Höchstgröße eines Befehls außerhalb der Durchführung, unter der Grenze des
+/// Relays für TL-Kommandos (32 KiB): Zeitplan-Rahmen, Setzliste und `merkmale`
+/// (Verein/Verband/Land je Person, für die Konfliktzahl der Auslosung) wachsen
+/// mit dem Turnier.
 pub const BEFEHL_MAX_BYTES_MERKMALE: usize = 24 * 1024;
+
+/// Höchstgröße der Posten in einer Relay-Antwort (serialisiert). Darüber
+/// antwortet die Halle ohne Posten; badhub wartet dann auf den Abgleich.
+pub const ANTWORT_POSTEN_MAX_BYTES: usize = 256 * 1024;
 
 /// Befehle, deren `jetzt` dieser PC setzt (ADR-0084: die Zeit der Halle).
 pub const ARTEN_MIT_JETZT: [&str; 3] = ["spiel_aufrufen", "ergebnis_melden", "rueckzug"];
@@ -379,7 +420,10 @@ pub fn befehl_begrenzt(roh: &serde_json::Value) -> Result<(), String> {
         .map(|v| v.len())
         .unwrap_or(usize::MAX);
     let art = roh.get("art").and_then(|a| a.as_str()).unwrap_or("");
-    let max = if ARTEN_MIT_MERKMALEN.contains(&art) {
+    // Nur die Befehle des Spielbetriebs bleiben klein; Auslosung (merkmale)
+    // und alles aus `ERLAUBTE_ARTEN_BADHUB` darf größer sein.
+    let klein = ERLAUBTE_ARTEN[..8].contains(&art);
+    let max = if !klein {
         BEFEHL_MAX_BYTES_MERKMALE
     } else {
         BEFEHL_MAX_BYTES

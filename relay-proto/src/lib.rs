@@ -2811,6 +2811,19 @@ pub struct TlResponse {
     /// es nie.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ablehnung: Option<serde_json::Value>,
+    /// Antwort auf einen übernommenen [`TlAction::KernBefehl`] (ab 0.9.461):
+    /// die Posten (`[{befehl, ereignisse}]`), die badhub noch nicht bestätigt
+    /// hat — der neue eingeschlossen. badhub übernimmt sie sofort, statt auf
+    /// den nächsten Abgleich zu warten. Additiv: ältere Gegenstellen übergehen
+    /// das Feld.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub posten: Option<serde_json::Value>,
+    /// `n` des letzten von badhub bestätigten Ereignisses, auf dem [`posten`]
+    /// aufsetzt. Nur zusammen mit `posten`.
+    ///
+    /// [`posten`]: TlResponse::posten
+    #[serde(rename = "basisN", skip_serializing_if = "Option::is_none", default)]
+    pub basis_n: Option<u64>,
 }
 
 impl TlResponse {
@@ -2823,6 +2836,8 @@ impl TlResponse {
             warning: None,
             state_rev,
             ablehnung: None,
+            posten: None,
+            basis_n: None,
         }
     }
 
@@ -2835,6 +2850,8 @@ impl TlResponse {
             warning: None,
             state_rev: 0,
             ablehnung: None,
+            posten: None,
+            basis_n: None,
         }
     }
 

@@ -825,7 +825,7 @@ async fn kernbefehl_aus_badhub_idempotent_jetzt_vom_knoten_und_nur_spielbefehle(
     });
     // Turnierweite Befehle sind unter der Lease gesperrt.
     let e = mit(&z, |q| {
-        q.befehl_von_badhub(serde_json::json!({"art": "zeitplan_rechnen", "id": "bh-78"}))
+        q.befehl_von_badhub(serde_json::json!({"art": "absagen", "id": "bh-78"}))
     });
     assert!(matches!(e, Err(SchreibFehler::Ungueltig(_))), "{e:?}");
     // Zu großer Befehl: abgelehnt, bevor er gelesen wird.
@@ -1376,6 +1376,56 @@ async fn auslosung_aendern_von_badhub_unter_der_lease() {
         mit(&z, |q| q.befehl_von_badhub(nochmal)),
         Err(SchreibFehler::Kern { .. })
     ));
+}
+
+#[tokio::test]
+async fn online_nichts_sperren_befehle_aus_badhub_und_posten_in_der_antwort() {
+    // 0.9.461: badhub schickt auch Meldungen, Planung, Zählweise; die Antwort
+    // trägt die Posten, die badhub noch nicht bestätigt hat.
+    let (_d, _b, _c, z) = gekoppelt().await;
+    lease_schritt(&z, Some("ns")).await;
+    assert!(schreiben::von_badhub_erlaubt("melden"));
+    assert!(schreiben::von_badhub_erlaubt("zeitplan_rechnen"));
+    assert!(schreiben::von_badhub_erlaubt("ergebnis_melden"));
+    assert!(!schreiben::von_badhub_erlaubt("eroeffnen"));
+    assert!(!schreiben::von_badhub_erlaubt("absagen"));
+    let vorher = mit(&z, |q| q.wartende_fuer_badhub()).expect("Outbox läuft");
+    assert_eq!(vorher.1.as_array().map(Vec::len), Some(0), "nichts offen");
+    // Zählweise eines Spiels (kein Durchführungs-Befehl der Halle)
+    let zw = serde_json::json!({"id": "bh-950", "art": "zaehlweise_festlegen", "konkurrenz": "HE", "spiel": 1});
+    assert_eq!(mit(&z, |q| q.befehl_von_badhub(zw.clone())), Ok(1));
+    let (basis_n, posten) = mit(&z, |q| q.wartende_fuer_badhub()).unwrap();
+    assert_eq!(basis_n, vorher.0, "setzt auf dem bestätigten n auf");
+    let liste = posten.as_array().unwrap();
+    assert_eq!(liste.len(), 1);
+    assert_eq!(liste[0]["befehl"]["id"], "bh-950");
+    assert_eq!(liste[0]["befehl"]["art"], "zaehlweise_festlegen");
+    assert_eq!(liste[0]["ereignisse"].as_array().map(Vec::len), Some(1));
+    assert!(
+        liste[0].get("akteur").is_none(),
+        "nur Befehl und Ereignisse"
+    );
+    // dieselbe Kennung noch einmal: nichts Neues, der Posten bleibt offen
+    assert_eq!(mit(&z, |q| q.befehl_von_badhub(zw)), Ok(0));
+    assert_eq!(
+        mit(&z, |q| q.wartende_fuer_badhub())
+            .unwrap()
+            .1
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    // Eröffnen bleibt verboten.
+    assert!(matches!(
+        mit(&z, |q| q.befehl_von_badhub(
+            serde_json::json!({"id": "bh-951", "art": "absagen"})
+        )),
+        Err(SchreibFehler::Ungueltig(_))
+    ));
+    // Größe: Planung darf größer sein als ein Befehl des Spielbetriebs.
+    let setzliste = serde_json::json!({"id": "bh-952", "art": "zeitplan_rahmen_festlegen", "x": "y".repeat(60), "z": (0..2000).collect::<Vec<u32>>()});
+    assert!(serde_json::to_vec(&setzliste).unwrap().len() > schreiben::BEFEHL_MAX_BYTES);
+    assert!(schreiben::befehl_begrenzt(&setzliste).is_ok());
 }
 
 #[test]

@@ -4,6 +4,19 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.461
+
+- **Online nichts sperren.** Während bts-light ein badhub-Turnier steuert, kann
+  die Turnierleitung in badhub weiterarbeiten: Meldungen, Personen tauschen,
+  Zeitplan, Zählweise, Setzliste, Auslosung und Konkurrenzen kommen übers Relay
+  an den Turnier-PC. Er prüft sie im Kern wie eine eigene Eingabe und schickt
+  das Ergebnis gleich mit zurück, sodass es in badhub sofort steht. Ohne
+  Verbindung bleibt badhub für das Turnier gesperrt – wie bisher.
+- Eröffnen und Absagen eines Turniers gehen weiter nur in badhub ohne
+  Steuerung durch bts-light.
+- Das Relay reicht die neue Antwort durch (wird mit diesem Stand neu ausgerollt).
+- BTP-Turniere laufen unverändert.
+
 ## v0.9.460
 
 - **Turnierkern 0.18.0** – gleiche Version wie badhub. Dort lässt sich die

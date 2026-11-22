@@ -2276,9 +2276,16 @@ fn execute_kern_befehl(
         return TlResponse::err(C::NotAllowed, "Dieser PC steuert kein badhub-Turnier.");
     }
     match crate::quelle::badhub::befehl_von_badhub(befehl) {
-        Ok(_) => {
+        Ok((_, wartend)) => {
             tracing::info!("TL-Web [badhub]: Kernbefehl übernommen");
-            TlResponse::ok(0)
+            // Die noch nicht bestätigten Posten gehen gleich mit: badhub
+            // übernimmt sie sofort und schließt seinen Vorgang ab.
+            let mut antwort = TlResponse::ok(0);
+            if let Some((basis_n, posten)) = wartend {
+                antwort.basis_n = Some(basis_n);
+                antwort.posten = Some(posten);
+            }
+            antwort
         }
         Err(F::Kern { text, grund }) => {
             tracing::info!("TL-Web [badhub]: Kernbefehl abgelehnt ({text})");

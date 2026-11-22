@@ -639,7 +639,7 @@ impl KernQuelle {
             .and_then(|a| a.as_str())
             .unwrap_or("")
             .to_string();
-        if !schreiben::ERLAUBTE_ARTEN.contains(&art.as_str()) {
+        if !schreiben::von_badhub_erlaubt(&art) {
             return Err(SchreibFehler::Ungueltig(format!(
                 "Dieser Befehl ist unter der Lease nicht erlaubt ({art})."
             )));
@@ -664,6 +664,26 @@ impl KernQuelle {
         let befehl: TurnierBefehl = serde_json::from_value(roh)
             .map_err(|e| SchreibFehler::Ungueltig(format!("Befehl unlesbar ({e}).")))?;
         self.ausfuehren(vec![befehl], AKTEUR_BADHUB)
+    }
+
+    /// Posten, die badhub noch nicht bestätigt hat, in der Form des Uploads
+    /// (`[{befehl, ereignisse}]`), mit dem bestätigten `n` davor — für die
+    /// Antwort auf einen Kernbefehl aus badhub. `None`, wenn die Outbox
+    /// angehalten ist oder die Posten zu groß für eine Antwort wären; badhub
+    /// wartet dann auf den Abgleich.
+    pub fn wartende_fuer_badhub(&self) -> Option<(u64, serde_json::Value)> {
+        if self.abweichung.is_some() || self.zugang_abgelehnt {
+            return None;
+        }
+        let basis_n = self.n_bestaetigt();
+        let posten: Vec<serde_json::Value> = self
+            .protokoll
+            .offen_nach(basis_n)
+            .map(Posten::fuer_badhub)
+            .collect();
+        let wert = serde_json::Value::Array(posten);
+        let laenge = serde_json::to_vec(&wert).map_or(usize::MAX, |v| v.len());
+        (laenge <= schreiben::ANTWORT_POSTEN_MAX_BYTES).then_some((basis_n, wert))
     }
 
     /// Rückzug einer Meldung aus der Halle (TL-Web, Kern 0.13.0): `Some` =
@@ -1401,9 +1421,15 @@ pub fn offizielle(
     .map_err(|e| e.to_string())
 }
 
-/// Ein Kernbefehl aus badhub (über das Relay).
-pub fn befehl_von_badhub(befehl: serde_json::Value) -> Result<usize, SchreibFehler> {
-    mit_quelle(|q| q.befehl_von_badhub(befehl))
+/// Ein Kernbefehl aus badhub (über das Relay). Dazu die Posten, die badhub
+/// noch nicht bestätigt hat ([`KernQuelle::wartende_fuer_badhub`]).
+pub fn befehl_von_badhub(
+    befehl: serde_json::Value,
+) -> Result<(usize, Option<(u64, serde_json::Value)>), SchreibFehler> {
+    mit_quelle(|q| {
+        q.befehl_von_badhub(befehl)
+            .map(|n| (n, q.wartende_fuer_badhub()))
+    })
 }
 
 /// Rückzug bzw. Rücknahme aus dem TL-Web (Kern 0.13.0).
