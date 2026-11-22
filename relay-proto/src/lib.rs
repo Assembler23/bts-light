@@ -2817,7 +2817,7 @@ pub struct TlResponse {
     /// den nächsten Abgleich zu warten. Additiv: ältere Gegenstellen übergehen
     /// das Feld.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub posten: Option<serde_json::Value>,
+    pub posten: Option<Box<serde_json::Value>>,
     /// `n` des letzten von badhub bestätigten Ereignisses, auf dem [`posten`]
     /// aufsetzt. Nur zusammen mit `posten`.
     ///

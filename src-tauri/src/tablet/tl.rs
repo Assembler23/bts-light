@@ -2283,7 +2283,7 @@ fn execute_kern_befehl(
             let mut antwort = TlResponse::ok(0);
             if let Some((basis_n, posten)) = wartend {
                 antwort.basis_n = Some(basis_n);
-                antwort.posten = Some(posten);
+                antwort.posten = Some(Box::new(posten));
             }
             antwort
         }
