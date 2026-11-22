@@ -1227,6 +1227,8 @@ export function SetupWizard({
     try {
       const info = await badhubKoppeln(kopplungsCode.trim(), geraetName.trim());
       setBadhubTurnier(info.turnier);
+      // Frisch gekoppelt: Cloud-Weg als Vorgabe an (siehe Quelle-Auswahl).
+      if (!slaveMode) setCloudEnabled(true);
       setKopplungsCode("");
       setKopplung({ kind: "ok", info });
     } catch (e) {
@@ -1696,7 +1698,13 @@ export function SetupWizard({
                 title="badhub-Turnier"
                 description="Das Turnier ist in badhub organisiert."
                 active={quelle === "badhub"}
-                onClick={() => setQuelle("badhub")}
+                onClick={() => {
+                  setQuelle("badhub");
+                  // Vorgabe bei einem badhub-Turnier: Cloud-Weg an. Ohne ihn
+                  // meldet die Lease keinen Rückweg, und badhub erreicht die
+                  // Halle nicht (Eingaben dort enden mit „nicht erreichbar“).
+                  if (quelle !== "badhub" && !slaveMode) setCloudEnabled(true);
+                }}
               />
             </div>
             {quelle === "badhub" && (
@@ -2175,6 +2183,14 @@ export function SetupWizard({
             active={cloudEnabled}
             onToggle={() => setCloudEnabled((v) => !v)}
           />
+          {quelle === "badhub" && !slaveMode && !cloudEnabled && (
+            <p className="flex items-start gap-1.5 text-xs text-amber-700">
+              <X size={14} className="mt-0.5 shrink-0" />
+              Ohne den Cloud-Weg kommen Eingaben aus badhub (Ergebnisse,
+              Meldungen, Auslosung, Zeitplan) nicht in die Halle – sie werden
+              dort abgelehnt, solange dieser PC das Turnier steuert.
+            </p>
+          )}
           {!lanEnabled && !cloudEnabled && (
             <p className="flex items-start gap-1.5 text-xs text-rose-700">
               <X size={14} className="mt-0.5 shrink-0" />

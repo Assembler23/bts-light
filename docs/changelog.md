@@ -4,6 +4,17 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.462
+
+- **Cloud-Weg bei badhub-Turnieren von selbst an.** Wer im Setup die Quelle
+  „badhub-Turnier“ wählt oder ein Turnier koppelt, bekommt den Cloud-Weg als
+  Vorgabe eingeschaltet (LAN bleibt, wie es war). Ohne ihn meldet bts-light
+  beim Übernehmen der Steuerung keinen Rückweg, und Eingaben aus badhub
+  (Ergebnisse, Meldungen, Auslosung, Zeitplan) enden dort mit „nicht
+  erreichbar“. Wer ihn bewusst ausschaltet, sieht im Setup einen Hinweis.
+  Bestehende Einrichtungen bleiben unverändert – dort den Schalter „Über
+  badhub.de – Cloud“ einmal von Hand setzen.
+
 ## v0.9.461
 
 - **Online nichts sperren.** Während bts-light ein badhub-Turnier steuert, kann

@@ -196,6 +196,9 @@ Zeiten: lokale Wandzeit des Hallen-PCs `JJJJ-MM-TTTHH:MM:SS` (`schreiben::wandze
   gespeicherten Epoche). Vor der Lease holt der Abgleich Ereignisse nach (`n_veraltet` heilt so im nächsten Takt);
   unter der Lease holt er keine Ereignisse, nur alle 60 s die Stammdaten.
 - `relay: {ns: install_id, tl_token}` nur mit Cloud-Weg. Der Kern-Zugang bleibt über Neustarts gleich.
+  Seit v0.9.462 schaltet das Setup den Cloud-Weg beim Wählen der Quelle badhub und beim Koppeln als Vorgabe ein
+  (`SetupWizard.tsx`, nicht im Slave-Modus) und warnt, wenn er aus ist: Ohne Rückweg lehnt badhub jede Eingabe unter
+  der Lease mit „nicht erreichbar“ ab (dort Log `keine_relay_angaben`, Warnung im Rahmen der Turnierorganisation).
 - Offline beim Start: gespeicherte Lease (Epoche) gilt weiter, kein Ablauf. Ohne gespeicherte Lease: Eingaben gesperrt.
 - `lease_belegt`: Hinweis „ein anderes Gerät steuert das Turnier“, Eingaben gesperrt.
 - `409 uebernahme_nicht_freigegeben` (badhub B2: Übernahme ohne Freigabe im Web): Hinweis „Übernahme in badhub im
