@@ -4,6 +4,11 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.468
+
+- **Turnierkern 0.20.0** – gleiche Version wie badhub. Meldungen können dort den Status
+  „fehlt unentschuldigt“ tragen; ohne diese Version liest bts-light ein solches Turnier nicht.
+
 ## v0.9.467
 
 - **Punktspiele: Punktverlauf direkt an badhub.** bts-light schickt Ballwechsel, Aufschlag
