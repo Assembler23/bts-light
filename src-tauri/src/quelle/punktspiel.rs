@@ -920,6 +920,154 @@ pub fn punktestand_melden(tablet: &crate::tablet::state::TabletState) {
     });
 }
 
+// ── Punktverlauf (badhub ADR-0060) ──────────────────────────────────────────
+
+/// Höchstens so viele Verläufe je Meldung (badhub `Durchfuehrung::VERLAUF_MAX_SPIELE`).
+pub const VERLAUF_MAX_JE_MELDUNG: usize = 16;
+
+/// Was badhub vom Punktverlauf zuletzt angenommen hat.
+static VERLAUF_STAND: Mutex<Option<crate::badhub::verlauf::VerlaufStand>> = Mutex::new(None);
+/// Zu welcher Begegnung `VERLAUF_STAND` gehört — eine neue Kopplung beginnt leer.
+static VERLAUF_BEGEGNUNG: Mutex<String> = Mutex::new(String::new());
+static VERLAUF_UNTERWEGS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static VERLAUF_PAUSE_BIS: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+#[derive(Serialize)]
+struct VerlaufMeldung<'a> {
+    matches: &'a [crate::badhub::verlauf::VerlaufEintrag],
+}
+
+#[derive(Deserialize)]
+struct VerlaufAntwort {
+    #[serde(default)]
+    verworfen: u64,
+}
+
+async fn api_verlauf(
+    basis: &str,
+    token: &str,
+    eintraege: &[crate::badhub::verlauf::VerlaufEintrag],
+) -> Result<u64, ApiFehler> {
+    let body = serde_json::to_vec(&VerlaufMeldung { matches: eintraege })
+        .map_err(|e| ApiFehler::Format(e.to_string()))?;
+    let antwort = client(Duration::from_secs(15))?
+        .post(format!("{basis}/begegnung/verlauf"))
+        .bearer_auth(token)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(netz)?;
+    let status = antwort.status();
+    if !status.is_success() {
+        return Err(status_fehler(status));
+    }
+    serde_json::from_slice::<VerlaufAntwort>(&koerper(antwort).await?)
+        .map(|a| a.verworfen)
+        .map_err(|e| ApiFehler::Format(e.to_string()))
+}
+
+/// Meldet nach einem Zyklus den Punktverlauf (Ballwechsel, Aufschlag, Pausen)
+/// der Spiele an badhub — dieselben Einträge wie im Liveticker-Kanal
+/// `tverlauf`, aber direkt an die Begegnung. So gibt es den Verlauf auch ohne
+/// Liveticker (Punktspiel ohne Oberfläche).
+///
+/// Wie der Punktestand: eigene Aufgabe, höchstens eine zugleich, nach einem
+/// Fehler mit Pause. Gesendet wird nur, was sich seit der letzten angenommenen
+/// Meldung geändert hat.
+pub fn verlauf_melden(snapshot: &BtpSnapshot, tablet: &crate::tablet::state::TabletState) {
+    use crate::badhub::verlauf;
+    use std::sync::atomic::Ordering;
+    let pause = *VERLAUF_PAUSE_BIS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if pause.is_some_and(|bis| std::time::Instant::now() < bis) {
+        return;
+    }
+    let Ok((basis, token, _, _)) = zugang() else {
+        return;
+    };
+    let pausen: std::collections::HashMap<i64, serde_json::Value> = tablet
+        .overview_from(snapshot)
+        .into_iter()
+        .filter_map(|c| c.pause.map(|p| (c.match_id, p)))
+        .collect();
+    let kandidaten = verlauf::kandidaten(
+        snapshot,
+        |id| tablet.timeline_store().marke(id),
+        |id| tablet.sheet_store().marke(id),
+        &pausen,
+    );
+    let (eintraege, gesendet) = {
+        let mut begegnung = VERLAUF_BEGEGNUNG
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut stand = VERLAUF_STAND.lock().unwrap_or_else(PoisonError::into_inner);
+        if *begegnung != snapshot.tournament_name || stand.is_none() {
+            *begegnung = snapshot.tournament_name.clone();
+            *stand = Some(verlauf::VerlaufStand::default());
+        }
+        let stand = stand.get_or_insert_with(Default::default);
+        let mut eintraege = Vec::new();
+        let mut gesendet = Vec::new();
+        for k in stand
+            .auswahl(&kandidaten)
+            .into_iter()
+            .take(VERLAUF_MAX_JE_MELDUNG)
+        {
+            let eintrag = snapshot
+                .matches
+                .iter()
+                .find(|m| m.id == k.match_id)
+                .and_then(|m| {
+                    verlauf::eintrag_fuer(
+                        m,
+                        |id| tablet.timeline_store().timeline(id),
+                        |id| tablet.sheet_store().sheet(id),
+                        &pausen,
+                    )
+                });
+            match eintrag {
+                Some(e) => {
+                    eintraege.push(e);
+                    gesendet.push(k);
+                }
+                // nichts zu senden: gilt als erledigt, bis sich das Spiel ändert
+                None => stand.angenommen(std::slice::from_ref(&k)),
+            }
+        }
+        (eintraege, gesendet)
+    };
+    if eintraege.is_empty() || VERLAUF_UNTERWEGS.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tokio::spawn(async move {
+        let ergebnis = api_verlauf(&basis, &token, &eintraege).await;
+        {
+            let mut stand = VERLAUF_STAND.lock().unwrap_or_else(PoisonError::into_inner);
+            let stand = stand.get_or_insert_with(Default::default);
+            match &ergebnis {
+                Ok(0) => stand.angenommen(&gesendet),
+                // badhub nennt nur die Zahl der verworfenen Einträge (Spiel
+                // noch offen, Inhalt ungültig): nach einigen Versuchen geparkt
+                Ok(_) => {
+                    stand.verworfen(&gesendet);
+                }
+                Err(_) => {}
+            }
+        }
+        if let Err(e) = ergebnis {
+            tracing::warn!(target: "punktspiel", "Punktverlauf nicht gemeldet, nächster Versuch in {} s: {e}", PUNKTESTAND_PAUSE.as_secs());
+            *VERLAUF_PAUSE_BIS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) =
+                Some(std::time::Instant::now() + PUNKTESTAND_PAUSE);
+        }
+        VERLAUF_UNTERWEGS.store(false, Ordering::SeqCst);
+    });
+}
+
 /// Ergebnis einer Kopplung, für die Anzeige im Einrichtungsassistenten.
 #[derive(Debug, Clone, Serialize)]
 pub struct Kopplung {
