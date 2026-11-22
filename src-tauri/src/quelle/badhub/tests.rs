@@ -110,6 +110,7 @@ pub(super) fn turnier(n: u32, s: System, hallen: &[(&str, u32)]) -> Vec<TurnierE
                     .map(|(id, f)| Halle {
                         id: (*id).into(),
                         felder: *f,
+                        fenster: vec![],
                     })
                     .collect(),
                 dauer: 30,
@@ -117,6 +118,8 @@ pub(super) fn turnier(n: u32, s: System, hallen: &[(&str, u32)]) -> Vec<TurnierE
                 pause: 20,
                 reihenfolge: vec![],
                 tage_je: Default::default(),
+                schnitte: Default::default(),
+                ziel: Default::default(),
             },
         },
     )

@@ -352,7 +352,7 @@ pub const ERLAUBTE_ARTEN: [&str; 11] = [
 /// nichts gesperrt — Meldungen, Personen, Zeitplan, Zählweise, Setzliste,
 /// Auslosung, Konkurrenzen. Die Halle prüft jeden Befehl im Kern wie eine
 /// eigene Eingabe. Nicht dabei: `eroeffnen` und `absagen`.
-pub const ERLAUBTE_ARTEN_BADHUB: [&str; 32] = [
+pub const ERLAUBTE_ARTEN_BADHUB: [&str; 33] = [
     "melden",
     "zurueckziehen",
     "status_setzen",
@@ -377,6 +377,7 @@ pub const ERLAUBTE_ARTEN_BADHUB: [&str; 32] = [
     "zeitplan_rahmen_festlegen",
     "zeitplan_rechnen",
     "zeit_setzen",
+    "zeiten_setzen",
     "zeiten_verschieben",
     "setzliste_festlegen",
     "auslosen",
@@ -393,10 +394,11 @@ pub fn von_badhub_erlaubt(art: &str) -> bool {
 }
 
 /// Höchstgröße eines Befehls außerhalb der Durchführung, unter der Grenze des
-/// Relays für TL-Kommandos (32 KiB): Zeitplan-Rahmen, Setzliste und `merkmale`
+/// Relays für TL-Kommandos (128 KiB): Zeitplan (`zeiten_setzen` trägt alle
+/// Zeiten, Kern 0.19.0), Rahmen, Setzliste und `merkmale`
 /// (Verein/Verband/Land je Person, für die Konfliktzahl der Auslosung) wachsen
 /// mit dem Turnier.
-pub const BEFEHL_MAX_BYTES_MERKMALE: usize = 24 * 1024;
+pub const BEFEHL_MAX_BYTES_MERKMALE: usize = 96 * 1024;
 
 /// Höchstgröße der Posten in einer Relay-Antwort (serialisiert). Darüber
 /// antwortet die Halle ohne Posten; badhub wartet dann auf den Abgleich.

@@ -6672,8 +6672,9 @@ const TL_SEARCH_BODY_MAX: usize = 1024;
 /// rohes JSON). Die größte bestehende Aktion ist `ProfileSave`; selbst ein
 /// Profil mit 64 Panels und langen Namen bleibt weit darunter
 /// (`tl_kommando_grenze_traegt_jede_bestehende_aktion`). Ein Kernbefehl ist
-/// am Turnier-PC zusätzlich auf 4 KiB begrenzt.
-const TL_COMMAND_BODY_MAX: usize = 32 * 1024;
+/// am Turnier-PC zusätzlich begrenzt: 4 KiB im Spielbetrieb, 96 KiB für
+/// Planung und Meldungen aus badhub (ein ganzer Zeitplan in `zeiten_setzen`).
+const TL_COMMAND_BODY_MAX: usize = 128 * 1024;
 
 /// Rumpf einer Suchanfrage.
 #[derive(serde::Deserialize)]
