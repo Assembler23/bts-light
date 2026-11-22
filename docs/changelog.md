@@ -15,6 +15,8 @@ erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 - Eröffnen und Absagen eines Turniers gehen weiter nur in badhub ohne
   Steuerung durch bts-light.
 - Das Relay reicht die neue Antwort durch (wird mit diesem Stand neu ausgerollt).
+- **Turnierkern 0.19.0** – gleiche Version wie badhub (Planwerkstatt: Zeitplan in
+  Blöcken, mehrere Zeiten auf einmal setzen).
 - BTP-Turniere laufen unverändert.
 
 ## v0.9.460

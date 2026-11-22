@@ -5595,8 +5595,8 @@ dependencies = [
 
 [[package]]
 name = "turnierkern"
-version = "0.18.0"
-source = "git+https://github.com/Assembler23/turnierkern?tag=v0.18.0#41f09f98380da0f11292bedbf2b3d563b46cf6d4"
+version = "0.19.0"
+source = "git+https://github.com/Assembler23/turnierkern?tag=v0.19.0#380d9426f15178871fca7b90ee0fbf99d3471958"
 dependencies = [
  "serde",
 ]
