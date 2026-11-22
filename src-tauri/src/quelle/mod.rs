@@ -1,14 +1,16 @@
 //! Turnierquelle: woher bts-light den Turnierstand liest und wohin es
 //! schreibt.
 //!
-//! Zwei Quellen: BTP und — seit Paket L2 — ein in badhub organisiertes
+//! Drei Quellen: BTP, — seit Paket L2 — ein in badhub organisiertes
 //! Turnier, dessen Stand der Turnierkern lokal faltet (badhub
-//! `docs/features/bts_light_steuerung.md`, ADR-0084). **BTP-Turniere laufen
+//! `docs/features/bts_light_steuerung.md`, ADR-0084), und ein Punktspiel
+//! aus badhub (`punktspiel`, `docs/features/punktspiel.md`). **BTP-Turniere laufen
 //! dabei unverändert** — dieses Modul ist die eine Stelle, an der sich die
 //! Wege trennen; die Konsumenten fragen nie selbst nach der Quelle.
 
 pub mod badhub;
 pub mod btp;
+pub mod punktspiel;
 
 use crate::btp::client;
 use crate::btp::model::BtpSnapshot;
@@ -31,6 +33,7 @@ pub async fn stand(config: &AppConfig) -> Result<BtpSnapshot, String> {
         .map_err(|e| e.to_string()),
         QuelleArt::Badhub if config.slave_mode => badhub::slave::stand_vom_master(config).await,
         QuelleArt::Badhub => badhub::stand(config),
+        QuelleArt::Punktspiel => punktspiel::stand().await,
     }
 }
 
@@ -41,6 +44,7 @@ pub fn turnier_schluessel(config: &AppConfig) -> Option<String> {
         QuelleArt::Btp => None,
         QuelleArt::Badhub if config.slave_mode => None,
         QuelleArt::Badhub => badhub::turnier_schluessel(),
+        QuelleArt::Punktspiel => punktspiel::turnier_schluessel(),
     }
 }
 
@@ -52,6 +56,7 @@ pub fn schreiben_moeglich(config: &AppConfig) -> bool {
     match config.quelle {
         QuelleArt::Btp => true,
         QuelleArt::Badhub => !config.slave_mode && badhub::schreiben_moeglich(),
+        QuelleArt::Punktspiel => !config.slave_mode && punktspiel::schreiben_moeglich(),
     }
 }
 
@@ -64,7 +69,8 @@ pub fn schreib_ablehnung(config: &AppConfig, fehler: &str) -> relay_proto::TlRes
             relay_proto::TlErrorCode::BtpError,
             format!("BTP hat abgelehnt: {fehler}"),
         ),
-        QuelleArt::Badhub => {
+        // Punktspiel: die Meldung von badhub selbst, wie beim badhub-Turnier.
+        QuelleArt::Badhub | QuelleArt::Punktspiel => {
             relay_proto::TlResponse::err(relay_proto::TlErrorCode::KernAbgelehnt, fehler)
         }
     }
@@ -95,6 +101,17 @@ pub fn starten(config: &AppConfig, daten: Option<&std::path::Path>) -> QuellenSt
             let geladen = daten.is_some_and(|d| badhub::starten(config, d));
             QuellenStart {
                 kern_abgleich: !config.slave_mode && geladen,
+                btp_dienste: false,
+            }
+        }
+        QuelleArt::Punktspiel => {
+            // Kein Kern, kein Abgleich: das Paket holt `punktspiel::stand`
+            // im Takt der Sync-Schleife selbst.
+            if let Some(d) = daten {
+                punktspiel::starten(config, d);
+            }
+            QuellenStart {
+                kern_abgleich: false,
                 btp_dienste: false,
             }
         }
@@ -137,6 +154,18 @@ fn badhub_weiche<T>(
     f()
 }
 
+/// Schreibweg eines Punktspiels: wie [`badhub_weiche`], aber der Aufruf geht
+/// per HTTPS an badhub und wartet.
+async fn punktspiel_weiche<T>(
+    config: &AppConfig,
+    f: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    if config.slave_mode {
+        return Err(SLAVE_SCHREIBT_NICHT.into());
+    }
+    f.await
+}
+
 pub(crate) async fn write_result_to_btp(
     config: &AppConfig,
     update: &proto::MatchUpdate,
@@ -144,6 +173,7 @@ pub(crate) async fn write_result_to_btp(
     match config.quelle {
         QuelleArt::Btp => btp::write_result_to_btp(config, update).await,
         QuelleArt::Badhub => badhub_weiche(config, || badhub::ergebnis(update)),
+        QuelleArt::Punktspiel => punktspiel_weiche(config, punktspiel::ergebnis(update)).await,
     }
 }
 
@@ -155,6 +185,7 @@ pub(crate) async fn write_result_settled(
     match config.quelle {
         QuelleArt::Btp => btp::write_result_settled(config, tablet, update).await,
         QuelleArt::Badhub => badhub_weiche(config, || badhub::ergebnis(update)),
+        QuelleArt::Punktspiel => punktspiel_weiche(config, punktspiel::ergebnis(update)).await,
     }
 }
 
@@ -166,6 +197,7 @@ pub(crate) async fn write_courts_to_btp(
     match config.quelle {
         QuelleArt::Btp => btp::write_courts_to_btp(config, courts, match_courts).await,
         QuelleArt::Badhub => badhub_weiche(config, || badhub::feld_vergabe(courts)),
+        QuelleArt::Punktspiel => punktspiel_weiche(config, punktspiel::feld_vergabe(courts)).await,
     }
 }
 
@@ -178,6 +210,8 @@ pub(crate) async fn write_officials_to_btp(
     match config.quelle {
         QuelleArt::Btp => btp::write_officials_to_btp(config, entries, zyklus, tablet).await,
         QuelleArt::Badhub => badhub_weiche(config, || badhub::offizielle(entries)),
+        // Ein Punktspiel kennt keine Schiedsrichter-Besetzung in badhub: lokal erledigt.
+        QuelleArt::Punktspiel => Ok(entries.to_vec()),
     }
 }
 
@@ -189,7 +223,7 @@ pub(crate) async fn write_highlight_to_btp(
         QuelleArt::Btp => btp::write_highlight_to_btp(config, entries).await,
         // Zeilenfarbe gibt es nur in BTP; bei Kern-Turnieren gilt der lokale
         // Aufrufzustand — Erfolg ohne Kernbefehl.
-        QuelleArt::Badhub => Ok(entries.len()),
+        QuelleArt::Badhub | QuelleArt::Punktspiel => Ok(entries.len()),
     }
 }
 

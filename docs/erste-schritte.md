@@ -108,6 +108,9 @@ ein, alles andere kannst du zunächst überspringen:
 > **Turnier in badhub statt in BTP?** Dann unter **Turnierquelle** „badhub-Turnier“
 > wählen und den Kopplungscode aus badhub eintragen; die BTP-Verbindung entfällt.
 > Wie das geht, steht in der [Einstellungs-Referenz](einstellungen.md#turnierquelle).
+>
+> **Ein Punktspiel (Ligaspiel) zählen?** Dann unter **Turnierquelle** „Punktspiel“ wählen und den Kopplungscode
+> aus Mein Badhub (Live-Scoring) eintragen.
 <!-- pruef: "Turnierquelle" in src/pages/SetupWizard.tsx -->
 
 > **Bei Liga- und Mannschaftswettbewerben ist der Port ein anderer.** Für
@@ -265,6 +268,7 @@ Hast du „Beim Beenden einbauen" gewählt und es dir anders überlegt, nimmt
 | Diagnose-Logs | eigenes Log-Verzeichnis, erreichbar über **Wartung → Logs öffnen** |
 | Werbebilder, Zettel, Punktverlauf | im Datenverzeichnis der App |
 | badhub-Turnier (Turnierpaket, Namen verschlüsselt) | `turniere\` im Datenverzeichnis der App |
+| Punktspiel (nur der verschlüsselte Zugang, keine Namen) | `punktspiele\` im Datenverzeichnis der App |
 
 Die Logs liegen bewusst **nicht** im Programmverzeichnis — dort würde ein
 Update sie überschreiben.

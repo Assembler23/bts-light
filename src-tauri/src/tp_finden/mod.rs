@@ -388,7 +388,7 @@ pub fn entscheide(cfg: &crate::config::AppConfig, fund: &Fund) -> Aktion {
     // badhub-Turniere haben keine TP-Datei (badhub-Spec „Turnierseite und
     // Liveticker“); ihre GUID passt nie zu einer — die Automatik fragte sonst
     // jeden Takt erneut.
-    if !cfg.tp_upload.finden_automatisch || cfg.quelle == crate::config::QuelleArt::Badhub {
+    if !cfg.tp_upload.finden_automatisch || cfg.quelle != crate::config::QuelleArt::Btp {
         return Aktion::Nichts;
     }
     let Some(eingetragen) = cfg.tournament_uuid_kanonisch() else {

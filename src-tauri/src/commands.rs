@@ -563,6 +563,8 @@ fn keep_host_managed_fields(mut incoming: AppConfig, current: &AppConfig) -> App
     // Das gekoppelte badhub-Turnier setzt nur die Kopplung im Kern
     // (`badhub_koppeln`), nie das Formular (Paket L2).
     incoming.badhub_turnier = current.badhub_turnier.clone();
+    // ebenso das gekoppelte Punktspiel (`punktspiel_koppeln`)
+    incoming.punktspiel = current.punktspiel.clone();
     if incoming.tl_web.enabled {
         incoming.tl_web.devices = current.tl_web.devices.clone();
     } else {
@@ -1247,6 +1249,43 @@ pub async fn badhub_koppeln(
 
 /// Gekoppeltes badhub-Turnier (für den Einrichtungsassistenten); `None`, wenn
 /// keins gekoppelt ist.
+/// Koppelt diesen PC mit einem Punktspiel aus badhub (Live-Scoring für
+/// Punktspiele): Code einlösen, Gerätetoken verschlüsselt ablegen, Kopplung in
+/// die Konfiguration schreiben. Die Quelle selbst stellt das Setup um.
+#[tauri::command]
+pub async fn punktspiel_koppeln(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    code: String,
+    geraet_name: String,
+) -> Result<crate::quelle::punktspiel::Kopplung, String> {
+    let (push_url, install_id) = {
+        let cfg = state.config.lock().expect("config lock");
+        (cfg.badhub.url.clone(), cfg.install_id.clone())
+    };
+    if install_id.trim().is_empty() {
+        return Err("Die Installations-ID fehlt — bitte die Einrichtung einmal speichern.".into());
+    }
+    let basis = crate::quelle::punktspiel::api_basis(&push_url)?;
+    let daten = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let kopplung =
+        crate::quelle::punktspiel::koppeln(&basis, &daten, &code, &install_id, &geraet_name)
+            .await?;
+    let punktspiel = kopplung.punktspiel.clone();
+    mutate_config(&app, &state, move |cfg| {
+        cfg.punktspiel = punktspiel;
+        Ok(())
+    })?;
+    Ok(kopplung)
+}
+
+/// Das gekoppelte Punktspiel, falls eines gekoppelt ist.
+#[tauri::command]
+pub fn punktspiel_info(state: State<'_, AppState>) -> Option<crate::config::PunktspielConfig> {
+    let cfg = state.config.lock().expect("config lock");
+    cfg.punktspiel.gekoppelt().then(|| cfg.punktspiel.clone())
+}
+
 #[tauri::command]
 pub fn badhub_turnier_info(
     state: State<'_, AppState>,
@@ -2342,6 +2381,12 @@ pub(crate) fn pruefe_startbedingungen(config: &crate::config::AppConfig) -> Resu
     if config.quelle == crate::config::QuelleArt::Badhub && !config.badhub_turnier.gekoppelt() {
         return Err(
             "Kein badhub-Turnier gekoppelt — im Setup unter „Quelle“ den Kopplungscode eingeben."
+                .to_string(),
+        );
+    }
+    if config.quelle == crate::config::QuelleArt::Punktspiel && !config.punktspiel.gekoppelt() {
+        return Err(
+            "Kein Punktspiel gekoppelt — im Setup unter „Quelle“ den Kopplungscode eingeben."
                 .to_string(),
         );
     }
