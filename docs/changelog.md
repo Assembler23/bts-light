@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.465
+
+- **Punktspiele ohne PC: Dienst für den Server.** `bts-light --kopflos-dienst <spool>`
+  startet zu jedem Auftrag aus badhub einen Prozess, startet ihn nach einem Absturz neu
+  und räumt ab, sobald badhub das Ende meldet. Dazu Dienstdatei, Einrichtungsskript und
+  ein Workflow, der das Linux-Programm auf den Server bringt. Für den Betrieb in der
+  Halle ändert sich nichts.
+
 ## v0.9.464
 
 - **Punktspiel: laufender Punktestand geht an badhub.** bts-light meldet bei einem

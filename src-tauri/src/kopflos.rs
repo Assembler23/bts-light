@@ -183,8 +183,11 @@ fn laden(wurzel: &Path) -> Result<AppConfig, String> {
 }
 
 fn lauf(wurzel: &Path) -> Result<(), String> {
+    // Der Ordner selbst gehört badhub (es legt dort Auftrag und die Marke
+    // `ende` ab) — seine Rechte bleiben. Was dieser Prozess darin anlegt,
+    // gehört nur ihm.
+    std::fs::create_dir_all(wurzel).map_err(|e| e.to_string())?;
     for ordner in [
-        wurzel.to_path_buf(),
         wurzel.join("config"),
         wurzel.join("daten"),
         wurzel.join("logs"),

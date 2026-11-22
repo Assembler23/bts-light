@@ -11,6 +11,7 @@ pub mod gemini_tts;
 pub mod hall_colors;
 pub mod kern_tausch;
 pub mod kopflos;
+pub mod kopflos_dienst;
 pub mod log_upload;
 pub mod offline_stimme;
 pub mod openai_tts;

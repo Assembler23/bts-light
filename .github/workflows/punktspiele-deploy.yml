@@ -1,0 +1,83 @@
+name: Punktspiel-Host deployen
+
+# bts-light für den Betrieb ohne Oberfläche (docs/features/punktspiel-kopflos.md, ADR 0108): dieselbe App wie am
+# Desktop, als Linux-Programm auf dem badhub-Server. Der Dienst bts-punktspiele@prod/@test startet daraus je
+# Punktspiel einen Prozess.
+#
+# Bewusst NUR von Hand: Ein Neustart des Dienstes unterbricht laufende Begegnungen für einige Sekunden (die Prozesse
+# machen danach mit ihrem Stand weiter). Nicht während eines Spieltags auslösen.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # dieselbe Ubuntu-Version wie der Server (24.04): glibc und WebKitGTK müssen zur Laufzeit passen
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Turnierkern (privates Repo): cargo löst den ganzen Workspace samt Git-Abhängigkeit auf.
+      - name: Zugang zum Turnierkern
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.TURNIERKERN_LESE_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/Assembler23/turnierkern".insteadOf "https://github.com/Assembler23/turnierkern"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Tauri-System-Pakete
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libxdo-dev patchelf
+
+      - name: Frontend bauen (fuer generate_context)
+        run: |
+          npm ci
+          npm run build
+
+      - name: bts-light bauen (Release)
+        run: cargo build --release -p bts-light
+
+      # Der Start ohne Auftrag muss sauber mit Code 1 enden — ohne Display, wie auf dem Server.
+      - name: Probe ohne Display
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/probe-kopflos
+          env -u DISPLAY -u WAYLAND_DISPLAY ./target/release/bts-light --kopflos /tmp/probe-kopflos; code=$?
+          echo "Ende-Code: $code"
+          test "$code" -eq 1
+
+      - name: SSH einrichten
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_DEPLOY_KEY_V2 }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      # Erst .new hochladen, dann die laufende Datei sichern und atomar umbenennen (Muster relay-deploy.yml).
+      - name: Programm hochladen, sichern und Dienste neu starten
+        run: |
+          set -euo pipefail
+          rsync -av target/release/bts-light \
+            bts-deploy@178.104.221.177:/opt/bts-light-host/bts-light.new
+          ssh bts-deploy@178.104.221.177 '
+            set -e
+            cd /opt/bts-light-host
+            [ -f bts-light ] && cp -a bts-light bts-light.rollback
+            mv bts-light.new bts-light
+            sudo systemctl restart bts-punktspiele@test
+            sudo systemctl restart bts-punktspiele@prod
+            sleep 3
+            systemctl is-active bts-punktspiele@test bts-punktspiele@prod
+          '
