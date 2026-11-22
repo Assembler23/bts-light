@@ -252,6 +252,32 @@ fn ergebnis_als_meldung() {
 }
 
 #[test]
+fn punktestand_nur_bei_abweichung_und_nur_fuer_laufende_spiele() {
+    let mut p = paket();
+    p.spiele[0].status = "laeuft".into();
+    p.spiele[0].feld = Some(1);
+    p.spiele[0].saetze = vec![(3, 2)];
+    p.spiele[1].status = "laeuft".into();
+    p.spiele[1].feld = Some(2);
+    // Feld 1: neuer Stand; Feld 2: Tablet zeigt ein anderes Spiel (Feld gerade neu belegt)
+    let m = punktestand_meldungen(&p, |feld| match feld {
+        1 => Some((1, vec![(21, 15), (4, 4)])),
+        2 => Some((9, vec![(1, 0)])),
+        _ => None,
+    });
+    assert_eq!(m.len(), 1);
+    assert_eq!((m[0].nr, m[0].status, m[0].feld), (1, "laeuft", Some(1)));
+    assert_eq!(m[0].saetze, vec![[21, 15], [4, 4]]);
+    // gleicher Stand, noch kein Punkt, kein Tablet: nichts zu melden
+    assert!(punktestand_meldungen(&p, |f| (f == 1).then(|| (1, vec![(3, 2)]))).is_empty());
+    assert!(punktestand_meldungen(&p, |f| (f == 1).then(|| (1, Vec::new()))).is_empty());
+    assert!(punktestand_meldungen(&p, |_| None).is_empty());
+    // beendetes Spiel: der Punktestand überschreibt kein Ergebnis
+    p.spiele[0].status = "beendet".into();
+    assert!(punktestand_meldungen(&p, |_| Some((1, vec![(9, 9)]))).is_empty());
+}
+
+#[test]
 fn api_basis_folgt_der_push_adresse() {
     assert_eq!(
         api_basis("https://test.badhub.de/api/live_update.php").unwrap(),
@@ -313,6 +339,14 @@ async fn attrappe_starten(a: Arc<Attrappe>) -> String {
         format!("\"{}\"", p.to_string().len())
     }
     async fn koppeln(Json(body): Json<serde_json::Value>) -> axum::response::Response {
+        // Passwortschutz vor badhub (Testsystem): 401 mit Basic-Aufforderung
+        if body["code"] == "WANDWAND" {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [("WWW-Authenticate", "Basic realm=\"test\"")],
+            )
+                .into_response();
+        }
         if body["code"] == "ABCD2345" && body["install_id"] == "inst-1" {
             Json(serde_json::json!({"token": TOKEN, "begegnung": {"uuid": UUID.to_uppercase(), "name": "TV Heim 1 – SV Gast 1"}})).into_response()
         } else {
@@ -384,6 +418,13 @@ async fn koppeln_lesen_melden_und_fehler() {
     assert!(koppeln(&basis, daten.path(), "  ", "inst-1", "Halle")
         .await
         .is_err());
+    let wand = koppeln(&basis, daten.path(), "WANDWAND", "inst-1", "Halle")
+        .await
+        .unwrap_err();
+    assert!(
+        wand.contains("Passwortschutz") && !wand.contains("falsch"),
+        "{wand}"
+    );
     let k = koppeln(
         &basis,
         daten.path(),

@@ -4,6 +4,18 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.464
+
+- **Punktspiel: laufender Punktestand geht an badhub.** bts-light meldet bei einem
+  Punktspiel nach jedem Abgleich den Stand der laufenden Spiele an badhub. Dort steht er
+  öffentlich an der Begegnung und im Liveticker, auch wenn der Liveticker-Zugang des
+  Verbands nicht eingerichtet ist.
+- **Koppeln am Testsystem: klare Meldung.** Verlangt ein Server vor badhub eine eigene
+  Anmeldung (Passwortschutz), sagt bts-light das, statt „Kopplungscode falsch“ zu melden.
+- **Vorbereitung „ohne PC“.** bts-light lässt sich mit `--kopflos <ordner>` ohne Fenster
+  starten und zählt dann ein Punktspiel als Serverprozess über den Cloud-Weg. Für den
+  Betrieb in der Halle ändert sich nichts. BTP- und badhub-Turniere laufen unverändert.
+
 ## v0.9.463
 
 - **Punktspiele live zählen.** Neue Turnierquelle „Punktspiel“: bts-light koppelt sich

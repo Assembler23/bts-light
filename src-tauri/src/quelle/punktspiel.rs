@@ -9,9 +9,9 @@
 //!   [`abbilden`] macht daraus den `BtpSnapshot`, mit dem der Rest der App
 //!   arbeitet (Tablets, Monitore, Liveticker). Abgefragt wird im Takt der
 //!   Sync-Schleife mit `If-None-Match`.
-//! - **Schreiben:** Feldvergabe und Ergebnis gehen als Zustandsmeldung je
-//!   Spiel an `POST /api/ls/v1/begegnung/spiel`. Die Antwort ist das neue
-//!   Paket.
+//! - **Schreiben:** Feldvergabe, Ergebnis und — nach jedem Zyklus — der
+//!   laufende Punktestand gehen als Zustandsmeldung je Spiel an
+//!   `POST /api/ls/v1/begegnung/spiel`. Die Antwort ist das neue Paket.
 //!
 //! Auf der Platte liegt nur das Gerätetoken (verschlüsselt, wie bei den
 //! badhub-Turnieren), unter `punktspiele/<uuid>/geraet.bin`. Das Paket wird
@@ -416,6 +416,9 @@ pub enum ApiFehler {
     Beendet,
     /// Der Kopplungscode wurde nicht angenommen.
     CodeAbgelehnt,
+    /// Ein vorgelagerter Server verlangt eine eigene Anmeldung (Passwortschutz
+    /// des Testsystems) — die Anfrage hat badhub gar nicht erreicht.
+    Wand,
     /// 422: badhub lehnt die Meldung ab (Text von badhub).
     Abgelehnt(String),
     /// 429: zu viele Anfragen.
@@ -439,6 +442,10 @@ impl std::fmt::Display for ApiFehler {
             ApiFehler::CodeAbgelehnt => write!(
                 f,
                 "Der Kopplungscode ist falsch, abgelaufen oder schon eingelöst. In Mein Badhub unter Live-Scoring einen neuen erzeugen."
+            ),
+            ApiFehler::Wand => write!(
+                f,
+                "Der Server verlangt vor badhub eine eigene Anmeldung (Passwortschutz, etwa am Testsystem) — die Anfrage ist dort nicht angekommen. Das muss am Server freigegeben werden; am Kopplungscode liegt es nicht."
             ),
             ApiFehler::Abgelehnt(t) => write!(f, "badhub hat abgelehnt: {t}"),
             ApiFehler::Drossel => write!(f, "Zu viele Anfragen an badhub — bitte kurz warten."),
@@ -533,6 +540,17 @@ async fn api_koppeln(
         .map_err(netz)?;
     let status = antwort.status();
     if !status.is_success() {
+        // Ein 401 mit „Basic“-Aufforderung kommt nicht von badhub, sondern von
+        // einem Passwortschutz davor (test.badhub.de, 22.11.2026: sah aus wie
+        // ein falscher Code und kostete eine Fehlersuche).
+        let basic = antwort
+            .headers()
+            .get("WWW-Authenticate")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.trim_start().to_ascii_lowercase().starts_with("basic"));
+        if status.as_u16() == 401 && basic {
+            return Err(ApiFehler::Wand);
+        }
         return Err(match status.as_u16() {
             400 | 401 | 403 | 404 | 409 | 410 | 422 => ApiFehler::CodeAbgelehnt,
             _ => status_fehler(status),
@@ -807,6 +825,49 @@ pub async fn feld_vergabe(courts: &[proto::CourtAssignment]) -> Result<(), Strin
 /// Ergebnis an badhub melden.
 pub async fn ergebnis(update: &proto::MatchUpdate) -> Result<(), String> {
     melden(vec![ergebnis_meldung(update)]).await
+}
+
+/// Meldungen für den laufenden Punktestand: je laufendem Spiel eine, wenn der
+/// Stand am Tablet von dem abweicht, den badhub zuletzt kennt. `stand_am_feld`
+/// liefert zu einem Feld die Spielnummer und die Sätze vom Tablet.
+pub fn punktestand_meldungen(
+    paket: &Paket,
+    stand_am_feld: impl Fn(i64) -> Option<(i64, Vec<(i64, i64)>)>,
+) -> Vec<Meldung> {
+    paket
+        .spiele
+        .iter()
+        .filter(|s| s.status == "laeuft")
+        .filter_map(|s| {
+            let feld = s.feld?;
+            let (nr, saetze_jetzt) = stand_am_feld(feld)?;
+            if nr != s.nr || saetze_jetzt.is_empty() || saetze_jetzt == s.saetze {
+                return None;
+            }
+            Some(Meldung {
+                nr: s.nr,
+                status: "laeuft",
+                feld: Some(feld),
+                saetze: saetze(&saetze_jetzt),
+                sieger: None,
+                ausgang: "normal",
+            })
+        })
+        .collect()
+}
+
+/// Meldet nach jedem Zyklus den laufenden Punktestand an badhub — so steht er
+/// öffentlich an der Begegnung, auch ohne Liveticker. Ein Fehler ist kein
+/// Fehler der Übertragung: der nächste Zyklus meldet den dann aktuellen Stand.
+pub async fn punktestand_melden(tablet: &crate::tablet::state::TabletState) {
+    let Ok(paket) = paket_kopie() else { return };
+    let meldungen = punktestand_meldungen(&paket, |feld| tablet.laufende_saetze(feld));
+    if meldungen.is_empty() {
+        return;
+    }
+    if let Err(e) = melden(meldungen).await {
+        tracing::warn!(target: "punktspiel", "Punktestand nicht gemeldet: {e}");
+    }
 }
 
 /// Ergebnis einer Kopplung, für die Anzeige im Einrichtungsassistenten.

@@ -59,6 +59,7 @@ const NICHT_GESPEICHERT: &[&str] = &[
     "badhub/tp_upload.rs",
     "commands.rs",
     "kern_tausch.rs",
+    "kopflos.rs",
     "quelle/badhub/api.rs",
     "quelle/badhub/mod.rs",
     "quelle/badhub/slave.rs",

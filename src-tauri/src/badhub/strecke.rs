@@ -370,6 +370,17 @@ impl Strecke {
         )
     }
 
+    /// Dauerhaft geschlossene Strecke: kein Kanal darf senden. Für den Betrieb
+    /// ohne Liveticker (`AppConfig::liveticker_aus`) — dort gibt es kein
+    /// Passwort, und ein Versuch wäre nur ein Fehlversuch bei badhub.
+    pub fn geschlossen() -> Self {
+        let mut s = Self::frisch();
+        s.lage = Lage::Angehalten {
+            grund: HaltGrund::Passwort,
+        };
+        s
+    }
+
     /// Als geteiltes Tor.
     pub fn als_tor(self) -> Tor {
         Arc::new(Mutex::new(self))

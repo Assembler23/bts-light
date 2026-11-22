@@ -1308,6 +1308,12 @@ pub struct AppConfig {
     /// Gekoppeltes Punktspiel (nur bei `quelle = punktspiel` wirksam).
     #[serde(default)]
     pub punktspiel: PunktspielConfig,
+    /// Kein Liveticker-Push an badhub. Nur für ein Punktspiel ohne Oberfläche
+    /// (`kopflos`): dort gibt es kein Liveticker-Passwort, der Punktestand
+    /// geht mit den Meldungen des Punktspiels an badhub. Vorgabe aus — jede
+    /// bestehende Einrichtung sendet unverändert.
+    #[serde(default)]
+    pub liveticker_aus: bool,
     pub btp: BtpConfig,
     pub badhub: BadhubConfig,
     /// Diagnose-Logs automatisch an badhub.de hochladen, damit Fehler über
@@ -3102,6 +3108,7 @@ mod tests {
             quelle: QuelleArt::Btp,
             badhub_turnier: BadhubTurnierConfig::default(),
             punktspiel: PunktspielConfig::default(),
+            liveticker_aus: false,
             badhub_notfall_ordner: String::new(),
             btp: BtpConfig {
                 host: "192.168.1.50".to_string(),

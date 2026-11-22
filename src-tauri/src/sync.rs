@@ -2599,6 +2599,9 @@ impl SyncEngine {
             tablet.apply_preparation_calls(&mut snapshot.clone());
             return SyncOutcome::SlaveActive;
         }
+        // Quelle „Punktspiel“: laufenden Punktestand an badhub melden. Bei
+        // BTP und badhub-Turnieren ohne Wirkung.
+        crate::quelle::nach_zyklus(config, tablet).await;
         // Schiedsrichter-Rotation (Spec schiedsrichter-management Nr. 4):
         // bewusst NACH `set_snapshot` — der Roster ist dann ans Turnier
         // gebunden und um neue BTP-Officials ergänzt. Master-only: der

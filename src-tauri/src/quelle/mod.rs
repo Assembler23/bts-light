@@ -118,6 +118,15 @@ pub fn starten(config: &AppConfig, daten: Option<&std::path::Path>) -> QuellenSt
     }
 }
 
+/// Nach jedem Zyklus der Sync-Schleife, wenn der neue Stand gesetzt ist. Nur
+/// das Punktspiel tut hier etwas (laufenden Punktestand an badhub melden);
+/// bei BTP und badhub-Turnieren passiert nichts.
+pub async fn nach_zyklus(config: &AppConfig, tablet: &TabletState) {
+    if config.quelle == QuelleArt::Punktspiel && !config.slave_mode {
+        punktspiel::punktestand_melden(tablet).await;
+    }
+}
+
 /// Laufen die BTP-eigenen Nebendienste (TP-Datei-Upload, TP-Takt,
 /// TP-Datei-Suche)? Nur bei Quelle BTP — für badhub-Turniere gibt es keine
 /// TP-Datei (badhub-Spec „Turnierseite und Liveticker“).

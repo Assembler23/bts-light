@@ -5544,6 +5544,13 @@ impl TabletState {
         Some((match_id, sets))
     }
 
+    /// Match-ID und laufender Satzstand eines Felds (Tablet-Stand vor dem der
+    /// Quelle) — für die Quelle „Punktspiel“, die den Punktestand an badhub
+    /// meldet. Ohne den gespiegelten Tablet-Zustand von [`Self::score_mirror_of`].
+    pub fn laufende_saetze(&self, court_id: i64) -> Option<(i64, Vec<(i64, i64)>)> {
+        self.live_sets_of(court_id)
+    }
+
     pub fn score_mirror_of(&self, court_id: i64) -> Option<ScoreMirror> {
         let (match_id, sets) = self.live_sets_of(court_id)?;
         Some(ScoreMirror {
