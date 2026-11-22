@@ -494,6 +494,21 @@ async fn koppeln_lesen_melden_und_fehler() {
         );
         assert_eq!(m[1]["sieger"], "heim");
     }
+    // Ein Punktestand, der nach dem Ergebnis an die Reihe kommt, wird aus dem
+    // dann aktuellen Paket berechnet: das Spiel ist beendet, es geht nichts hinaus
+    // (sonst höbe „läuft“ das Ergebnis wieder auf).
+    melden_aus(|p| punktestand_meldungen(p, |_| Some((2, vec![(9, 9)]))))
+        .await
+        .expect("nichts zu senden");
+    assert_eq!(
+        a.meldungen.lock().unwrap().len(),
+        2,
+        "kein Punktestand nach dem Ergebnis"
+    );
+    assert_eq!(
+        stand().await.unwrap().matches[1].status,
+        MatchStatus::Finished
+    );
     // badhub lehnt ab: der Text von badhub kommt bis in die Halle
     let fehler = ergebnis(&update(99, true, 0)).await.unwrap_err();
     assert!(fehler.contains("Dieses Spiel gibt es"), "{fehler}");

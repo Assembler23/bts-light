@@ -54,6 +54,24 @@ Stände liegen laufend auf der Platte.
   Übertragung, auch am Desktop. So steht der Punktestand öffentlich an der Begegnung, auch ohne Liveticker.
 - TLS: `kopflos::einstieg` legt den Anbieter für rustls fest (ring). Am Desktop erledigt das ein Tauri-Plugin.
 
+## Betrieb
+
+- **Ende-Codes:** `1` Start fehlgeschlagen (Auftrag fehlt, Code verbraucht, keine Kopplung, kein Zugang): kein
+  Neustart, es braucht einen neuen Auftrag. `2` falscher Aufruf. `70` Absturz in der laufenden Übertragung: neu
+  starten. Jede Panik beendet den Prozess — er soll nie als leere Hülle weiterlaufen.
+- **Rechte:** Der Ordner und `config/`, `daten/`, `logs/` gehören nur dem Dienstbenutzer (0700), `config.json` 0600.
+  In der Konfiguration steht der Zugang zum Turnierleitungs-Web im Klartext.
+- **Ziel:** Der Auftrag darf nur auf badhub zeigen (`badhub.de`, `test.badhub.de`, nur https). Dorthin gehen
+  Kopplungscode und Gerätetoken. Das Live- oder Testsystem wird vor der ersten Verbindung festgelegt, der Relay folgt.
+- **Je Begegnung ein eigener Ordner.** Ein Auftrag neben einer fertigen Konfiguration wird verworfen.
+
+## Reihenfolge der Meldungen
+
+Feldvergabe, Ergebnis und Punktestand gehen nacheinander an badhub (eine Sende-Sperre) und werden erst unter der
+Sperre aus dem dann aktuellen Paket berechnet. Eine Meldung trägt den ganzen Zustand eines Spiels: ein Punktestand
+(„läuft“), der nach dem Ergebnis ankäme, höbe es sonst wieder auf. Der Punktestand läuft in einer eigenen Aufgabe,
+höchstens eine zugleich, der Sync-Zyklus wartet nicht darauf. Nach einem Fehler pausiert er 30 Sekunden.
+
 ## Voraussetzungen auf dem Server
 
 Das Programm ist dieselbe Datei wie am Desktop und hängt an den Laufzeit-Bibliotheken von GTK und WebKit, auch wenn

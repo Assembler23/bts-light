@@ -16,6 +16,9 @@
 //!
 //! Läuft **vor** Tauri (`main.rs`): es gibt kein Display, und die
 //! Einzelinstanz-Sperre des Desktops würde den zweiten Prozess beenden.
+//!
+//! Ende-Codes: `1` Start fehlgeschlagen (neuer Auftrag nötig), `2` falscher
+//! Aufruf, `70` Absturz in der laufenden Übertragung (neu starten).
 
 use std::path::{Path, PathBuf};
 
@@ -60,6 +63,12 @@ fn jetzt_ms() -> u64 {
 /// Liveticker, keine Log-Uploads, das Turnierleitungs-Web mit genau dem
 /// Zugang aus dem Auftrag.
 fn grundkonfiguration(a: &Auftrag) -> Result<AppConfig, String> {
+    // Nur badhub selbst: an diese Adresse gehen Kopplungscode und Gerätetoken.
+    // Eine lokale Adresse (Attrappe) nur im Entwicklungs-Build.
+    let lokal = cfg!(debug_assertions) && a.push_url.trim().starts_with("http://127.0.0.1:");
+    if !crate::badhub_host::ist_badhub_adresse(&a.push_url) && !lokal {
+        return Err("Auftrag: push_url zeigt nicht auf badhub.".into());
+    }
     if !crate::tablet::relay_client::valid_relay_namespace(a.install_id.trim()) {
         return Err("Auftrag: install_id ist keine gültige Kennung.".into());
     }
@@ -94,6 +103,9 @@ fn einrichten(wurzel: &Path, auftrag_datei: &Path) -> Result<AppConfig, String> 
     let auftrag: Auftrag =
         serde_json::from_slice(&roh).map_err(|e| format!("Auftrag ungültig: {e}"))?;
     let mut cfg = grundkonfiguration(&auftrag)?;
+    // Live- oder Testsystem festlegen, bevor irgendetwas verbindet: der Relay
+    // folgt diesem Schalter (am Desktop setzt ihn das Laden der Konfiguration).
+    crate::badhub_host::set_aus_push_url(&cfg.badhub.url);
     let basis = crate::quelle::punktspiel::api_basis(&cfg.badhub.url)?;
     let daten = OrtKopflos::daten_ordner(wurzel);
     std::fs::create_dir_all(&daten).map_err(|e| e.to_string())?;
@@ -114,11 +126,31 @@ fn einrichten(wurzel: &Path, auftrag_datei: &Path) -> Result<AppConfig, String> 
     if let Some(dir) = datei.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    cfg.save_to(&datei).map_err(|e| e.to_string())?;
+    cfg.save_to(&datei).map_err(|e| {
+        format!("Konfiguration nicht geschrieben ({e}) — der Kopplungscode ist verbraucht, bitte einen neuen Auftrag ausstellen.")
+    })?;
+    nur_eigner(&datei);
     // Der Code ist eingelöst: nie liegen lassen.
-    let _ = std::fs::remove_file(auftrag_datei);
+    if let Err(e) = std::fs::remove_file(auftrag_datei) {
+        tracing::warn!(target: "kopflos", "Auftrag nicht gelöscht: {e}");
+    }
     tracing::info!(target: "kopflos", "gekoppelt mit „{}“ ({} Spiele, {} Felder)", cfg.punktspiel.name, kopplung.spiele, kopplung.felder);
     Ok(cfg)
+}
+
+/// Datei oder Ordner nur für den Dienstbenutzer lesbar machen: in der
+/// Konfiguration steht der Zugang zum Turnierleitungs-Web im Klartext.
+fn nur_eigner(pfad: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let modus = if pfad.is_dir() { 0o700 } else { 0o600 };
+        if let Err(e) = std::fs::set_permissions(pfad, std::fs::Permissions::from_mode(modus)) {
+            tracing::warn!(target: "kopflos", "Rechte nicht gesetzt ({}): {e}", pfad.display());
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = pfad;
 }
 
 fn laden(wurzel: &Path) -> Result<AppConfig, String> {
@@ -128,8 +160,12 @@ fn laden(wurzel: &Path) -> Result<AppConfig, String> {
         return einrichten(wurzel, &auftrag);
     }
     // Ein Auftrag neben einer fertigen Konfiguration ist ein Rest (Neustart
-    // nach dem Koppeln): der Code darin ist verbraucht.
-    let _ = std::fs::remove_file(&auftrag);
+    // nach dem Koppeln): der Code darin ist verbraucht. Je Begegnung gibt es
+    // einen eigenen Ordner — ein neuer Auftrag gehört nie in einen benutzten.
+    if auftrag.exists() {
+        tracing::warn!(target: "kopflos", "Auftrag neben fertiger Konfiguration verworfen");
+        let _ = std::fs::remove_file(&auftrag);
+    }
     let mut cfg = AppConfig::load_from(&datei).map_err(|e| e.to_string())?;
     // Diese Schalter gelten hier immer, was auch in der Datei steht.
     cfg.liveticker_aus = true;
@@ -138,16 +174,45 @@ fn laden(wurzel: &Path) -> Result<AppConfig, String> {
     if cfg.quelle != QuelleArt::Punktspiel {
         return Err("Ohne Oberfläche läuft nur die Quelle „Punktspiel“.".into());
     }
+    if !crate::badhub_host::ist_badhub_adresse(&cfg.badhub.url)
+        && !(cfg!(debug_assertions) && cfg.badhub.url.starts_with("http://127.0.0.1:"))
+    {
+        return Err("Die Konfiguration zeigt nicht auf badhub.".into());
+    }
     Ok(cfg)
 }
 
 fn lauf(wurzel: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(wurzel).map_err(|e| e.to_string())?;
+    for ordner in [
+        wurzel.to_path_buf(),
+        wurzel.join("config"),
+        wurzel.join("daten"),
+        wurzel.join("logs"),
+    ] {
+        std::fs::create_dir_all(&ordner).map_err(|e| e.to_string())?;
+        nur_eigner(&ordner);
+    }
     let cfg = laden(wurzel)?;
+    // Ohne Kopplung oder ohne Gerätetoken liefe die Übertragung leer weiter
+    // und meldete jeden Zyklus denselben Fehler — das ist ein Startfehler.
+    if !cfg.punktspiel.gekoppelt() {
+        return Err("Kein Punktspiel gekoppelt — bitte einen neuen Auftrag ausstellen.".into());
+    }
+    if !crate::quelle::punktspiel::starten(&cfg, &OrtKopflos::daten_ordner(wurzel)) {
+        return Err(
+            "Zugang zum Punktspiel fehlt oder ist ungültig — bitte einen neuen Auftrag ausstellen."
+                .into(),
+        );
+    }
     kopflos_starten(wurzel, cfg)?;
     tracing::info!(target: "kopflos", "Übertragung läuft");
     Ok(())
 }
+
+/// Ende-Code nach einer Panik in der laufenden Übertragung — der
+/// Dienstverwalter startet dann neu. `1` = Start fehlgeschlagen (kein
+/// Neustart: es braucht einen neuen Auftrag), `2` = falscher Aufruf.
+pub const ENDE_ABSTURZ: i32 = 70;
 
 /// `--kopflos <ordner>`: startet die Übertragung ohne Oberfläche und kehrt
 /// nicht zurück, solange sie läuft. `None` = kein solcher Aufruf, der normale
@@ -168,6 +233,15 @@ pub fn einstieg(args: &[String]) -> Option<i32> {
     // Tauri-Plugin beim Start; hier gibt es keins — ohne diese Zeile bräche
     // die Verbindung zum Relay beim ersten Aufbau ab.
     let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+    // Stirbt eine Aufgabe der Übertragung (Panik), liefe der Prozess sonst als
+    // leere Hülle weiter: der Dienstverwalter sähe ihn gesund, die Halle
+    // zählte ins Leere. Deshalb beendet jede Panik den Prozess — mit einem
+    // eigenen Code, damit er neu gestartet wird (anders als ein Startfehler).
+    let voriger = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        voriger(info);
+        std::process::exit(ENDE_ABSTURZ);
+    }));
     if let Err(e) = lauf(&wurzel) {
         tracing::error!(target: "kopflos", "Start fehlgeschlagen: {e}");
         eprintln!("bts-light --kopflos: {e}");
@@ -236,6 +310,53 @@ mod tests {
         let mut reserviert = auftrag("0f3a1c2e-7b4d-4c1a-9e2f-5a6b7c8d9e0f", "geheim");
         reserviert.tl.id = relay_proto::TL_GERAET_KERN.into();
         assert!(grundkonfiguration(&reserviert).is_err());
+    }
+
+    #[test]
+    fn auftrag_darf_nur_auf_badhub_zeigen() {
+        let mut fremd = auftrag("0f3a1c2e-7b4d-4c1a-9e2f-5a6b7c8d9e0f", "geheim");
+        fremd.push_url = "https://badhub.de.example.org/api/live_update.php".into();
+        assert!(grundkonfiguration(&fremd).unwrap_err().contains("badhub"));
+        fremd.push_url = "http://badhub.de/api/live_update.php".into();
+        assert!(grundkonfiguration(&fremd).is_err(), "nie im Klartext");
+        fremd.push_url = "https://badhub.de/api/live_update.php".into();
+        assert!(grundkonfiguration(&fremd).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ordner_und_dateien_nur_fuer_den_dienstbenutzer() {
+        use std::os::unix::fs::PermissionsExt;
+        let ordner = tempfile::tempdir().unwrap();
+        let _ = lauf(ordner.path());
+        for teil in ["config", "daten", "logs"] {
+            let modus = std::fs::metadata(ordner.path().join(teil))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(modus, 0o700, "{teil}");
+        }
+        let datei = ordner.path().join("config").join("x.json");
+        std::fs::write(&datei, b"{}").unwrap();
+        nur_eigner(&datei);
+        assert_eq!(
+            std::fs::metadata(&datei).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn konfiguration_ohne_kopplung_ist_ein_startfehler() {
+        let ordner = tempfile::tempdir().unwrap();
+        let datei = OrtKopflos::config_datei(ordner.path());
+        std::fs::create_dir_all(datei.parent().unwrap()).unwrap();
+        let mut cfg =
+            grundkonfiguration(&auftrag("0f3a1c2e-7b4d-4c1a-9e2f-5a6b7c8d9e0f", "geheim")).unwrap();
+        cfg.badhub.url = "https://badhub.de/api/live_update.php".into();
+        cfg.save_to(&datei).unwrap();
+        let fehler = lauf(ordner.path()).unwrap_err();
+        assert!(fehler.contains("gekoppelt"), "{fehler}");
     }
 
     #[test]

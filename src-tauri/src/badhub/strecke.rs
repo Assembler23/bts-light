@@ -802,6 +802,27 @@ impl Flanke {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn geschlossene_strecke_laesst_keinen_kanal_durch() {
+        let jetzt = Instant::now();
+        let mut s = Strecke::geschlossen();
+        for kanal in [
+            Kanal::Tset,
+            Kanal::Tupdate,
+            Kanal::Meldeliste,
+            Kanal::Sched,
+            Kanal::Verlauf,
+        ] {
+            assert!(!s.darf(kanal, jetzt), "{}", kanal.name());
+            assert!(!s.beginnen(kanal, jetzt), "{}", kanal.name());
+            assert!(
+                !s.darf(kanal, jetzt + Duration::from_secs(3600)),
+                "auch später nicht"
+            );
+        }
+        assert!(!s.logo_erlaubt("x", jetzt));
+    }
+
     use super::*;
 
     /// Antwort von badhub selbst — auch seine Fehler sind JSON mit `type`.

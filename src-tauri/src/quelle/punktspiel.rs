@@ -798,8 +798,20 @@ pub async fn stand() -> Result<BtpSnapshot, String> {
     }
 }
 
-async fn melden(meldungen: Vec<Meldung>) -> Result<(), String> {
-    for m in meldungen {
+/// Alle Meldungen an badhub gehen **nacheinander** hinaus, und jede wird erst
+/// unter dieser Sperre aus dem dann aktuellen Paket berechnet. Eine Meldung
+/// trägt immer den ganzen Zustand eines Spiels: Liefen Punktestand („läuft“)
+/// und Ergebnis („beendet“) nebeneinander, könnte der später eintreffende
+/// Punktestand das Ergebnis wieder aufheben — und das Ergebnis geht nur
+/// einmal hinaus.
+static SENDEN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Berechnet die Meldungen aus dem aktuellen Paket und sendet sie, alles
+/// unter der Sende-Sperre.
+async fn melden_aus(bauen: impl FnOnce(&Paket) -> Vec<Meldung>) -> Result<(), String> {
+    let _sperre = SENDEN.lock().await;
+    let paket = paket_kopie()?;
+    for m in bauen(&paket) {
         let (basis, token, _, _) = zugang()?;
         let (paket, etag) = api_melden(&basis, &token, &m)
             .await
@@ -818,13 +830,12 @@ fn paket_kopie() -> Result<Paket, String> {
 
 /// Feldvergabe an badhub melden.
 pub async fn feld_vergabe(courts: &[proto::CourtAssignment]) -> Result<(), String> {
-    let paket = paket_kopie()?;
-    melden(feld_meldungen(&paket, courts)).await
+    melden_aus(|paket| feld_meldungen(paket, courts)).await
 }
 
 /// Ergebnis an badhub melden.
 pub async fn ergebnis(update: &proto::MatchUpdate) -> Result<(), String> {
-    melden(vec![ergebnis_meldung(update)]).await
+    melden_aus(|_| vec![ergebnis_meldung(update)]).await
 }
 
 /// Meldungen für den laufenden Punktestand: je laufendem Spiel eine, wenn der
@@ -856,18 +867,57 @@ pub fn punktestand_meldungen(
         .collect()
 }
 
-/// Meldet nach jedem Zyklus den laufenden Punktestand an badhub — so steht er
-/// öffentlich an der Begegnung, auch ohne Liveticker. Ein Fehler ist kein
-/// Fehler der Übertragung: der nächste Zyklus meldet den dann aktuellen Stand.
-pub async fn punktestand_melden(tablet: &crate::tablet::state::TabletState) {
-    let Ok(paket) = paket_kopie() else { return };
-    let meldungen = punktestand_meldungen(&paket, |feld| tablet.laufende_saetze(feld));
-    if meldungen.is_empty() {
+/// Läuft gerade eine Punktestand-Meldung? Höchstens eine zugleich.
+static PUNKTESTAND_UNTERWEGS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// Nach einem Fehler erst ab hier wieder versuchen — sonst wiederholte sich
+/// eine abgelehnte oder gedrosselte Meldung in jedem Zyklus.
+static PUNKTESTAND_PAUSE_BIS: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+const PUNKTESTAND_PAUSE: Duration = Duration::from_secs(30);
+
+/// Meldet nach einem Zyklus den laufenden Punktestand an badhub — so steht er
+/// öffentlich an der Begegnung, auch ohne Liveticker.
+///
+/// Der Zyklus wartet nicht darauf: gesendet wird in einer eigenen Aufgabe,
+/// höchstens eine zugleich, nach einem Fehler mit Pause. Die Meldungen werden
+/// erst unter der Sende-Sperre aus dem dann aktuellen Paket berechnet — ein
+/// Spiel, dessen Ergebnis inzwischen gemeldet ist, bekommt keinen Punktestand
+/// mehr.
+pub fn punktestand_melden(tablet: &crate::tablet::state::TabletState) {
+    use std::sync::atomic::Ordering;
+    let jetzt = std::time::Instant::now();
+    let pause = *PUNKTESTAND_PAUSE_BIS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if pause.is_some_and(|bis| jetzt < bis) {
         return;
     }
-    if let Err(e) = melden(meldungen).await {
-        tracing::warn!(target: "punktspiel", "Punktestand nicht gemeldet: {e}");
+    let Ok(paket) = paket_kopie() else { return };
+    // Stand der Tablets jetzt festhalten (die Aufgabe hat keinen Zugriff auf
+    // den Tablet-Zustand); nichts zu melden → gar nicht erst starten.
+    let staende: std::collections::HashMap<i64, (i64, Vec<(i64, i64)>)> =
+        (1..=paket.felder.clamp(1, 8))
+            .filter_map(|feld| tablet.laufende_saetze(feld).map(|s| (feld, s)))
+            .collect();
+    if punktestand_meldungen(&paket, |feld| staende.get(&feld).cloned()).is_empty() {
+        return;
     }
+    if PUNKTESTAND_UNTERWEGS.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tokio::spawn(async move {
+        let ergebnis =
+            melden_aus(|paket| punktestand_meldungen(paket, |feld| staende.get(&feld).cloned()))
+                .await;
+        if let Err(e) = ergebnis {
+            tracing::warn!(target: "punktspiel", "Punktestand nicht gemeldet, nächster Versuch in {} s: {e}", PUNKTESTAND_PAUSE.as_secs());
+            *PUNKTESTAND_PAUSE_BIS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) =
+                Some(std::time::Instant::now() + PUNKTESTAND_PAUSE);
+        }
+        PUNKTESTAND_UNTERWEGS.store(false, Ordering::SeqCst);
+    });
 }
 
 /// Ergebnis einer Kopplung, für die Anzeige im Einrichtungsassistenten.

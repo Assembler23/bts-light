@@ -119,11 +119,12 @@ pub fn starten(config: &AppConfig, daten: Option<&std::path::Path>) -> QuellenSt
 }
 
 /// Nach jedem Zyklus der Sync-Schleife, wenn der neue Stand gesetzt ist. Nur
-/// das Punktspiel tut hier etwas (laufenden Punktestand an badhub melden);
-/// bei BTP und badhub-Turnieren passiert nichts.
-pub async fn nach_zyklus(config: &AppConfig, tablet: &TabletState) {
+/// das Punktspiel tut hier etwas (laufenden Punktestand an badhub melden, in
+/// einer eigenen Aufgabe — der Zyklus wartet nicht); bei BTP und
+/// badhub-Turnieren passiert nichts.
+pub fn nach_zyklus(config: &AppConfig, tablet: &TabletState) {
     if config.quelle == QuelleArt::Punktspiel && !config.slave_mode {
-        punktspiel::punktestand_melden(tablet).await;
+        punktspiel::punktestand_melden(tablet);
     }
 }
 
