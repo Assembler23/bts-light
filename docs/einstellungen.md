@@ -174,7 +174,7 @@ bestehende Einrichtung nach einem Update unverändert weiter.
 eintragen und **„Kopplungscode erzeugen“** wählen. Den Code hier unter **Kopplungscode** eintragen, dem PC einen
 Namen geben und **Koppeln**. Der Code gilt 10 Minuten und nur einmal. Danach zeigt bts-light die Einzelspiele des
 Punktspiels wie Turnierspiele. Feldvergabe und Ergebnisse gehen direkt an badhub, der Turnier-PC braucht dafür am
-Spieltag Internet. Die Aufstellung ändert man in badhub; sie erscheint hier nach wenigen Sekunden. Koppelt man einen
+Spieltag Internet. Die Aufstellung ändert man in badhub; sie erscheint hier nach wenigen Sekunden. Ein Spiel, dessen Aufstellung noch nicht vollständig ist, lässt sich nicht aufrufen. Koppelt man einen
 zweiten PC an dasselbe Punktspiel, verliert der erste den Zugang. Im Ansage-Slave-Modus gibt es diese Wahl nicht.
 <!-- pruef: "Kopplungscode erzeugen" in src/pages/SetupWizard.tsx -->
 

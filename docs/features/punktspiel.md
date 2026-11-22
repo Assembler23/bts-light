@@ -32,10 +32,15 @@ Alles in `src-tauri/src/quelle/punktspiel.rs`.
 | Kopplung | `POST {basis}/koppeln` mit Code, Installations-ID und Name. Das Gerätetoken liegt verschlüsselt unter `punktspiele/<uuid>/geraet.bin` (Schlüssel `punktspiele/schluessel.bin`, Verfahren wie bei badhub-Turnieren). In `config.json` steht nur `punktspiel` (Kennung, Name, API-Basis, Gerätename), nie das Token |
 | API-Basis | aus der Liveticker-Adresse: `…/api/live_update.php` → `…/api/ls/v1`. Folgt dem Testsystem-Schalter, nur https |
 | Lesen | `stand()` fragt im Takt der Sync-Schleife (5 s) `GET {basis}/begegnung` mit `If-None-Match`. Das Paket wird nicht gespeichert |
-| Abbildung | `abbilden()`: Match-ID = Spielnummer, Feld-ID = Feldnummer, je Spiel eine Klasse mit dem Disziplinnamen („1.HD“), Runde = „Heim – Gast“, Verein = Mannschaftsname. Offene Plätze der Aufstellung heißen „N. N.“ |
+| Abbildung | `abbilden()`: Match-ID = Spielnummer, Feld-ID = Feldnummer, je Spiel eine Klasse mit dem Disziplinnamen („1.HD“), Runde = „Heim – Gast“, Verein = Mannschaftsname. Eine Seite mit unvollständiger Aufstellung bleibt leer: das Spiel ist dann nicht spielbereit und wird weder von Hand noch automatisch aufgerufen |
 | Feldvergabe | `feld_meldungen()`: Aufruf = Spiel läuft auf Feld n, Freigabe = Spiel wieder offen. Ein beendetes Spiel wird nicht wieder geöffnet |
-| Ergebnis | `ergebnis_meldung()`: Sätze, Sieger (`heim`/`gast`), Ausgang (`normal`, `kampflos`, `aufgabe`) |
+| Ergebnis | `ergebnis_meldung()`: Sätze, Sieger (`heim`/`gast`), Ausgang (`normal`, `kampflos`, `aufgabe`, `disqualifikation`) |
 | Meldung | `POST {basis}/begegnung/spiel` trägt immer den ganzen Zustand eines Spiels. Die Antwort ist das neue Paket |
+
+### Gleichzeitigkeit
+
+Der Abruf der Sync-Schleife und eine Meldung können sich überholen. Jede Meldung zählt einen Zähler hoch; ein Abruf,
+der vor einer Meldung losging und danach ankommt, wird verworfen. So zeigt die Halle nie kurz einen älteren Stand.
 
 ### Netz
 
@@ -49,7 +54,8 @@ Begegnung als gespielt, meldet die Übertragung das als Fehler, statt mit altem 
 ### Was es nicht gibt
 
 - Schiedsrichter-Besetzung und Zeilenfarbe werden nicht an badhub gemeldet (lokal erledigt).
-- Check-In, TP-Datei, Zeitplan, Standby-PC und Ansage-Slave: nicht für Punktspiele.
+- Check-In, TP-Datei, Zeitplan und Standby-PC: nicht für Punktspiele. `checkin_bereit()` ist für die Quelle immer aus.
+- Ansage-Slave: Die Übertragung startet mit der Quelle „Punktspiel“ im Slave-Modus nicht und nennt den Grund.
 - Die Aufstellung ändert man in badhub, nicht in bts-light. Änderungen erscheinen nach wenigen Sekunden.
 
 ## Tests

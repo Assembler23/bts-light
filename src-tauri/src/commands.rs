@@ -1247,8 +1247,6 @@ pub async fn badhub_koppeln(
     Ok(kopplung)
 }
 
-/// Gekoppeltes badhub-Turnier (für den Einrichtungsassistenten); `None`, wenn
-/// keins gekoppelt ist.
 /// Koppelt diesen PC mit einem Punktspiel aus badhub (Live-Scoring für
 /// Punktspiele): Code einlösen, Gerätetoken verschlüsselt ablegen, Kopplung in
 /// die Konfiguration schreiben. Die Quelle selbst stellt das Setup um.
@@ -1286,6 +1284,8 @@ pub fn punktspiel_info(state: State<'_, AppState>) -> Option<crate::config::Punk
     cfg.punktspiel.gekoppelt().then(|| cfg.punktspiel.clone())
 }
 
+/// Gekoppeltes badhub-Turnier (für den Einrichtungsassistenten); `None`, wenn
+/// keins gekoppelt ist.
 #[tauri::command]
 pub fn badhub_turnier_info(
     state: State<'_, AppState>,
@@ -2375,6 +2375,14 @@ fn effective_tts_mit_teilen(
 /// die turnier.de-GUID — ohne sie könnte badhub das Turnier nicht von einem
 /// parallel laufenden desselben Verbands unterscheiden.
 pub(crate) fn pruefe_startbedingungen(config: &crate::config::AppConfig) -> Result<(), String> {
+    // Ein Punktspiel läuft nur am Turnier-PC: ein Ansage-Slave hätte kein
+    // Token und meldete jeden Takt „kein Punktspiel geladen“.
+    if config.slave_mode && config.quelle == crate::config::QuelleArt::Punktspiel {
+        return Err(
+            "Ein Punktspiel lässt sich nicht im Ansage-Slave-Modus zählen — im Setup den Slave-Modus ausschalten oder eine andere Turnierquelle wählen."
+                .to_string(),
+        );
+    }
     if config.slave_mode {
         return Ok(());
     }

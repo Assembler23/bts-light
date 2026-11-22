@@ -168,13 +168,18 @@ fn zaehlformat(z: &str) -> ScoringFormat {
     }
 }
 
-/// Eine Seite eines Spiels. Ein offener Platz der Aufstellung wird zu
-/// „N. N.“ (ID 0 = unbekannt), damit Tablet und Monitor immer so viele
-/// Namen zeigen, wie die Disziplin Plätze hat.
+/// Eine Seite eines Spiels. Ist die Aufstellung der Seite unvollständig,
+/// bleibt sie **leer**: ein Spiel mit leerer Seite gilt im ganzen Programm als
+/// nicht spielbereit und wird weder von Hand noch automatisch aufgerufen. Ein
+/// Platzhalter-Spieler wäre dagegen ein „Spieler“, den zwei Spiele teilen —
+/// die Verfügbarkeitsprüfung hielte sie für gleichzeitig unmöglich.
 fn seite(personen: &[PaketPerson], doppel: bool, mannschaft: &str) -> Vec<BtpPlayer> {
     let plaetze = if doppel { 2 } else { 1 };
+    if personen.len() < plaetze {
+        return Vec::new();
+    }
     let verein = Some(mannschaft.trim().to_string()).filter(|m| !m.is_empty());
-    let mut team: Vec<BtpPlayer> = personen
+    personen
         .iter()
         .take(plaetze)
         .map(|p| BtpPlayer {
@@ -195,19 +200,7 @@ fn seite(personen: &[PaketPerson], doppel: bool, mannschaft: &str) -> Vec<BtpPla
             nationality: None,
             club: verein.clone(),
         })
-        .collect();
-    while team.len() < plaetze {
-        team.push(BtpPlayer {
-            id: 0,
-            name: "N. N.".into(),
-            first: String::new(),
-            last: "N. N.".into(),
-            member_id: None,
-            nationality: None,
-            club: verein.clone(),
-        });
-    }
-    team
+        .collect()
 }
 
 /// Bildet das Paket auf den Snapshot ab, mit dem Tablets, Monitore und
@@ -246,12 +239,11 @@ pub fn abbilden(paket: &Paket) -> BtpSnapshot {
             discipline,
         });
         for (id, team) in [(entry1_id, &team1), (entry2_id, &team2)] {
-            let bekannte: Vec<BtpPlayer> = team.iter().filter(|p| p.id != 0).cloned().collect();
-            if !bekannte.is_empty() {
+            if !team.is_empty() {
                 entries.push(BtpEntry {
                     id,
                     event_id: s.nr,
-                    players: bekannte,
+                    players: team.clone(),
                     seed: None,
                 });
             }
@@ -394,7 +386,7 @@ pub fn feld_meldungen(paket: &Paket, courts: &[proto::CourtAssignment]) -> Vec<M
 }
 
 /// Meldung für ein Ergebnis. `score_status` wie in BTP: 1 = kampflos,
-/// 2 = Aufgabe, sonst regulär.
+/// 2 = Aufgabe, 3 = Disqualifikation, sonst regulär.
 pub fn ergebnis_meldung(update: &proto::MatchUpdate) -> Meldung {
     Meldung {
         nr: update.btp_match_id,
@@ -405,6 +397,7 @@ pub fn ergebnis_meldung(update: &proto::MatchUpdate) -> Meldung {
         ausgang: match update.score_status {
             1 => "kampflos",
             2 => "aufgabe",
+            3 => "disqualifikation",
             _ => "normal",
         },
     }
@@ -669,6 +662,9 @@ struct Zustand {
     uuid: String,
     paket: Option<Paket>,
     etag: Option<String>,
+    /// Zählt jede Meldung. Ein Abruf, der vor einer Meldung losging und
+    /// danach ankommt, trägt einen älteren Stand und wird verworfen.
+    meldungen: u64,
 }
 
 static ZUSTAND: Mutex<Option<Zustand>> = Mutex::new(None);
@@ -682,20 +678,40 @@ const NICHT_GELADEN: &str =
 
 /// Zugang und ETag für den nächsten Aufruf (ohne die Sperre über ein `await`
 /// zu halten).
-fn zugang() -> Result<(String, String, Option<String>), String> {
+fn zugang() -> Result<(String, String, Option<String>, u64), String> {
     match zustand().as_ref() {
-        Some(z) => Ok((z.basis.clone(), z.token.clone(), z.etag.clone())),
+        Some(z) => Ok((
+            z.basis.clone(),
+            z.token.clone(),
+            z.etag.clone(),
+            z.meldungen,
+        )),
         None => Err(NICHT_GELADEN.into()),
     }
 }
 
-fn uebernehmen(paket: Paket, etag: Option<String>) {
+/// Übernimmt ein Paket. `abruf_von` = Stand des Meldungszählers, als der
+/// Abruf losging (`None` = Antwort auf eine eigene Meldung, immer aktuell).
+fn uebernehmen(paket: Paket, etag: Option<String>, abruf_von: Option<u64>) {
     if let Some(z) = zustand().as_mut() {
         // Ein Paket einer anderen Begegnung kann nur ein Serverfehler sein —
         // nie anzeigen, was nicht gekoppelt ist.
-        if paket.begegnung.uuid.eq_ignore_ascii_case(&z.uuid) {
-            z.paket = Some(paket);
-            z.etag = etag;
+        if !paket.begegnung.uuid.eq_ignore_ascii_case(&z.uuid) {
+            return;
+        }
+        match abruf_von {
+            // Seit dem Start des Abrufs kam eine Meldung dazwischen: der
+            // Abruf ist älter als der Stand aus ihrer Antwort.
+            Some(von) if von != z.meldungen => {}
+            Some(_) => {
+                z.paket = Some(paket);
+                z.etag = etag;
+            }
+            None => {
+                z.meldungen += 1;
+                z.paket = Some(paket);
+                z.etag = etag;
+            }
         }
     }
 }
@@ -709,6 +725,12 @@ pub fn starten(config: &AppConfig, daten: &Path) -> bool {
     if !p.gekoppelt() {
         return false;
     }
+    // Die Basis kommt aus der Konfigurationsdatei: dieselbe Prüfung wie beim
+    // Koppeln (nur https, Klartext nur lokal) — das Token reist in jeder Anfrage.
+    if super::badhub::api_basis(&p.basis).is_err() {
+        tracing::warn!(target: "punktspiel", "API-Adresse der Kopplung ungültig — bitte neu koppeln");
+        return false;
+    }
     let Some(token) = token_laden(daten, &p.uuid) else {
         tracing::warn!(target: "punktspiel", "Gerätetoken fehlt — bitte neu koppeln");
         return false;
@@ -719,6 +741,7 @@ pub fn starten(config: &AppConfig, daten: &Path) -> bool {
         uuid: p.uuid.clone(),
         paket: None,
         etag: None,
+        meldungen: 0,
     });
     true
 }
@@ -738,9 +761,9 @@ pub fn schreiben_moeglich() -> bool {
 /// den zuletzt gelesenen Stand zurück; ein abgelehnter Zugang ist dagegen
 /// immer ein Fehler — sonst zählte die Halle weiter, ohne dass etwas ankommt.
 pub async fn stand() -> Result<BtpSnapshot, String> {
-    let (basis, token, etag) = zugang()?;
+    let (basis, token, etag, von) = zugang()?;
     match api_begegnung(&basis, &token, etag.as_deref()).await {
-        Ok(Some((paket, etag))) => uebernehmen(paket, etag),
+        Ok(Some((paket, etag))) => uebernehmen(paket, etag, Some(von)),
         Ok(None) => {}
         Err(e @ (ApiFehler::Zugang | ApiFehler::Beendet)) => return Err(e.to_string()),
         Err(e) => {
@@ -759,11 +782,11 @@ pub async fn stand() -> Result<BtpSnapshot, String> {
 
 async fn melden(meldungen: Vec<Meldung>) -> Result<(), String> {
     for m in meldungen {
-        let (basis, token, _) = zugang()?;
+        let (basis, token, _, _) = zugang()?;
         let (paket, etag) = api_melden(&basis, &token, &m)
             .await
             .map_err(|e| e.to_string())?;
-        uebernehmen(paket, etag);
+        uebernehmen(paket, etag, None);
     }
     Ok(())
 }
@@ -817,7 +840,9 @@ pub async fn koppeln(
         .await
         .map_err(|e| e.to_string())?;
     let uuid = antwort.begegnung.uuid.to_ascii_lowercase();
-    if !super::badhub::uuid_gueltig(&uuid) {
+    // Die Kennung ist zugleich die GUID des Livetickers — nur eine echte GUID
+    // gilt dort (sonst liefe der Ticker unter einem alten Turnier weiter).
+    if !super::badhub::uuid_gueltig(&uuid) || crate::config::kanonische_guid(&uuid).is_none() {
         return Err(ApiFehler::Format("Kennung der Begegnung".into()).to_string());
     }
     let (paket, _) = api_begegnung(basis, &antwort.token, None)

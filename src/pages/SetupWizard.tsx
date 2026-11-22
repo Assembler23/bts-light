@@ -1733,6 +1733,7 @@ export function SetupWizard({
                 description="Das Turnier ist in badhub organisiert."
                 active={quelle === "badhub"}
                 onClick={() => {
+                  if (quelle !== "badhub") setKopplungsCode("");
                   setQuelle("badhub");
                   // Vorgabe bei einem badhub-Turnier: Cloud-Weg an. Ohne ihn
                   // meldet die Lease keinen Rückweg, und badhub erreicht die
@@ -1746,7 +1747,12 @@ export function SetupWizard({
                   title="Punktspiel"
                   description="Ein Ligaspiel aus badhub live zählen."
                   active={quelle === "punktspiel"}
-                  onClick={() => setQuelle("punktspiel")}
+                  onClick={() => {
+                    // Der Code gilt je Quelle: ein für das badhub-Turnier
+                    // eingetippter soll nicht hier eingelöst werden.
+                    if (quelle !== "punktspiel") setKopplungsCode("");
+                    setQuelle("punktspiel");
+                  }}
                 />
               )}
             </div>

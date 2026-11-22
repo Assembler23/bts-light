@@ -123,18 +123,19 @@ fn abbildung_spieler_verein_lizenz_und_offene_plaetze() {
     );
     assert_eq!(hd.team1[0].member_id.as_deref(), Some("01-000011"));
     assert_eq!(hd.team1[0].club.as_deref(), Some("TV Heim 1"));
-    // der zweite Gast fehlt in der Aufstellung: Platzhalter statt eines Einzels im Doppel
-    assert_eq!(hd.team2.len(), 2);
-    assert_eq!((hd.team2[1].id, hd.team2[1].name.as_str()), (0, "N. N."));
-    assert_eq!(hd.team2[1].club.as_deref(), Some("SV Gast 1"));
+    // der zweite Gast fehlt in der Aufstellung: die Seite bleibt leer, das Spiel ist nicht spielbereit
+    assert!(hd.team2.is_empty());
     // Einzel: genau ein Platz je Seite
     assert_eq!((s.matches[1].team1.len(), s.matches[1].team2.len()), (1, 1));
-    // Meldeliste nur mit bekannten Personen
-    assert!(s
-        .entries
-        .iter()
-        .all(|e| e.players.iter().all(|p| p.id != 0)));
+    // Meldeliste nur von vollständigen Seiten
+    assert_eq!(s.entries.iter().filter(|e| e.event_id == 1).count(), 1);
     assert_eq!(s.entries.iter().filter(|e| e.event_id == 3).count(), 0);
+    // zwei Spiele ohne Aufstellung teilen keinen Platzhalter-Spieler
+    assert!(s.matches[2].team1.is_empty() && s.matches[3].team1.is_empty());
+    assert!(s
+        .matches
+        .iter()
+        .all(|m| m.team1.iter().chain(&m.team2).all(|p| p.id != 0)));
 }
 
 #[test]
@@ -240,6 +241,11 @@ fn ergebnis_als_meldung() {
     assert_eq!(ergebnis_meldung(&update(2, false, 2)).sieger, Some("gast"));
     assert_eq!(ergebnis_meldung(&update(2, false, 2)).ausgang, "aufgabe");
     assert_eq!(ergebnis_meldung(&update(2, true, 1)).ausgang, "kampflos");
+    assert_eq!(
+        ergebnis_meldung(&update(2, true, 3)).ausgang,
+        "disqualifikation"
+    );
+    assert_eq!(ergebnis_meldung(&update(2, true, 9)).ausgang, "normal");
     let json = serde_json::to_value(ergebnis_meldung(&update(2, true, 0))).unwrap();
     assert_eq!(json["saetze"][1], serde_json::json!([19, 21]));
     assert_eq!(json["feld"], serde_json::Value::Null);
@@ -460,6 +466,35 @@ async fn koppeln_lesen_melden_und_fehler() {
     assert!(stand().await.unwrap_err().contains("neu koppeln"));
     *a.status.lock().unwrap() = 403;
     assert!(stand().await.unwrap_err().contains("nuLiga"));
+
+    // Verspäteter Abruf: ging vor einer Meldung los und kommt danach an — sein älterer Stand zählt nicht
+    *a.status.lock().unwrap() = 0;
+    let (_, _, _, von) = zugang().unwrap();
+    let alt = paket_lesen(paket_json().to_string().as_bytes()).unwrap();
+    feld_vergabe(&[zuweisung(1, Some(1))])
+        .await
+        .expect("Meldung dazwischen");
+    uebernehmen(alt.clone(), Some("\"alt\"".into()), Some(von));
+    assert_eq!(
+        paket_kopie().unwrap().spiele[0].status,
+        "laeuft",
+        "der neuere Stand aus der Meldung bleibt"
+    );
+    // ein Paket einer anderen Begegnung wird nie übernommen
+    let mut fremd = alt;
+    fremd.begegnung.uuid = "ffffffff-ffff-4fff-8fff-ffffffffffff".into();
+    fremd.begegnung.name = "Fremd".into();
+    uebernehmen(fremd, None, None);
+    assert_eq!(
+        paket_kopie().unwrap().begegnung.name,
+        "TV Heim 1 – SV Gast 1"
+    );
+
+    // Kopplung mit Klartext-Adresse in der Konfiguration (von Hand geändert): nicht laden
+    let mut unsicher = config.clone();
+    unsicher.punktspiel.basis = "http://badhub.de/api/ls/v1".into();
+    assert!(!starten(&unsicher, daten.path()));
+    assert!(starten(&config, daten.path()));
 
     // Neustart ohne Token-Datei: nicht geladen
     std::fs::remove_file(&datei).unwrap();

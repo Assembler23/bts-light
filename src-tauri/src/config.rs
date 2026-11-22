@@ -2066,6 +2066,11 @@ impl AppConfig {
     /// Ist der Check-In einsatzbereit? Bei Quelle badhub mit der GUID aus der
     /// Kopplung, sonst unverändert [`CheckinConfig::is_ready`].
     pub fn checkin_bereit(&self) -> bool {
+        // Ein Punktspiel hat keinen Check-In: die Meldeliste eines früheren
+        // Turniers ginge sonst unter der Kennung der Begegnung an badhub.
+        if self.quelle == QuelleArt::Punktspiel {
+            return false;
+        }
         match self.badhub_guid() {
             Some(_) => self.checkin.enabled,
             None => self.checkin.is_ready(),
