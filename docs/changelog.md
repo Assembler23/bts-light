@@ -4,6 +4,14 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.472
+
+- **Turnierkern 0.24.0** – gleiche Version wie badhub. Turniere können dort „nach Zeit“ spielen
+  (zum Beispiel 1 × 10 Minuten, es zählt der Stand beim Abpfiff) und einen Timer für alle Felder
+  starten. Der Timer wird in badhub gesteuert und angezeigt; bts-light nimmt die Timer-Befehle
+  an. Am Tablet wird ein Spiel nach Zeit noch nicht mitgezählt – das Ergebnis trägt die
+  Turnierleitung ein.
+
 ## v0.9.471
 
 - **Turnierkern 0.23.0** – gleiche Version wie badhub. Turniere können dort eine
