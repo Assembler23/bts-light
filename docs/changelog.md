@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.471
+
+- **Turnierkern 0.23.0** – gleiche Version wie badhub. Turniere können dort eine
+  Forderungs-Leiter spielen; Forderungen trägt die Turnierleitung in badhub ein, bts-light
+  führt die Spiele wie gewohnt auf Feldern und Tablets.
+
 ## v0.9.470
 
 - **Turnierkern 0.22.0** – gleiche Version wie badhub. Turniere können dort „KO mit Ausspielen der
