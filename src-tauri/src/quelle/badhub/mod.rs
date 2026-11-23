@@ -45,7 +45,7 @@ use turnierkern::{TurnierBefehl, TurnierEreignis, TurnierStand};
 
 /// Version der eingebundenen Kern-Crate (gleich dem Tag in `Cargo.toml`,
 /// geprüft im Test `kern_version_passt_zum_cargo_tag`).
-pub const KERN_VERSION: &str = "0.21.0";
+pub const KERN_VERSION: &str = "0.22.0";
 
 /// Takt der Ereignis-Abfrage.
 const EREIGNIS_TAKT: Duration = Duration::from_secs(5);

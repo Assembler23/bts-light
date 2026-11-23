@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.470
+
+- **Turnierkern 0.22.0** – gleiche Version wie badhub. Turniere können dort „KO mit Ausspielen der
+  Plätze“ und „Doppel-KO“ spielen; bts-light führt ihre Spiele wie KO-Spiele, die Bezeichnung
+  („Verliererrunde“, „Spiel um Platz 5“, „Endspiel“) kommt mit dem Turnierpaket.
+
 ## v0.9.469
 
 - **Turnierkern 0.21.0** – gleiche Version wie badhub. Turniere können dort die Spielsysteme
