@@ -352,7 +352,7 @@ pub const ERLAUBTE_ARTEN: [&str; 11] = [
 /// nichts gesperrt — Meldungen, Personen, Zeitplan, Zählweise, Setzliste,
 /// Auslosung, Konkurrenzen. Die Halle prüft jeden Befehl im Kern wie eine
 /// eigene Eingabe. Nicht dabei: `eroeffnen` und `absagen`.
-pub const ERLAUBTE_ARTEN_BADHUB: [&str; 38] = [
+pub const ERLAUBTE_ARTEN_BADHUB: [&str; 42] = [
     "melden",
     "zurueckziehen",
     "status_setzen",
@@ -393,6 +393,11 @@ pub const ERLAUBTE_ARTEN_BADHUB: [&str; 38] = [
     "fordern",
     "forderung_zuruecknehmen",
     "leiter_schliessen",
+    // Timer des Turniers (Kern 0.24.0)
+    "timer_starten",
+    "timer_pausieren",
+    "timer_fortsetzen",
+    "timer_beenden",
 ];
 
 /// Darf badhub diesen Befehl übers Relay schicken?
