@@ -4,6 +4,12 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.473
+
+- **Turnierkern 0.25.0** – gleiche Version wie badhub. Neu ist dort das Schleifchenturnier:
+  alle melden einzeln, jede Runde lost badhub neue Doppel. bts-light zeigt bei solchen
+  Spielen beide Personen je Seite auf Feldern, Monitoren und Tablets.
+
 ## v0.9.472
 
 - **Turnierkern 0.24.0** – gleiche Version wie badhub. Turniere können dort „nach Zeit“ spielen

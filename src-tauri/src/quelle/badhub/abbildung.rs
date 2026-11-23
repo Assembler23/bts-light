@@ -330,18 +330,23 @@ pub fn abbilden(stand: &TurnierStand, paket: &Paket) -> BtpSnapshot {
             // Zählweise je Spiel (Kern ab 0.14.0: Spiel → Konkurrenz/KO-Phase → Turnier → 3×21),
             // nicht mehr je Konkurrenz — Gruppen 3×15 und KO 3×21 oder ein Finale 5×11 gehen so durch.
             let scoring = zaehlformat(&s.zaehlweise);
-            let team = |m: Option<u32>| -> (i64, Vec<BtpPlayer>, Option<String>) {
-                match m {
-                    Some(m) => (
-                        i64::from(m),
-                        personen.get(&m).cloned().unwrap_or_default(),
-                        setzplaetze.get(&m).cloned(),
-                    ),
-                    None => (0, Vec::new(), None),
-                }
-            };
-            let (entry1_id, team1, team1_seed) = team(s.oben);
-            let (entry2_id, team2, team2_seed) = team(s.unten);
+            // Schleifchenturnier (Kern 0.25.0): die Seite ist ein für die Runde gelostes Paar aus
+            // zwei Einzelmeldungen — die Person der Partner-Meldung spielt auf derselben Seite.
+            let team =
+                |m: Option<u32>, partner: Option<u32>| -> (i64, Vec<BtpPlayer>, Option<String>) {
+                    match m {
+                        Some(m) => {
+                            let mut spieler = personen.get(&m).cloned().unwrap_or_default();
+                            if let Some(p) = partner {
+                                spieler.extend(personen.get(&p).cloned().unwrap_or_default());
+                            }
+                            (i64::from(m), spieler, setzplaetze.get(&m).cloned())
+                        }
+                        None => (0, Vec::new(), None),
+                    }
+                };
+            let (entry1_id, team1, team1_seed) = team(s.oben, s.partner_oben);
+            let (entry2_id, team2, team2_seed) = team(s.unten, s.partner_unten);
             let feld = s.feld.as_deref().and_then(|f| feld_zu(&felder, f));
             let winner = s.ergebnis.as_ref().map(|e| match e.sieger {
                 Seite::Oben => 1u8,

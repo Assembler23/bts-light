@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "bts-light"
-version = "0.9.472"
+version = "0.9.473"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -5595,8 +5595,8 @@ dependencies = [
 
 [[package]]
 name = "turnierkern"
-version = "0.24.0"
-source = "git+https://github.com/Assembler23/turnierkern?tag=v0.24.0#7c8c8d5d8eb9f0c5c0d44ea700b93681b9abc66b"
+version = "0.25.0"
+source = "git+https://github.com/Assembler23/turnierkern?tag=v0.25.0#ac643d2de94b0d4e8f532a279adbdb8aef2c31d1"
 dependencies = [
  "serde",
 ]
