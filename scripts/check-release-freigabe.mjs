@@ -38,7 +38,7 @@ import { cargoVersion, tauriVersion, istHauptmodul } from "./check-version-tagge
  * @param {string|null} e.paket       Version aus package.json
  * @param {boolean}     e.tagVorhanden  gibt es v<Version> schon auf dem Server?
  * @param {{status:string, conclusion:string|null, headSha:string}|null} e.ci
- *        jüngster CI-Lauf auf main (Push), null = keiner gefunden
+ *        maßgeblicher CI-Lauf auf main (siehe waehleCi), null = keiner gefunden
  * @param {string[]|null} [e.seitCi]
  *        Dateien, die sich zwischen dem Commit des CI-Laufs und `sha` geändert
  *        haben; null = nicht ermittelbar. Nur von Belang, wenn der Lauf zu
@@ -100,7 +100,8 @@ export function pruefeFreigabe({ ref, sha, mainSpitze, eingabe, cargo, tauri, pa
       if (ungeprueft.length > 0) {
         fehler.push(
           `Für diesen Commit gibt es noch keinen CI-Lauf (seit dem letzten geändert: ${ungeprueft.slice(0, 3).join(", ")}` +
-            `${ungeprueft.length > 3 ? " …" : ""}) — kurz warten und neu auslösen.`,
+            `${ungeprueft.length > 3 ? " …" : ""}) — kurz warten und neu auslösen. Kommt keiner ` +
+            `(Merge durch einen Workflow, z. B. Dependabot): „gh workflow run ci.yml --ref main".`,
         );
       }
     }
@@ -131,6 +132,24 @@ export function ciUeberspringt(pfad) {
     pfad.startsWith(".github/ISSUE_TEMPLATE/") ||
     pfad === "LICENSE"
   );
+}
+
+/**
+ * Welcher CI-Lauf gilt? Die Regel will den Lauf für den zu taggenden Commit.
+ * Normalerweise ist das der jüngste Push-Lauf. Merged aber ein Workflow mit
+ * dem GITHUB_TOKEN (Dependabot-Automerge), startet GitHub KEINEN Push-Lauf —
+ * dann zählt ein von Hand gestarteter Lauf (`workflow_dispatch` auf main),
+ * sofern er genau diesen Commit geprüft hat. Sonst bleibt es beim Push-Lauf,
+ * damit die Doku-Ausnahme (`seitCi`) wie bisher greift.
+ *
+ * @param {{headSha:string}|null} push  jüngster Push-Lauf auf main
+ * @param {{headSha:string}|null} hand  jüngster Hand-Lauf auf main
+ * @param {string} sha                  zu taggender Commit
+ */
+export function waehleCi(push, hand, sha) {
+  if (push && push.headSha === sha) return push;
+  if (hand && sha && hand.headSha === sha) return hand;
+  return push ?? null;
 }
 
 /** Version aus package.json. */
@@ -166,15 +185,17 @@ if (istHauptmodul(import.meta.url, process.argv[1])) {
   const tagZeile = versuch(() => lauf("git", "ls-remote", "--tags", "origin", `refs/tags/v${cargo}`));
   const tagVorhanden = tagZeile === null ? true : tagZeile.length > 0;
 
-  const ci = versuch(() => {
-    const laeufe = JSON.parse(
-      lauf("gh", "run", "list", "--workflow", "ci.yml", "--branch", "main", "--event", "push",
-        "--limit", "1", "--json", "status,conclusion,headSha"),
-    );
-    return laeufe[0] ?? null;
-  });
+  const juengster = (event) =>
+    versuch(() => {
+      const laeufe = JSON.parse(
+        lauf("gh", "run", "list", "--workflow", "ci.yml", "--branch", "main", "--event", event,
+          "--limit", "1", "--json", "status,conclusion,headSha"),
+      );
+      return laeufe[0] ?? null;
+    });
 
   const sha = process.env.GITHUB_SHA ?? "";
+  const ci = waehleCi(juengster("push"), juengster("workflow_dispatch"), sha);
   // Abstand zwischen geprüftem und zu taggendem Commit. Der CI-Commit muss ein
   // Vorfahre sein (braucht die volle Historie: fetch-depth 0 im Workflow).
   let seitCi = null;

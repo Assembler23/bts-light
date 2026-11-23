@@ -5,7 +5,7 @@
 // und einem Auto-Update auf allen Turnier-PCs steht — jeder Hinderungsgrund
 // bekommt deshalb einen eigenen Test, und jeder Lesefehler muss sperren.
 import { readFileSync } from "node:fs";
-import { pruefeFreigabe, paketVersion, ciUeberspringt, CI_PATHS_IGNORE } from "./check-release-freigabe.mjs";
+import { pruefeFreigabe, paketVersion, ciUeberspringt, waehleCi, CI_PATHS_IGNORE } from "./check-release-freigabe.mjs";
 
 let failures = 0;
 function eq(name, got, want) {
@@ -86,6 +86,24 @@ for (const [p, w] of [
   [".github/ISSUE_TEMPLATE/bug.yml", true], [".github/workflows/ci.yml", false],
   ["scripts/check-release-freigabe.mjs", false], ["src-tauri/Cargo.toml", false], ["docs", false],
 ]) eq(`ciUeberspringt(${p})`, ciUeberspringt(p), w);
+
+// ── Hand-Lauf, wenn der Merge keinen Push-Lauf auslöste ────────────────────
+// Dependabot-Automerge pusht mit dem GITHUB_TOKEN: Für die Spitze von main
+// entsteht nie ein Push-Lauf (so hing v0.9.473 am 23.11.2026).
+{
+  const push = { status: "completed", conclusion: "success", headSha: "alt" };
+  const hand = { status: "completed", conclusion: "success", headSha: "aaa" };
+  eq("Push-Lauf für den Commit gewinnt", waehleCi({ ...push, headSha: "aaa" }, hand, "aaa").headSha, "aaa");
+  eq("Hand-Lauf für den Commit zählt", waehleCi(push, hand, "aaa"), hand);
+  eq("Hand-Lauf für fremden Commit zählt nicht", waehleCi(push, { ...hand, headSha: "x" }, "aaa"), push);
+  eq("kein Hand-Lauf → Push-Lauf", waehleCi(push, null, "aaa"), push);
+  eq("gar kein Lauf → null", waehleCi(null, null, "aaa"), null);
+  eq("nur fremder Hand-Lauf → null", waehleCi(null, { ...hand, headSha: "x" }, "aaa"), null);
+  eq("leerer Commit greift nie zum Hand-Lauf", waehleCi(null, { ...hand, headSha: "" }, ""), null);
+  eq("Hand-Lauf grün → Freigabe", u({ ci: waehleCi(push, hand, "aaa") }).ok, true);
+  eq("Hand-Lauf rot → gesperrt", u({ ci: waehleCi(push, { ...hand, conclusion: "failure" }, "aaa") }).ok, false);
+  eq("ci.yml ist von Hand startbar", /^  workflow_dispatch:\s*$/m.test(ciYml), true);
+}
 
 // ── Alle Gründe auf einmal, nicht nur der erste ────────────────────────────
 eq(

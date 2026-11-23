@@ -286,6 +286,17 @@ Deshalb vergleicht die Regel den Commit des Laufs mit dem zu taggenden. Ein
 für die `ci.yml` auf `main` gar nicht startet (`paths-ignore`: Markdown,
 `docs/`) — ein Test hält die beiden Listen deckungsgleich.
 
+**Merge ohne CI-Lauf (Dependabot).** Den Automerge für Dependabot-PRs führt ein
+Workflow mit dem `GITHUB_TOKEN` aus, und Pushes mit diesem Token starten keine
+Workflows — für die Spitze von `main` entsteht dann **nie** ein Push-Lauf, und
+die Freigabe sperrt dauerhaft. Abhilfe: die CI von Hand starten und nach ihrem
+grünen Ende neu auslösen. Ein Hand-Lauf zählt nur, wenn er genau den zu
+taggenden Commit geprüft hat.
+
+```
+gh workflow run ci.yml --ref main
+```
+
 Schlägt eine Prüfung fehl, nennt der Lauf **alle** Gründe und setzt keinen Tag.
 Geht alles durch, pusht der Job `taggen` einen annotierten Tag — und der löst
 wie bisher `release.yml` aus.
