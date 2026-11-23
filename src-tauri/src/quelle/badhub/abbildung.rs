@@ -332,18 +332,19 @@ pub fn abbilden(stand: &TurnierStand, paket: &Paket) -> BtpSnapshot {
             let scoring = zaehlformat(&s.zaehlweise);
             // Schleifchenturnier (Kern 0.25.0): die Seite ist ein für die Runde gelostes Paar aus
             // zwei Einzelmeldungen — die Person der Partner-Meldung spielt auf derselben Seite.
-            let team = |m: Option<u32>, partner: Option<u32>| -> (i64, Vec<BtpPlayer>, Option<String>) {
-                match m {
-                    Some(m) => {
-                        let mut spieler = personen.get(&m).cloned().unwrap_or_default();
-                        if let Some(p) = partner {
-                            spieler.extend(personen.get(&p).cloned().unwrap_or_default());
+            let team =
+                |m: Option<u32>, partner: Option<u32>| -> (i64, Vec<BtpPlayer>, Option<String>) {
+                    match m {
+                        Some(m) => {
+                            let mut spieler = personen.get(&m).cloned().unwrap_or_default();
+                            if let Some(p) = partner {
+                                spieler.extend(personen.get(&p).cloned().unwrap_or_default());
+                            }
+                            (i64::from(m), spieler, setzplaetze.get(&m).cloned())
                         }
-                        (i64::from(m), spieler, setzplaetze.get(&m).cloned())
+                        None => (0, Vec::new(), None),
                     }
-                    None => (0, Vec::new(), None),
-                }
-            };
+                };
             let (entry1_id, team1, team1_seed) = team(s.oben, s.partner_oben);
             let (entry2_id, team2, team2_seed) = team(s.unten, s.partner_unten);
             let feld = s.feld.as_deref().and_then(|f| feld_zu(&felder, f));
