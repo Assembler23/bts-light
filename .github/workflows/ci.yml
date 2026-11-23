@@ -18,6 +18,13 @@ on:
     # dauerhaft auf "ausstehend" statt gemergt zu werden. Lieber ein
     # ueberfluessiger Build als ein blockierter Doku-PR.
 
+  # Von Hand startbar (Actions-Tab oder `gh workflow run ci.yml --ref main`).
+  # Noetig, wenn ein Merge KEINEN Push-Lauf ausloest: Dependabot-PRs merged
+  # der Automerge mit dem GITHUB_TOKEN, und dessen Pushes starten bewusst keine
+  # Workflows. Ohne Lauf fuer die Spitze von main sperrt die Release-Freigabe
+  # (scripts/check-release-freigabe.mjs) -- dauerhaft, nicht nur kurz.
+  workflow_dispatch:
+
 # Dieser Job laeuft auf windows-latest, und Windows-Minuten zaehlen bei GitHub
 # DOPPELT. Gemessen 2026-08-08: ein Lauf ~626 s = 11 min, also 22 berechnete
 # Minuten -- so viel wie zwei komplette badhub-PRs mit acht Jobs.
