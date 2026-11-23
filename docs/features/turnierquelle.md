@@ -331,3 +331,23 @@ badhub kappt `GET turnier/paket` auf höchstens 2000 Ereignisse und liefert nebe
   `uebernehmen_mit_mehr_bestaetigten_als_das_gekappte_paket_traegt_laedt_nach_und_nimmt_die_lease`,
   `haengender_stand_aus_v0_9_450_heilt_beim_laden`, `gleichzeitige_rueckgabe_bleibt_zurueckgegeben_und_holt_keine_namen_zurueck`
   (`tests_l3.rs`).
+
+## Timer des Turniers auf den Feldmonitoren (v0.9.474)
+
+Der Kern (ab 0.24.0) kennt einen Timer für alle Felder (`timer_starten`, `timer_pausieren`,
+`timer_fortsetzen`, `timer_beenden`); gesteuert wird er in badhub. Bei Quelle badhub hängt der
+Turnier-PC den Stand an den Anzeige-Zustand der Feldmonitore (`MonitorState.turnierTimer`,
+`relay-proto`):
+
+- läuft: `endsAtMs` (Ende in der Uhr des Turnier-PCs), angehalten: `restS` (eingefrorene Restzeit).
+  Beide ändern sich zwischen zwei Abrufen nicht, die Zustands-Marke (ETag) bleibt also stabil.
+  Herunter zählt `monitor.html` gegen `serverNowMs`.
+- Rechenregel wie in badhub (`Timer::stand`): Rest = Minuten × 60 − (jetzt − Start − Pausen), nie
+  negativ, 0 = Abpfiff (`quelle/badhub/timer.rs`).
+- Timer-Befehle behalten die Zeit von badhub. Beim Eintreffen merkt sich der PC den Abstand seiner
+  Uhr dazu und rechnet ihn ins Ende ein (nicht gespeichert: nach einem Neustart gilt 0, bis der
+  nächste Timer-Befehl kommt).
+- Kein Timer oder Quelle BTP: das Feld fehlt im JSON, die Antwort ist byte-gleich wie zuvor.
+
+Offen: Monitore über die Cloud (der Relay bekommt den Timer nicht, `MonitorUpload` trägt ihn nicht),
+Zähltafel, Übersicht und Kombi-Anzeige, Signalton.

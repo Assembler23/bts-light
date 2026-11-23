@@ -29,6 +29,7 @@ pub mod schluessel;
 pub mod schreiben;
 pub mod slave;
 pub mod standby;
+pub mod timer;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -241,6 +242,9 @@ pub struct KernQuelle {
     abweichung: Option<String>,
     /// Zwischenspeicher der Kern-Faltung (Schlüssel wie die Abbildung).
     kern: Option<((u64, usize), TurnierStand)>,
+    /// Uhr dieses PCs minus Uhr, die den letzten Timer-Befehl gestempelt hat
+    /// (badhub) — nur für die Anzeige des Timers, nicht gespeichert.
+    timer_versatz_ms: i64,
     /// Präfix der Befehls-IDs dieses Laufs und Zähler.
     id_praefix: String,
     id_zaehler: u64,
@@ -323,6 +327,7 @@ impl KernQuelle {
             lease_hinweis: None,
             abweichung: None,
             kern: None,
+            timer_versatz_ms: 0,
             id_praefix,
             id_zaehler: 0,
             slave_schluessel: None,
@@ -434,6 +439,17 @@ impl KernQuelle {
         let st = turnierkern::falten_turnier(&self.alle_ereignisse());
         self.kern = Some((schluessel, st.clone()));
         st
+    }
+
+    /// Timer des Turniers für die Feldmonitore (`None` = keiner). Liest den
+    /// Zwischenspeicher der Faltung, ohne den ganzen Stand zu kopieren.
+    pub fn turnier_timer(&mut self) -> Option<relay_proto::TurnierTimerView> {
+        let schluessel = self.faltungs_schluessel();
+        if self.kern.as_ref().map(|(s, _)| *s) != Some(schluessel) {
+            let _ = self.kern_stand();
+        }
+        let t = self.kern.as_ref()?.1.timer.as_ref()?;
+        timer::ansicht(t, self.timer_versatz_ms)
     }
 
     /// Stand im heutigen Modell (Faltung nur bei neuen Daten).
@@ -661,9 +677,24 @@ impl KernQuelle {
                 );
             }
         }
+        // Timer-Befehle behalten die Zeit von badhub (dessen Timer-Seite
+        // rechnet damit). Für die Feldmonitore merken wir uns, wie weit die
+        // Uhr dieses PCs davon abweicht.
+        let timer_versatz = if art.starts_with("timer_") {
+            roh.get("jetzt")
+                .and_then(|j| j.as_str())
+                .and_then(timer::wandzeit_ms)
+                .map(|t| i64::try_from(jetzt_ms()).unwrap_or(i64::MAX) - t)
+        } else {
+            None
+        };
         let befehl: TurnierBefehl = serde_json::from_value(roh)
             .map_err(|e| SchreibFehler::Ungueltig(format!("Befehl unlesbar ({e}).")))?;
-        self.ausfuehren(vec![befehl], AKTEUR_BADHUB)
+        let n = self.ausfuehren(vec![befehl], AKTEUR_BADHUB)?;
+        if let Some(v) = timer_versatz {
+            self.timer_versatz_ms = v;
+        }
+        Ok(n)
     }
 
     /// Posten, die badhub noch nicht bestätigt hat, in der Form des Uploads
@@ -1430,6 +1461,12 @@ pub fn befehl_von_badhub(
         q.befehl_von_badhub(befehl)
             .map(|n| (n, q.wartende_fuer_badhub()))
     })
+}
+
+/// Timer des laufenden badhub-Turniers für die Feldmonitore. `None` ohne
+/// Kern-Quelle (BTP-Turnier) und ohne laufenden Timer.
+pub fn turnier_timer() -> Option<relay_proto::TurnierTimerView> {
+    zustand().as_mut()?.turnier_timer()
 }
 
 /// Rückzug bzw. Rücknahme aus dem TL-Web (Kern 0.13.0).

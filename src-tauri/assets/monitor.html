@@ -120,6 +120,28 @@
       animation: callpulse 1s ease-in-out infinite;
     }
     @keyframes callpulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+    /* Timer des Turniers („Spiel nach Zeit“, badhub-Turniere): Restzeit für
+       alle Felder. Im Spielkopf als Chip, ohne Spiel als Einblendung unten. */
+    .turnier-timer {
+      flex: 0 0 auto; font-size: 4.4vmin; font-weight: 900;
+      font-variant-numeric: tabular-nums; padding: .2vmin 1.8vmin;
+      border-radius: 1.2vmin; letter-spacing: .02em; white-space: nowrap;
+      background: #0f172a; color: #f8fafc; border: .35vmin solid #38bdf8;
+    }
+    .turnier-timer:empty { display: none; }
+    .turnier-timer .tt-titel { font-size: .6em; font-weight: 700; opacity: .85; margin-right: .6em; }
+    .turnier-timer .tt-status { font-size: .6em; font-weight: 800; margin-left: .6em; text-transform: uppercase; letter-spacing: .06em; }
+    .turnier-timer.knapp { border-color: #f59e0b; color: #fcd34d; }
+    .turnier-timer.pause { border-color: #64748b; color: #cbd5e1; }
+    .turnier-timer.ende {
+      background: #7f1d1d; border-color: #fecaca; color: #fff;
+      animation: callpulse 1s ease-in-out infinite;
+    }
+    #turnier-timer-frei {
+      position: absolute; left: 50%; bottom: 4vmin; transform: translateX(-50%);
+      z-index: 5; font-size: 9vmin; box-shadow: 0 1vmin 4vmin rgba(0,0,0,.55);
+    }
+    #match-view.show ~ #turnier-timer-frei { display: none; }
     header.bar .discipline {
       margin-left: auto; font-size: 3.9vmin; font-weight: 700;
       letter-spacing: .03em; color: #cbd5e1;
@@ -510,6 +532,7 @@
         <span class="court" id="court-label">__COURT_LABEL__</span>
         <span class="match-clock" id="match-clock"></span>
         <span class="call-timer" id="call-timer"></span>
+        <span class="turnier-timer" id="turnier-timer"></span>
         <span class="discipline" id="discipline"></span>
         <span class="sponsor-bar" id="sponsor-bar"></span>
       </header>
@@ -531,6 +554,7 @@
       </section>
       <footer class="bar" id="footer"></footer>
     </div>
+    <div class="turnier-timer" id="turnier-timer-frei"></div>
 
     <div id="timer-overlay">
       <div class="label" id="timer-label">Pause</div>
@@ -781,6 +805,8 @@ function namenGroesse(el, basisPx) {
     discipline: document.getElementById("discipline"),
     matchClock: document.getElementById("match-clock"),
     callTimer: document.getElementById("call-timer"),
+    turnierTimer: document.getElementById("turnier-timer"),
+    turnierTimerFrei: document.getElementById("turnier-timer-frei"),
     half1: document.getElementById("half1"),
     half2: document.getElementById("half2"),
     rName1: document.getElementById("r-name1"),
@@ -1080,6 +1106,56 @@ function namenGroesse(el, basisPx) {
     // Kein Emoji (Pi OS hat keine Emoji-Schrift) – Uhr + Klartext genügen.
     el.textContent = clock + " · " + label;
     el.className = "call-timer " + tone;
+  }
+
+  // Timer des Turniers („Spiel nach Zeit“, nur badhub-Turniere). Der Stand
+  // trägt entweder das Ende (läuft) oder die eingefrorene Restzeit
+  // (angehalten); herunter zählt die Anzeige gegen die Server-Uhr. Dieselbe
+  // Regel wie auf der Timer-Seite von badhub: Rest nie negativ, 0 = Abpfiff.
+  function turnierTimerLage(t, nowMs) {
+    if (!t || typeof t !== "object") return null;
+    var rest;
+    if (t.paused) {
+      if (typeof t.restS !== "number") return null;
+      rest = Math.max(0, Math.floor(t.restS));
+    } else {
+      if (typeof t.endsAtMs !== "number") return null;
+      rest = Math.max(0, Math.ceil((t.endsAtMs - nowMs) / 1000));
+    }
+    var zustand = rest === 0 ? "ende" : (t.paused ? "pause" : (rest <= 60 ? "knapp" : "laeuft"));
+    var h = Math.floor(rest / 3600), m = Math.floor(rest / 60) % 60, sek = rest % 60;
+    var zz = function (n) { return (n < 10 ? "0" : "") + n; };
+    return {
+      zustand: zustand,
+      text: h > 0 ? h + ":" + zz(m) + ":" + zz(sek) : m + ":" + zz(sek),
+      status: zustand === "ende" ? "Abpfiff" : (zustand === "pause" ? "Angehalten" : ""),
+      titel: typeof t.title === "string" ? t.title : ""
+    };
+  }
+  var turnierTimerGezeigt = "";
+  function renderTurnierTimer(state) {
+    var lage = turnierTimerLage(state && state.turnierTimer, nowServerMs());
+    var kennung = lage ? [lage.zustand, lage.text, lage.titel].join("|") : "";
+    if (kennung === turnierTimerGezeigt) return;
+    turnierTimerGezeigt = kennung;
+    [els.turnierTimer, els.turnierTimerFrei].forEach(function (el) {
+      if (!el) return;
+      el.textContent = "";
+      el.className = "turnier-timer";
+      if (!lage) return;
+      el.className = "turnier-timer " + lage.zustand;
+      // Nur textContent — der Titel kommt von der Turnierleitung.
+      function teil(klasse, text) {
+        if (!text) return;
+        var sp = document.createElement("span");
+        if (klasse) sp.className = klasse;
+        sp.textContent = text;
+        el.appendChild(sp);
+      }
+      teil("tt-titel", lage.titel);
+      teil("", lage.text);
+      teil("tt-status", lage.status);
+    });
   }
 
   // Spieldauer in der Kopfzeile (Stoppuhr + Minuten) — als eigene Funktion,
@@ -1951,6 +2027,11 @@ function namenGroesse(el, basisPx) {
       renderMatchClock(lastState);
     }
   }, 1000);
+
+  // Timer des Turniers: auch ohne Spiel auf dem Feld, deshalb eigener Takt.
+  // Viermal je Sekunde, damit der Sekundenwechsel nicht sichtbar nachhinkt;
+  // gezeichnet wird nur bei geändertem Text.
+  setInterval(function () { renderTurnierTimer(lastState); }, 250);
 
   poll();
 

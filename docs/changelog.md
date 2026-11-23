@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.474
+
+- **Timer auf den Feldmonitoren** – läuft bei einem badhub-Turnier der Timer für alle Felder
+  („Spiel nach Zeit“), zeigen die Feldmonitore die Restzeit: im Spielkopf neben der Feldnummer,
+  ohne Spiel auf dem Feld groß unten im Bild. Die letzte Minute ist gelb, angehalten steht
+  „Angehalten“ daneben, nach Ablauf blinkt „Abpfiff“. Gestartet und angehalten wird der Timer
+  wie bisher in badhub unter „Spiele → Timer“. Voraussetzung: der Turnier-PC steuert das Turnier
+  (Lease) und die Monitore hängen im Hallennetz – Monitore über die Cloud zeigen den Timer noch
+  nicht. Bei BTP-Turnieren ändert sich nichts.
+
 ## v0.9.473
 
 - **Turnierkern 0.25.0** – gleiche Version wie badhub. Neu ist dort das Schleifchenturnier:

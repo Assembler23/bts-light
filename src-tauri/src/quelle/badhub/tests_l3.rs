@@ -808,6 +808,48 @@ async fn feld_belegt_kommt_als_ablehnung_des_kerns_an_und_nichts_wird_geschriebe
 }
 
 #[tokio::test]
+async fn timer_aus_badhub_kommt_bei_den_feldmonitoren_an() {
+    let (_d, _b, _c, z) = gekoppelt().await;
+    lease_schritt(&z, Some("ns")).await;
+    assert_eq!(mit(&z, |q| q.turnier_timer()), None, "ohne Timer nichts");
+    // badhub stempelt 90 s „in der Zukunft“: seine Uhr geht gegenüber diesem
+    // PC vor. Das Ende wird in die Uhr dieses PCs umgerechnet.
+    let jetzt = jetzt_ms();
+    let start = super::schreiben::wandzeit(jetzt + 90_000);
+    assert_eq!(
+        mit(&z, |q| q.befehl_von_badhub(serde_json::json!({
+            "art": "timer_starten", "id": "bh-t1", "minuten": 10, "titel": "Runde 3", "jetzt": start
+        }))),
+        Ok(1)
+    );
+    let t = mit(&z, |q| q.turnier_timer()).expect("Timer läuft");
+    assert!(!t.paused);
+    assert_eq!(t.minutes, 10);
+    assert_eq!(t.title.as_deref(), Some("Runde 3"));
+    let ende = t.ends_at_ms.unwrap() as i64;
+    let soll = jetzt as i64 + 600_000;
+    assert!((ende - soll).abs() < 5_000, "Ende {ende} statt etwa {soll}");
+    // Anhalten nach 4 Minuten (in der Uhr von badhub): 6 Minuten Rest.
+    let pause = super::schreiben::wandzeit(jetzt + 90_000 + 240_000);
+    assert_eq!(
+        mit(&z, |q| q.befehl_von_badhub(
+            serde_json::json!({"art": "timer_pausieren", "id": "bh-t2", "jetzt": pause})
+        )),
+        Ok(1)
+    );
+    let t = mit(&z, |q| q.turnier_timer()).unwrap();
+    assert!(t.paused);
+    assert_eq!(t.rest_s, Some(360));
+    assert_eq!(
+        mit(&z, |q| q.befehl_von_badhub(
+            serde_json::json!({"art": "timer_beenden", "id": "bh-t3"})
+        )),
+        Ok(1)
+    );
+    assert_eq!(mit(&z, |q| q.turnier_timer()), None);
+}
+
+#[tokio::test]
 async fn kernbefehl_aus_badhub_idempotent_jetzt_vom_knoten_und_nur_spielbefehle() {
     let (_d, _b, _c, z) = gekoppelt().await;
     lease_schritt(&z, Some("ns")).await;
