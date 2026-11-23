@@ -1800,6 +1800,8 @@ async fn monitor_state(
             }
         },
     );
+    let mut state = state;
+    state.turnier_timer = turnier_timer_fuer(&cfg);
     // Wie bei `/health` selbst serialisiert, um die Antwortgröße zu kennen
     // (Spec monitor-livestand-push, S0). Derselbe Body geht in die Antwort;
     // die Marke (ohne server_now_ms/seq) entscheidet zwischen 200 und 304.
@@ -1812,6 +1814,15 @@ async fn monitor_state(
         perf::Quelle::aus_query(q.src.as_deref()),
         json,
     )
+}
+
+/// Timer des Turniers für die Feldmonitore („Spiel nach Zeit“). Nur bei
+/// Quelle badhub — ein BTP-Turnier fragt den Kern-Zustand gar nicht erst.
+fn turnier_timer_fuer(config: &AppConfig) -> Option<relay_proto::TurnierTimerView> {
+    if config.quelle != crate::config::QuelleArt::Badhub {
+        return None;
+    }
+    crate::quelle::badhub::turnier_timer()
 }
 
 /// Effektive Hallen-Farbe des Felds (Spec hallen-farben) — über die
@@ -1888,6 +1899,7 @@ async fn monitor_device_state(
             if ist_tafel {
                 s.redirect_to = Some(format!("/court/{court_id}/tafel"));
             }
+            s.turnier_timer = turnier_timer_fuer(&cfg);
             s.stil = stil;
             s
         }

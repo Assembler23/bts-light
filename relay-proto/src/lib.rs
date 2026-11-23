@@ -796,6 +796,39 @@ pub struct MonitorState {
     /// neue Antwort an und schaltet ohne Neuladen um.
     #[serde(default, skip_serializing_if = "MonitorStil::ist_standard")]
     pub stil: MonitorStil,
+    /// Timer des Turniers („Spiel nach Zeit“, badhub-Turniere mit Kern ab
+    /// 0.24.0): ein Abschnitt für alle Felder zugleich. `None` = kein Timer
+    /// — das Feld fehlt dann im JSON, BTP-Turniere und ältere Absender
+    /// bleiben byte-gleich.
+    #[serde(
+        rename = "turnierTimer",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub turnier_timer: Option<TurnierTimerView>,
+}
+
+/// Timer des Turniers für die Anzeige. Die Werte ändern sich zwischen zwei
+/// Abrufen nicht (wichtig für die Zustands-Marke): läuft der Timer, steht das
+/// Ende in `ends_at_ms` (Uhr des Turnier-PCs, wie `serverNowMs`); steht er,
+/// die eingefrorene Restzeit in `rest_s`. Herunter zählt die Anzeige selbst.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TurnierTimerView {
+    /// Dauer des Abschnitts in Minuten.
+    #[serde(default)]
+    pub minutes: u16,
+    /// Bezeichnung, z. B. „Runde 3“.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Angehalten?
+    #[serde(default)]
+    pub paused: bool,
+    /// Ende des laufenden Timers (Unix-ms).
+    #[serde(rename = "endsAtMs", default, skip_serializing_if = "Option::is_none")]
+    pub ends_at_ms: Option<u64>,
+    /// Restzeit des angehaltenen Timers in Sekunden.
+    #[serde(rename = "restS", default, skip_serializing_if = "Option::is_none")]
+    pub rest_s: Option<u32>,
 }
 
 /// Aufruf-Timer-Einstellungen für die Monitor-Anzeige (gespiegelt aus der
@@ -5157,6 +5190,7 @@ mod tests {
             call_timer: CallTimerView::default(),
             seq: 4711,
             stil: MonitorStil::Standard,
+            turnier_timer: None,
         })
         .expect("serialisierbar");
         json.as_object_mut().expect("Objekt").remove("seq");
@@ -5199,6 +5233,7 @@ mod tests {
             call_timer: CallTimerView::default(),
             seq: 0,
             stil: MonitorStil::Standard,
+            turnier_timer: None,
         })
         .unwrap();
         json.as_object_mut().unwrap().remove("hallColor").unwrap();
@@ -5299,6 +5334,7 @@ mod tests {
             },
             seq: 1_787_000_000_007,
             stil: MonitorStil::Standard,
+            turnier_timer: None,
         };
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains(r#""match":{"#));

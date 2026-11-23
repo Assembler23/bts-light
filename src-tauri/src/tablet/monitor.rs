@@ -412,6 +412,7 @@ pub fn build_monitor_state(
         // Den Stil setzt erst die Geräte-Route aus der Zuweisung (ADR 0068);
         // die feste Route `/court/{id}/state` liefert nie einen.
         stil: relay_proto::MonitorStil::Standard,
+        turnier_timer: None,
     }
 }
 
@@ -673,6 +674,7 @@ pub fn unassigned_monitor_state(device_id: &str) -> MonitorState {
         on_court_since_ms: None,
         call_timer: relay_proto::CallTimerView::default(),
         stil: relay_proto::MonitorStil::Standard,
+        turnier_timer: None,
     }
 }
 

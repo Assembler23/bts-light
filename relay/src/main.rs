@@ -2533,6 +2533,7 @@ fn empty_monitor_state(court_id: i64, court_label: String) -> MonitorState {
         on_court_since_ms: None,
         call_timer: relay_proto::CallTimerView::default(),
         stil: relay_proto::MonitorStil::Standard,
+        turnier_timer: None,
     }
 }
 
@@ -2649,6 +2650,7 @@ fn build_monitor_state_mit(
         call_timer: monitor.map(|m| m.call_timer.clone()).unwrap_or_default(),
         // Den Stil setzt nur der Geräte-Arm (ADR 0068).
         stil: relay_proto::MonitorStil::Standard,
+        turnier_timer: None,
     }
 }
 
