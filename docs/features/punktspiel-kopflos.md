@@ -39,6 +39,7 @@ Stände liegen laufend auf der Platte.
 |---|---|
 | Quelle | nur `punktspiel` — eine andere Quelle in der Datei beendet den Start mit einem Fehler |
 | Tablets | über den Cloud-Relay: `https://badhub.de/bts-relay/<install_id>/court/<Feld>` (Feld = 1 bis Felderzahl). Der Link genügt, es gibt keine Freigabe am Gerät |
+| Monitor „Begegnung“ | über den Cloud-Relay: `https://badhub.de/bts-relay/<install_id>/info/begegnung` — alle Spiele und der Gesamtstand (seit v0.9.475). Der Prozess schickt dem Relay die Begegnung von selbst, es gibt keinen Schalter |
 | Turnierleitung | Turnierleitungs-Web über den Relay: `https://badhub.de/bts-relay/tl#t=<token>` mit dem Zugang aus dem Auftrag |
 | Meldungen an badhub | Feldvergabe, Ergebnis und nach jedem Zyklus der laufende Punktestand (`POST /api/ls/v1/begegnung/spiel`) |
 | Liveticker | **aus** (`liveticker_aus`): ein dauerhaft geschlossenes Tor (`Strecke::geschlossen()`), kein Kanal sendet. Es braucht kein Liveticker-Passwort |

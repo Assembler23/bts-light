@@ -1493,6 +1493,15 @@ impl From<PersistedBtpEntry> for PendingBtpWrite {
     }
 }
 
+/// Ein laufendes Spiel mit seinem Live-Stand (Tablet-Stand vor dem der
+/// Quelle) — Ergebnis von [`TabletState::laufende_saetze_alle`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaufendesSpiel {
+    pub feld: i64,
+    pub match_id: i64,
+    pub saetze: Vec<(i64, i64)>,
+}
+
 impl TabletState {
     /// Schlüssel der Stores setzen (vom Sync-Loop je Abruf, aus der Quelle).
     pub fn set_turnier_schluessel(&self, schluessel: Option<String>) {
@@ -5549,6 +5558,38 @@ impl TabletState {
     /// meldet. Ohne den gespiegelten Tablet-Zustand von [`Self::score_mirror_of`].
     pub fn laufende_saetze(&self, court_id: i64) -> Option<(i64, Vec<(i64, i64)>)> {
         self.live_sets_of(court_id)
+    }
+
+    /// Alle Felder mit laufendem Spiel, nach Feld sortiert — für die Monitoransicht „Begegnung“, die den Live-Stand
+    /// jedes laufenden Spiels zeigt. Die Felder kommen aus den Spielen auf
+    /// dem Feld, nicht aus der Feldliste.
+    pub fn laufende_saetze_alle(&self) -> Vec<LaufendesSpiel> {
+        let mut felder: Vec<i64> = {
+            let guard = self.snapshot.read().unwrap();
+            guard
+                .as_ref()
+                .map(|snap| {
+                    snap.matches
+                        .iter()
+                        .filter(|m| m.status == MatchStatus::OnCourt)
+                        .filter_map(|m| m.court_id)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        felder.sort_unstable();
+        felder.dedup();
+        felder
+            .into_iter()
+            .filter_map(|feld| {
+                self.live_sets_of(feld)
+                    .map(|(match_id, saetze)| LaufendesSpiel {
+                        feld,
+                        match_id,
+                        saetze,
+                    })
+            })
+            .collect()
     }
 
     pub fn score_mirror_of(&self, court_id: i64) -> Option<ScoreMirror> {

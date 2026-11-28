@@ -687,6 +687,8 @@ absolute URLs, unabhängig von der Verschachtelungstiefe.
 | Anzeige (fest)         | `/court/{label}/display`       | `/{ns}/court/{label}/display`  |
 | Status (fest)          | `/court/{label}/state`         | `/{ns}/court/{label}/state`    |
 | **Court-Übersicht**    | `/info/overview`               | `/{ns}/info/overview`          |
+| **Begegnung** (Punktspiel) | `/info/begegnung`          | `/{ns}/info/begegnung`         |
+| Begegnungs-Daten       | `/info/begegnung/state`        | `/{ns}/info/begegnung/state`   |
 | Übersichts-Daten       | `/health`                      | `/{ns}/health`                 |
 | **In Vorbereitung**    | `/info/preparation`            | `/{ns}/info/preparation`       |
 | Vorbereitungs-Daten    | `/info/preparation/state`      | `/{ns}/info/preparation/state` |
@@ -1104,6 +1106,56 @@ Setup-Wizard, Abschnitt **„Court-Monitor"** ([`CourtMonitorConfig`](../src-tau
 
 Die Einrichtungs-Adresse und die Feld-Zuweisung der Geräte stehen auf der
 Seite **„Court-Monitore"** (Dashboard → Court-Monitore).
+
+## Begegnung (`/info/begegnung`, seit v0.9.475)
+
+Die Anzeige für **Punktspiele**: die ganze Begegnung auf einem Bildschirm. Im Kopf stehen die Vereinslogos von Heim
+und Gast, die Mannschaftsnamen, die Staffel und groß der **Gesamtstand in Spielen**; darunter klein Sätze und Punkte.
+Darunter folgen alle Spiele der Begegnung in Spielreihenfolge, Einzel und Doppel. Die Zeilen teilen sich die
+Bildschirmhöhe, bis zu zwölf Spiele passen ohne Blättern; ein dreizehntes und weitere zeigt die Seite nicht. Spec:
+[features/punktspiel-monitoransicht.md](features/punktspiel-monitoransicht.md).
+
+**Einrichten:** Dashboard → Court-Monitore → beim Gerät in der Ziel-Auswahl **Begegnung (Punktspiel)**.
+<!-- pruef: "Begegnung (Punktspiel)" in src/pages/CourtMonitorPanel.tsx -->
+Die Auswahl gibt es nur, wenn als Turnierquelle ein Punktspiel eingestellt ist. Ein TV ohne Geräte-Zuweisung öffnet
+die Adresse direkt; sie steht im selben Reiter unter „Begegnung (Punktspiel)“:
+
+| | Adresse |
+|---|---|
+| Hallennetz | `http://bts-light.local:8088/info/begegnung` |
+| Internet (Cloud) | `https://badhub.de/bts-relay/<Kennung>/info/begegnung` |
+
+<!-- pruef: "/info/begegnung" in src-tauri/src/tablet/server.rs -->
+<!-- pruef: "/{ns}/info/begegnung" in relay/src/main.rs -->
+
+**Was eine Zeile zeigt:**
+
+| Zustand | Anzeige |
+|---|---|
+| offen | Die Namen, keine Sätze. Ein nicht besetzter Platz heißt „noch nicht aufgestellt“ |
+| läuft | Gelber Rahmen, rechts „Feld 2“, die Sätze mit dem Stand vom Tablet |
+| Ergebnis wird übermittelt | Das Spiel ist am Tablet zu Ende, badhub hat das Ergebnis noch nicht bestätigt. Es zählt noch nicht zum Gesamtstand |
+| beendet | Die Sätze, der Sieger hell, der Verlierer grau. Bei besonderem Ausgang steht rechts „kampflos“, „Aufgabe“ oder „Disqualifikation“ |
+
+<!-- pruef: "noch nicht aufgestellt" in src-tauri/assets/begegnung.html -->
+<!-- pruef: "Ergebnis wird übermittelt" in src-tauri/assets/begegnung.html -->
+
+**Gesamtstand:** Ein Spiel zählt für den Sieger, sobald badhub es als beendet führt, egal ob normal, kampflos, nach
+Aufgabe oder Disqualifikation. Das ist dieselbe Regel wie auf der Begegnungsseite in badhub. Sätze und Punkte der
+Nebenzeile kommen aus genau diesen Spielen. Sind alle Spiele beendet, steht „Endstand“ neben dem Stand.
+
+**Vereinslogo:** badhub nennt im Punktspiel die Vereine beider Mannschaften; der Turnier-PC holt das Logo und reicht
+es an den TV weiter (im Hallennetz braucht der TV dafür kein Internet). Hat ein Verein kein Logo hinterlegt, steht an
+derselben Stelle eine gleich große Kachel mit den Initialen. Der Turnier-PC holt per Vereins-ID nur die Logos der
+beiden Mannschaften der laufenden Begegnung.
+
+**Kein Punktspiel:** Steht ein Monitor noch vom letzten Spieltag auf dieser Ansicht und der PC fährt jetzt ein
+Turnier, zeigt der Bildschirm „Diese Ansicht gibt es nur bei Punktspielen.“ Die Zuweisung bleibt bestehen.
+<!-- pruef: "Diese Ansicht gibt es nur bei Punktspielen." in src-tauri/assets/begegnung.html -->
+
+**Technik:** Die Seite fragt den Stand im Sekundentakt (`/info/begegnung/state`) und bekommt bei unverändertem Stand
+nur eine kurze Bestätigung (304). Gebaut wird die Antwort im Hallennetz und in der Cloud von derselben Funktion
+(`relay_proto::begegnung_anzeige`); Einzelheiten zur Cloud in [cloud-relay.md](cloud-relay.md). Nur Querformat.
 
 ## Spielfolge (`/info/spielfolge`, seit v0.9.341)
 

@@ -66,6 +66,25 @@ pub struct PaketBegegnung {
     pub gast: String,
     #[serde(default)]
     pub staffel: String,
+    /// Vereine der beiden Mannschaften in badhub — für das Vereinslogo der
+    /// Monitoransicht „Begegnung“ (ADR 0109). Ältere badhub-Stände liefern
+    /// sie nicht; dann zeigt die Ansicht Initialen.
+    #[serde(default, deserialize_with = "verein_id_tolerant")]
+    pub heim_verein_id: Option<u32>,
+    #[serde(default, deserialize_with = "verein_id_tolerant")]
+    pub gast_verein_id: Option<u32>,
+}
+
+/// Liest eine Vereins-ID nachsichtig: Alles, was keine positive Zahl ist
+/// (Text, negativ, zu groß, Kommazahl), wird zu `None`. Das Feld dient nur
+/// dem Logo — eine unerwartete Form darf nicht das ganze Paket und damit
+/// das Punktspiel lahmlegen.
+fn verein_id_tolerant<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
+    let wert = serde_json::Value::deserialize(d)?;
+    Ok(wert
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n > 0))
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -320,6 +339,126 @@ pub fn abbilden(paket: &Paket) -> BtpSnapshot {
         entries,
         officials: Vec::new(),
     }
+}
+
+// ── Monitoransicht „Begegnung“ ──────────────────────────────────────────────
+
+/// Bildet das Paket auf die Sicht der Monitoransicht „Begegnung“ ab (Spec
+/// `punktspiel-monitoransicht`, ADR 0109).
+///
+/// Bewusst aus dem **Paket** und nicht aus dem Snapshot von [`abbilden`]:
+/// Dort bleibt eine Seite mit unvollständiger Aufstellung leer, hier soll der
+/// schon aufgestellte Doppelpartner sichtbar sein.
+///
+/// **Positivliste:** je Person nur der Name. Lizenznummer und Personen-ID
+/// aus dem Paket gelangen nicht in die Sicht — sie geht an den Relay und
+/// steht auf einem Hallen-TV.
+pub fn sicht_aus(paket: &Paket) -> relay_proto::BegegnungSicht {
+    use relay_proto::{BegegnungSeite, BegegnungStatus, BegegnungZeile, SetAb};
+    let b = &paket.begegnung;
+    let felder = 1..=paket.felder.clamp(1, 8);
+    let scoring = zaehlformat(&paket.zaehlweise);
+    let namen = |personen: &[PaketPerson], plaetze: usize| -> Vec<String> {
+        personen
+            .iter()
+            .take(plaetze)
+            .map(|p| p.name.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .collect()
+    };
+    let spiele = paket
+        .spiele
+        .iter()
+        .map(|s| {
+            let doppel = s.art != "single";
+            let plaetze = if doppel { 2 } else { 1 };
+            // Dieselbe Lesart wie `abbilden`: „läuft“ nur auf einem Feld,
+            // das es gibt.
+            let status = match s.status.as_str() {
+                "beendet" => BegegnungStatus::Beendet,
+                "laeuft" if s.feld.is_some_and(|f| felder.contains(&f)) => BegegnungStatus::Laeuft,
+                _ => BegegnungStatus::Offen,
+            };
+            let beendet = status == BegegnungStatus::Beendet;
+            BegegnungZeile {
+                nr: s.nr,
+                disziplin: s.disziplin.trim().to_string(),
+                doppel,
+                heim: namen(&s.heim, plaetze),
+                gast: namen(&s.gast, plaetze),
+                feld: s.feld.filter(|_| status == BegegnungStatus::Laeuft),
+                status,
+                saetze: if status == BegegnungStatus::Offen {
+                    Vec::new()
+                } else {
+                    s.saetze.iter().map(|&(a, b)| SetAb { a, b }).collect()
+                },
+                sieger: match s.sieger.as_deref() {
+                    Some("heim") if beendet => Some(BegegnungSeite::Heim),
+                    Some("gast") if beendet => Some(BegegnungSeite::Gast),
+                    _ => None,
+                },
+                ausgang: if beendet {
+                    s.ausgang.trim().to_string()
+                } else {
+                    String::new()
+                },
+            }
+        })
+        .collect();
+    let mut sicht = relay_proto::BegegnungSicht {
+        heim: b.heim.trim().to_string(),
+        gast: b.gast.trim().to_string(),
+        staffel: b.staffel.trim().to_string(),
+        heim_verein_id: b.heim_verein_id.filter(|id| *id > 0),
+        gast_verein_id: b.gast_verein_id.filter(|id| *id > 0),
+        best_of: scoring.best_of,
+        ziel: scoring.target_score,
+        kappe: scoring.cap_score,
+        spiele,
+    };
+    // Dieselben Deckel wie am Relay — LAN und Cloud zeigen dasselbe.
+    sicht.deckeln();
+    sicht
+}
+
+/// Sicht des zuletzt gelesenen Pakets. `None`, solange kein Punktspiel
+/// geladen oder noch kein Paket gelesen ist. Fragt badhub **nicht** — den
+/// Abruf macht [`stand`] im Takt der Sync-Schleife.
+pub fn begegnung_sicht() -> Option<relay_proto::BegegnungSicht> {
+    zustand()
+        .as_ref()
+        .and_then(|z| z.paket.as_ref())
+        .map(sicht_aus)
+}
+
+/// Was die Monitoransicht „Begegnung“ im LAN zeigt: die Sicht, dazu der
+/// Live-Stand der Tablets. Dieselbe Funktion rechnet am Relay
+/// (`relay_proto::begegnung_anzeige`); hier kommt der Live-Stand aus dem
+/// Tablet-Zustand, zugeordnet über die Match-ID (= Spielnummer).
+pub fn begegnung_anzeige(
+    sicht: Option<&relay_proto::BegegnungSicht>,
+    tablet: &crate::tablet::state::TabletState,
+) -> relay_proto::BegegnungAnzeige {
+    let Some(sicht) = sicht else {
+        return relay_proto::BegegnungAnzeige::default();
+    };
+    let mut live: std::collections::HashMap<i64, relay_proto::BegegnungLive> =
+        std::collections::HashMap::new();
+    // Nach Feld sortiert: Tragen zwei Felder dieselbe Match-ID, gilt das
+    // kleinere (wie am Relay).
+    for spiel in tablet.laufende_saetze_alle() {
+        live.entry(spiel.match_id)
+            .or_insert_with(|| relay_proto::BegegnungLive {
+                feld: Some(spiel.feld),
+                saetze: spiel
+                    .saetze
+                    .into_iter()
+                    .map(|(a, b)| relay_proto::SetAb { a, b })
+                    .collect(),
+            });
+    }
+    relay_proto::begegnung_anzeige(Some(sicht), |nr| live.get(&nr).cloned())
 }
 
 // ── Meldungen ───────────────────────────────────────────────────────────────

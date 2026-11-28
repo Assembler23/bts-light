@@ -58,6 +58,7 @@ import type {
 //   "info_overview"          → MonitorTarget::InfoOverview (alle Hallen)
 //   "info_overview:<halle>"  → InfoOverview, fest auf eine Halle
 //   "info_preparation"       → MonitorTarget::InfoPreparation
+//   "info_begegnung"         → MonitorTarget::InfoBegegnung (nur Punktspiel)
 //   "info_winners"           → MonitorTarget::InfoWinners (ganzes Podium)
 //   "info_winners:1|2|3"     → InfoWinners, nur dieser Rang (ein TV je Platz)
 //   "ad_rotation"            → MonitorTarget::AdRotation
@@ -88,6 +89,7 @@ function valueToTarget(v: string): MonitorTarget | null {
     if (hall.length > 0) return { kind: "info_overview", hall };
   }
   if (v === "info_preparation") return { kind: "info_preparation" };
+  if (v === "info_begegnung") return { kind: "info_begegnung" };
   if (v === "info_spielfolge") return { kind: "info_spielfolge" };
   if (v.startsWith("info_spielfolge:")) {
     const hall = v.slice("info_spielfolge:".length);
@@ -553,6 +555,37 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
         </p>
       </section>
 
+      {/* Begegnung (nur Punktspiel): alle Spiele und der Gesamtstand auf
+          einem Bildschirm. Feste Adressen für TVs ohne Geräte-Zuweisung. */}
+      {config.quelle === "punktspiel" && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold text-slate-700">
+            Begegnung (Punktspiel)
+          </h2>
+          <p className="text-xs text-slate-500">
+            Alle Spiele der Begegnung mit Gesamtstand und Vereinslogos auf
+            einem Bildschirm. Einem Monitor oben als „Begegnung (Punktspiel)"
+            zuweisen oder die Adresse direkt am TV öffnen.
+          </p>
+          {lanEnabled && (
+            <OverviewLinkRow
+              label="Hallennetz (LAN)"
+              kind="local"
+              url="http://bts-light.local:8088/info/begegnung"
+              openUrl="http://localhost:8088/info/begegnung"
+            />
+          )}
+          {cloudEnabled && info?.relay_base && (
+            <OverviewLinkRow
+              label="Internet (Cloud)"
+              kind="online"
+              url={`${info.relay_base}/info/begegnung`}
+              openUrl={`${info.relay_base}/info/begegnung`}
+            />
+          )}
+        </section>
+      )}
+
       <StreamBaukasten
         courts={courts}
         lanEnabled={lanEnabled}
@@ -664,6 +697,7 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
                     courts={courts}
                     ads={ads}
                     allHalls={allHalls}
+                    punktspiel={config.quelle === "punktspiel"}
                     comboVertical={comboDirs.devices[d.id]}
                     comboLast={comboDirs.last}
                     onAssign={(target, comboVertical) =>
@@ -711,6 +745,7 @@ export function CourtMonitorPanel({ config }: { config: AppConfig }) {
                     courts={courts}
                     ads={ads}
                     allHalls={allHalls}
+                    punktspiel={config.quelle === "punktspiel"}
                     comboVertical={comboDirs.devices[d.id]}
                     comboLast={comboDirs.last}
                     onAssign={(target, comboVertical) =>
@@ -763,6 +798,7 @@ function DeviceRow({
   courts,
   ads,
   allHalls,
+  punktspiel,
   comboVertical,
   comboLast,
   onAssign,
@@ -779,6 +815,9 @@ function DeviceRow({
   ads: CourtAd[];
   /** Alle Hallen des Turniers – für das Hallen-Dropdown (ab 2 Hallen). */
   allHalls: string[];
+  /** Turnierquelle ist ein Punktspiel — nur dann ist die Ansicht
+   *  „Begegnung“ wählbar. */
+  punktspiel: boolean;
   /** Kombi-Ausrichtung dieses Geräts (true = Felder nebeneinander).
    *  `undefined` = für dieses Gerät wurde noch nie eine gewählt. */
   comboVertical: boolean | undefined;
@@ -978,6 +1017,14 @@ function DeviceRow({
               </option>
             ))}
           <option value="info_preparation">In Vorbereitung</option>
+          {/* Begegnung: nur bei einem Punktspiel wählbar. Steht ein Gerät
+              noch vom letzten Spieltag darauf, bleibt die Zuweisung sichtbar
+              (ausgegraut); der Bildschirm zeigt dann einen Hinweis. */}
+          {(punktspiel || device.target?.kind === "info_begegnung") && (
+            <option value="info_begegnung" disabled={!punktspiel}>
+              Begegnung (Punktspiel)
+            </option>
+          )}
           <option value="info_winners">Siegerehrung – ganzes Podium</option>
           <option value="info_winners:1">Siegerehrung – nur Platz 1</option>
           <option value="info_winners:2">Siegerehrung – nur Platz 2</option>

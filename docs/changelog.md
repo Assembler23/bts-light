@@ -4,6 +4,16 @@ Pro veröffentlichter Version die wesentlichen Änderungen. Die Versionen
 werden über das Auto-Update (badhub.de) ausgeliefert; Tablet-Änderungen
 erreichen den Cloud-Modus zusätzlich sofort über den Relay-Redeploy.
 
+## v0.9.475
+
+- **Monitoransicht „Begegnung“ für Punktspiele** – ein TV zeigt die ganze Begegnung: im Kopf die
+  Vereinslogos von Heim und Gast, die Mannschaftsnamen und groß der Gesamtstand in Spielen, darunter
+  alle Spiele mit Spielern, Sätzen und Zustand (offen, läuft auf Feld n, beendet). Laufende Spiele
+  zeigen den Stand vom Tablet. Zuweisen unter Court-Monitore als „Begegnung (Punktspiel)“ oder die
+  Adresse `/info/begegnung` direkt am TV öffnen. Läuft im Hallennetz und über die Cloud, also auch
+  beim Punktspiel ohne Windows-PC. Hat ein Verein kein Logo, stehen seine Initialen in einer Kachel.
+  Bei Turnieren ändert sich nichts.
+
 ## v0.9.474
 
 - **Timer auf den Feldmonitoren** – läuft bei einem badhub-Turnier der Timer für alle Felder

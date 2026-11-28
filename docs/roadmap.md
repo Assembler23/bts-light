@@ -661,7 +661,8 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 - **Monitoransicht „Begegnung“ für Punktspiele** — Spec:
   [features/punktspiel-monitoransicht.md](features/punktspiel-monitoransicht.md)
-  (**freigegeben 28.11.2026**, ADR 0109). Ein TV zeigt alle Spiele der
+  (**freigegeben 28.11.2026**, ADR 0109; **umgesetzt in v0.9.475**, offen: Tag, Feldtest am TV im LAN und
+  über die Cloud, Link in Mein Badhub). Ein TV zeigt alle Spiele der
   Begegnung und den Gesamtstand, im Kopf die Vereinslogos von Heim und Gast. LAN und
   Cloud; ohne Windows-PC über einen festen Link aus Mein Badhub. Fünf Schritte:
   badhub-Paketfelder → Relay und Seite → Client LAN → Client Cloud → Link in badhub.

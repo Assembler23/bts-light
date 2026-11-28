@@ -49,6 +49,8 @@ fn paket() -> Paket {
             heim: "TV Heim 1".into(),
             gast: "SV Gast 1".into(),
             staffel: "Landesliga".into(),
+            heim_verein_id: Some(17),
+            gast_verein_id: None,
         },
         felder: 2,
         zaehlweise: "3x21".into(),
@@ -567,4 +569,144 @@ fn verlauf_meldung_traegt_die_eintraege_unter_matches() {
         serde_json::from_str(r#"{"ok":true,"gespeichert":1,"verworfen":2}"#).unwrap();
     assert_eq!(antwort.verworfen, 2);
     const { assert!(VERLAUF_MAX_JE_MELDUNG <= crate::badhub::verlauf::MAX_SPIELE_JE_NACHRICHT) };
+}
+
+// ── Monitoransicht „Begegnung“ (Spec punktspiel-monitoransicht) ─────────────
+
+#[test]
+fn sicht_zeigt_alle_spiele_in_spielreihenfolge_mit_teilaufstellung() {
+    let mut p = paket();
+    // Durcheinander geliefert: Die Sicht ordnet nicht um, das Paket kommt
+    // von badhub in Spielreihenfolge. Hier zählt, dass nichts verloren geht.
+    p.spiele[1].status = "beendet".into();
+    p.spiele[1].saetze = vec![(21, 15), (21, 12)];
+    p.spiele[1].sieger = Some("heim".into());
+    p.spiele[1].ausgang = "kampflos".into();
+    let s = sicht_aus(&p);
+    assert_eq!(
+        (s.heim.as_str(), s.gast.as_str()),
+        ("TV Heim 1", "SV Gast 1")
+    );
+    assert_eq!(s.staffel, "Landesliga");
+    assert_eq!((s.heim_verein_id, s.gast_verein_id), (Some(17), None));
+    assert_eq!((s.best_of, s.ziel, s.kappe), (3, 21, 30));
+    assert_eq!(
+        s.spiele.iter().map(|z| z.nr).collect::<Vec<_>>(),
+        vec![1, 2, 3, 4]
+    );
+    // Doppel mit nur einem Gast: der eine Name bleibt sichtbar (anders als
+    // im Snapshot, wo die Seite leer wird).
+    let hd = &s.spiele[0];
+    assert!(hd.doppel);
+    assert_eq!(hd.heim, vec!["Hans Heim", "Hugo Haus"]);
+    assert_eq!(hd.gast, vec!["Gerd Gast"]);
+    assert_eq!(hd.status, relay_proto::BegegnungStatus::Offen);
+    let he = &s.spiele[1];
+    assert!(!he.doppel);
+    assert_eq!(he.status, relay_proto::BegegnungStatus::Beendet);
+    assert_eq!(he.sieger, Some(relay_proto::BegegnungSeite::Heim));
+    assert_eq!(he.ausgang, "kampflos");
+    // Ganz ohne Aufstellung: leere Seiten, die Seite schreibt „noch nicht
+    // aufgestellt“.
+    assert!(s.spiele[2].heim.is_empty() && s.spiele[2].gast.is_empty());
+}
+
+#[test]
+fn sicht_status_und_sieger_wie_im_snapshot() {
+    let mut p = paket();
+    // „läuft“ auf einem Feld, das es nicht gibt → offen (wie `abbilden`).
+    p.spiele[0].status = "laeuft".into();
+    p.spiele[0].feld = Some(7);
+    p.spiele[0].saetze = vec![(5, 3)];
+    // „läuft“ auf Feld 2 mit Sieger-Angabe → Sieger erst mit „beendet“.
+    p.spiele[1].status = "laeuft".into();
+    p.spiele[1].feld = Some(2);
+    p.spiele[1].saetze = vec![(11, 9)];
+    p.spiele[1].sieger = Some("gast".into());
+    p.spiele[1].ausgang = "aufgabe".into();
+    let s = sicht_aus(&p);
+    assert_eq!(s.spiele[0].status, relay_proto::BegegnungStatus::Offen);
+    assert!(s.spiele[0].saetze.is_empty() && s.spiele[0].feld.is_none());
+    assert_eq!(s.spiele[1].status, relay_proto::BegegnungStatus::Laeuft);
+    assert_eq!(s.spiele[1].feld, Some(2));
+    assert_eq!(s.spiele[1].saetze, vec![relay_proto::SetAb { a: 11, b: 9 }]);
+    assert_eq!(s.spiele[1].sieger, None);
+    assert_eq!(s.spiele[1].ausgang, "");
+}
+
+/// Datenschutz-Wächter: Lizenznummer und Personen-ID aus dem Paket gelangen
+/// nicht in die Sicht — sie geht an den Relay und steht auf einem Hallen-TV.
+#[test]
+fn sicht_traegt_weder_lizenz_noch_personen_id() {
+    let mut p = paket();
+    p.spiele[0].heim[0].id = 987_654_321;
+    let text = serde_json::to_string(&sicht_aus(&p)).unwrap();
+    assert!(text.contains("Hans Heim"));
+    for verboten in [
+        "01-000011",
+        "987654321",
+        "lizenz",
+        "\"id\"",
+        "vorname",
+        "nachname",
+    ] {
+        assert!(!text.contains(verboten), "{verboten} in der Sicht");
+    }
+    // Anonymisierte Personen reisen unverändert durch.
+    p.spiele[1].heim = vec![person(5, "", "***", None)];
+    p.spiele[1].heim[0].name = "***".into();
+    assert_eq!(sicht_aus(&p).spiele[1].heim, vec!["***"]);
+}
+
+#[test]
+fn sicht_deckelt_wie_der_relay() {
+    let mut p = paket();
+    p.spiele = (1..=30).map(|nr| spiel(nr, "1.HE", "single")).collect();
+    p.begegnung.heim = "x".repeat(500);
+    let s = sicht_aus(&p);
+    assert_eq!(s.spiele.len(), relay_proto::MAX_BEGEGNUNG_SPIELE);
+    assert_eq!(s.heim.chars().count(), 80);
+    assert!(s.passt());
+}
+
+#[test]
+fn paket_mit_und_ohne_vereins_ids() {
+    let ohne = r#"{"schema":1,"begegnung":{"uuid":"0f3a1c2e-7b4d-4c1a-9e2f-5a6b7c8d9e0f","name":"A – B","heim":"A","gast":"B"},
+        "felder":2,"zaehlweise":"3x21","spiele":[]}"#;
+    let p = paket_lesen(ohne.as_bytes()).expect("altes Paket bleibt lesbar");
+    assert_eq!(
+        (p.begegnung.heim_verein_id, p.begegnung.gast_verein_id),
+        (None, None)
+    );
+    let mit = r#"{"schema":1,"begegnung":{"uuid":"0f3a1c2e-7b4d-4c1a-9e2f-5a6b7c8d9e0f","name":"A – B","heim":"A","gast":"B",
+        "heim_verein_id":17,"gast_verein_id":null},"felder":2,"zaehlweise":"3x21","spiele":[]}"#;
+    let p = paket_lesen(mit.as_bytes()).expect("Paket mit IDs lesbar");
+    assert_eq!(
+        (p.begegnung.heim_verein_id, p.begegnung.gast_verein_id),
+        (Some(17), None)
+    );
+    assert_eq!(sicht_aus(&p).heim_verein_id, Some(17));
+}
+
+/// Eine Vereins-ID in unerwarteter Form kostet nur das Logo, nie das Paket.
+#[test]
+fn unlesbare_vereins_id_legt_das_paket_nicht_lahm() {
+    for roh in [
+        r#""12""#,
+        "-1",
+        "0",
+        "99999999999",
+        "12.5",
+        "true",
+        "[1]",
+        "{}",
+    ] {
+        let json = format!(
+            r#"{{"schema":1,"begegnung":{{"uuid":"0f3a1c2e-7b4d-4c1a-9e2f-5a6b7c8d9e0f","name":"A – B","heim":"A","gast":"B",
+            "heim_verein_id":{roh},"gast_verein_id":23}},"felder":2,"zaehlweise":"3x21","spiele":[]}}"#
+        );
+        let p = paket_lesen(json.as_bytes()).unwrap_or_else(|e| panic!("{roh}: {e:?}"));
+        assert_eq!(p.begegnung.heim_verein_id, None, "{roh}");
+        assert_eq!(p.begegnung.gast_verein_id, Some(23), "{roh}");
+    }
 }

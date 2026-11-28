@@ -2074,7 +2074,10 @@ nur, was auf einem Feld läuft. Die übrigen Spiele bekommt er vom Host.
   (Mannschaftsnamen, Staffel, Vereins-IDs, Zählweise, je Spiel Nummer, Disziplin, Namen, Feld, Status, Sätze, Sieger,
   Ausgang) oder `null` für „kein Punktspiel“. **Positivliste:** Namen sind schlichte Texte; Personen-ID,
   Lizenznummer, Verein und Nation je Person gibt es in den Typen nicht.
-- **Wann:** einmal je Verbindung und danach bei geändertem Inhalt. Jeder Frame ersetzt den Stand.
+- **Wann:** einmal je Verbindung und danach bei geändertem Inhalt (`push_begegnung` im 2-s-Takt des Relay-Clients,
+  seit v0.9.475), **vor** den Feld-Zuweisungen desselben Takts: Der Relay erfährt „beendet“, bevor das Feld frei
+  wird. Ohne Punktspiel sendet der Host `null` und räumt damit eine Begegnung vom letzten Spieltag. Jeder Frame
+  ersetzt den Stand.
 - **Deckel:** Der Relay kürzt Texte (Mannschaft und Staffel 80, Name 60, Disziplin 12, Ausgang 20 Zeichen), kappt
   Listen (16 Spiele, 2 Namen je Seite, 5 Sätze) und klemmt Zahlen (Punkte 0 bis 99, Spiel- und Feldnummer 0 bis 999). Passt die Sicht danach nicht unter 16 KiB, gilt `null`; der Hinweis
   steht einmal je Host-Sitzung im Log.

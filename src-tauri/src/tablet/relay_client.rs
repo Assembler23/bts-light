@@ -558,6 +558,7 @@ where
     // Meetingpoint-Stand (Spec `meetingpoint-spielbereit`): im 2-s-Takt,
     // nur bei Änderung; `None` erzwingt das erste Senden nach dem Verbinden.
     let mut meetingpoint_fp: Option<String> = None;
+    let mut begegnung_fp: Option<String> = None;
     // Geräte-Steuerung: Feld-Zuweisungen/Befehle pushen, Geräteliste holen.
     let mut control_ticker = tokio::time::interval(CONTROL_TICK);
     control_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -652,6 +653,10 @@ where
                 for court_id in ruf_wacht.faellig(&ctx.tablet) {
                     let _ = tx.send(text(&HostFrame::OfficialCallCleared { court_id }));
                 }
+                // Begegnung VOR den Zuweisungen (gleiche FIFO-Wire): Der
+                // Relay erfährt „beendet“, bevor das Feld frei wird — sonst
+                // fiele die Zeile kurz auf „läuft“ zurück.
+                push_begegnung(ctx, &tx, &mut begegnung_fp);
                 push_all_courts(ctx, &tx, &mut last_match, &mut score_fp);
                 // Score-Spiegel-Sweep NACH den Zuweisungen (gleiche FIFO-Wire
                 // → der Relay kennt die Matches, bevor der Spiegel eintrifft).
@@ -931,6 +936,9 @@ async fn upload_monitor(ctx: &ServerCtx, install_id: &str) -> Result<(), String>
 fn ohne_nur_lan_ziele(
     mut targets: std::collections::HashMap<String, relay_proto::MonitorTarget>,
 ) -> std::collections::HashMap<String, relay_proto::MonitorTarget> {
+    // `InfoBegegnung` bleibt bewusst im Upload: Die Ansicht läuft in der
+    // Cloud, und der Relay kennt das Ziel seit dem Schritt davor (ADR 0109,
+    // Relay-Deploy vor Client).
     targets.retain(|_, t| !matches!(t, relay_proto::MonitorTarget::InfoSpielfolge { .. }));
     targets
 }
@@ -1698,6 +1706,43 @@ fn build_prepared_list(
         .collect()
 }
 
+/// Was als Nächstes an Begegnung zu senden ist: `Some(frame)` bei
+/// geändertem Inhalt und beim ersten Mal je Verbindung (`last_fp` ist dann
+/// `None`), sonst nichts. Ohne Punktspiel wird `sicht: None` gesendet — der
+/// Relay räumt damit eine Begegnung vom letzten Spieltag.
+fn begegnung_frame(
+    sicht: Option<relay_proto::BegegnungSicht>,
+    last_fp: &mut Option<String>,
+) -> Option<HostFrame> {
+    let fp = serde_json::to_string(&sicht).unwrap_or_default();
+    if last_fp.as_deref() == Some(fp.as_str()) {
+        return None;
+    }
+    *last_fp = Some(fp);
+    Some(HostFrame::Begegnung { sicht })
+}
+
+/// Pusht die Begegnung eines Punktspiels an den Relay (Monitoransicht
+/// „Begegnung“, Spec punktspiel-monitoransicht, ADR 0109). Den Live-Stand
+/// der Felder mischt der Relay selbst dazu; hier reist nur die Sicht. Ein
+/// Relay ohne diesen Frame verwirft ihn still.
+fn push_begegnung(
+    ctx: &ServerCtx,
+    tx: &mpsc::UnboundedSender<WsMessage>,
+    last_fp: &mut Option<String>,
+) {
+    // Ist die Konfiguration gerade nicht lesbar, wird nichts gesendet —
+    // die Standard-Konfiguration (BTP) hieße sonst „kein Punktspiel“ und
+    // räumte die Begegnung am Relay für einen Takt.
+    let Ok(config) = ctx.app_config_arc_result() else {
+        return;
+    };
+    let sicht = crate::quelle::begegnung_sicht(&config);
+    if let Some(frame) = begegnung_frame(sicht, last_fp) {
+        let _ = tx.send(text(&frame));
+    }
+}
+
 /// Pusht den Meetingpoint-Stand aller Hallen an den Relay — nur bei
 /// Änderung. Der Relay schneidet ihn je Seite auf die Halle zu.
 fn push_meetingpoint(
@@ -1949,6 +1994,49 @@ mod tests {
         let rest = super::ohne_nur_lan_ziele(t);
         assert_eq!(rest.len(), 1);
         assert!(rest.contains_key("a"));
+    }
+
+    /// Die Begegnungs-Ansicht läuft auch in der Cloud: Das Ziel bleibt im
+    /// Upload (der Relay kennt es seit dem Schritt davor, ADR 0109).
+    #[test]
+    fn begegnung_ziel_bleibt_im_upload() {
+        let mut t = std::collections::HashMap::new();
+        t.insert("tv".to_string(), relay_proto::MonitorTarget::InfoBegegnung);
+        let rest = super::ohne_nur_lan_ziele(t);
+        assert_eq!(
+            rest.get("tv"),
+            Some(&relay_proto::MonitorTarget::InfoBegegnung)
+        );
+    }
+
+    #[test]
+    fn begegnung_frame_einmal_je_verbindung_und_dann_nur_bei_aenderung() {
+        let sicht = |heim: &str| {
+            Some(relay_proto::BegegnungSicht {
+                heim: heim.into(),
+                ..Default::default()
+            })
+        };
+        // Neue Verbindung, kein Punktspiel: `None` geht einmal hinaus und
+        // räumt beim Relay eine Begegnung vom letzten Spieltag.
+        let mut fp = None;
+        assert_eq!(
+            super::begegnung_frame(None, &mut fp),
+            Some(HostFrame::Begegnung { sicht: None })
+        );
+        assert_eq!(super::begegnung_frame(None, &mut fp), None);
+        // Punktspiel geladen: einmal senden, gleicher Inhalt nicht erneut.
+        assert_eq!(
+            super::begegnung_frame(sicht("A"), &mut fp),
+            Some(HostFrame::Begegnung { sicht: sicht("A") })
+        );
+        assert_eq!(super::begegnung_frame(sicht("A"), &mut fp), None);
+        // Änderung (Ergebnis, Aufstellung) → senden.
+        assert!(super::begegnung_frame(sicht("B"), &mut fp).is_some());
+        // Nach dem Neuverbinden (`fp` zurückgesetzt) wieder genau einmal.
+        let mut fp = None;
+        assert!(super::begegnung_frame(sicht("B"), &mut fp).is_some());
+        assert_eq!(super::begegnung_frame(sicht("B"), &mut fp), None);
     }
 
     #[test]
