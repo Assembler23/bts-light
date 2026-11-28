@@ -266,6 +266,7 @@ Alle diese Seiten kommen vom Turnier-PC. Die Adresse beginnt mit
 | **Hallen-Übersicht** `/info/overview` | großer TV oder Beamer | **Alle** Felder — auch die freien. Bei mehreren Hallen zeigt der Bildschirm eine Halle nach der anderen im Vollbild, statt alle zusammenzuquetschen. Ein Zusatz in der Adresse bindet ihn fest an eine Halle. |
 | **In Vorbereitung** `/info/preparation` | TV am Meeting Point | Die als Nächstes anstehenden Spiele, gerufene zuerst. |
 | **Siegerehrung** `/info/winners` | TV am Podest | Das Podium der gewählten Disziplin. Ein Bildschirm kann auch **nur einen Platz** zeigen — gedacht für je einen Monitor vor jeder Podeststufe. **Achtung beim dritten Platz:** Im Badminton gibt es **zwei** Dritte, und der Platz-3-Bildschirm zeigt beide untereinander — im Doppel also bis zu vier Namen. |
+| **Begegnung** `/info/begegnung` | großer TV beim Punktspiel | Nur bei Punktspielen: alle Spiele der Begegnung mit Sätzen, dazu der Gesamtstand und die Vereinslogos von Heim und Gast. Einzelheiten: [Court-Monitor, Abschnitt „Begegnung“](court-monitor.md). |
 | **Werbung** `/info/ad` | Werbe-TV | Sponsorenbilder, rotierend oder als Einzelbild. |
 | **Stream-Einblendung** `/stream?courts=3` | OBS-Browserquelle beim Livestream | Durchsichtige Score-Leiste für ein bis drei Felder. Adresse nur ans eigene Stream-Team geben — sie enthält in der Cloud die Kennung des Turniers. |
 | **Stream-Werbung** `/stream/werbung` | OBS-Browserquelle beim Livestream | Durchsichtige Sponsoren-Ebene: rotierend, nebeneinander oder als Laufband. Zeigt nur Werbebilder mit dem Häkchen „Stream". Adresse aus dem Abschnitt „Stream-Werbung (OBS)" im Panel Monitore. |
@@ -311,7 +312,7 @@ dort sein Ziel:
 
 - ein **Feld** (Court-Monitor),
 - eine **Zähltafel** für ein Feld,
-- eine **Information**: Hallen-Übersicht, In Vorbereitung, Siegerehrung,
+- eine **Information**: Hallen-Übersicht, In Vorbereitung, Siegerehrung, bei einem Punktspiel auch die Begegnung,
 - **Werbung**, rotierend oder ein bestimmtes Bild,
 - eine **Kombi-Anzeige** aus mehreren Feldern.
 

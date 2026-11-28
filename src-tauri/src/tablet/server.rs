@@ -358,7 +358,7 @@ impl ServerCtx {
         self.app_config_arc_result().unwrap_or_default()
     }
 
-    fn app_config_arc_result(&self) -> Result<Arc<AppConfig>, String> {
+    pub(crate) fn app_config_arc_result(&self) -> Result<Arc<AppConfig>, String> {
         let meta = std::fs::metadata(&self.config_path).map_err(|e| e.to_string())?;
         let stempel = (meta.modified().map_err(|e| e.to_string())?, meta.len());
         {
@@ -697,6 +697,8 @@ pub fn router(ctx: Arc<ServerCtx>) -> Router {
         .route("/ansage/audio/{id}", get(ansage_audio))
         .route("/info/ad", get(info_ad_page))
         .route("/info/ad/state", get(info_ad_state))
+        .route("/info/begegnung", get(info_begegnung_page))
+        .route("/info/begegnung/state", get(info_begegnung_state))
         .route("/info/spielfolge", get(info_spielfolge_page))
         .route("/info/spielfolge/state", get(info_spielfolge_state))
         .route("/combo", get(combo_page))
@@ -2001,7 +2003,24 @@ async fn info_winners_state(
 #[derive(serde::Deserialize)]
 struct ClubLogoQuery {
     /// BTP-Vereinsname (z. B. „BC Tempelhof (Berlin)").
+    #[serde(default)]
     name: String,
+    /// Vereins-ID in badhub (Monitoransicht „Begegnung“, ADR 0109). Ist sie
+    /// angegeben, zählt nur sie.
+    #[serde(default)]
+    id: Option<String>,
+}
+
+/// Gehört die Vereins-ID zu einer der beiden Mannschaften der laufenden
+/// Begegnung? Ohne Begegnung ist keine ID erlaubt.
+fn vereins_id_erlaubt(id: u32, sicht: Option<&relay_proto::BegegnungSicht>) -> bool {
+    sicht.is_some_and(|s| s.heim_verein_id == Some(id) || s.gast_verein_id == Some(id))
+}
+
+/// Vereins-ID aus der Anfrage: nur eine positive Zahl. Alles andere ist
+/// „kein Logo“ — eine ungültige ID fällt nicht auf den Namen zurück.
+fn vereins_id(roh: &str) -> Option<u32> {
+    roh.trim().parse::<u32>().ok().filter(|n| *n > 0)
 }
 
 /// Vereinslogo für den Sieger-Monitor: matcht den Vereinsnamen gegen die
@@ -2012,7 +2031,24 @@ async fn info_club_logo(
     State(ctx): State<Arc<ServerCtx>>,
     Query(q): Query<ClubLogoQuery>,
 ) -> impl IntoResponse {
-    match crate::tablet::club_logos::resolve(&ctx.config.badhub, &ctx.http, &q.name).await {
+    let bild = match q.id.as_deref() {
+        // Nur die Vereine der laufenden Begegnung: Sonst könnte jedes Gerät
+        // im Hallennetz mit erfundenen IDs Abrufe bei badhub auslösen und
+        // den Logo-Cache füllen.
+        Some(roh) => match vereins_id(roh).filter(|id| {
+            vereins_id_erlaubt(
+                *id,
+                crate::quelle::begegnung_sicht(&ctx.app_config_arc()).as_ref(),
+            )
+        }) {
+            Some(id) => {
+                crate::tablet::club_logos::resolve_id(&ctx.config.badhub, &ctx.http, id).await
+            }
+            None => None,
+        },
+        None => crate::tablet::club_logos::resolve(&ctx.config.badhub, &ctx.http, &q.name).await,
+    };
+    match bild {
         Some((content_type, bytes)) => (
             [
                 (header::CONTENT_TYPE, content_type),
@@ -2451,6 +2487,64 @@ async fn combo_page() -> impl IntoResponse {
         [(header::CACHE_CONTROL, "no-store")],
         Html(assets::aktiv().koerper(Seite::Combo)),
     )
+}
+
+/// Monitoransicht „Begegnung“ für Punktspiele (Spec
+/// punktspiel-monitoransicht): alle Spiele und der Gesamtstand. Fragt
+/// `/info/begegnung/state` im Sekundentakt mit Marke.
+async fn info_begegnung_page() -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Html(assets::aktiv().koerper(Seite::Begegnung)),
+    )
+}
+
+/// Marke der Begegnungs-Antwort: Streuwert über den Rumpf. Fester Seed →
+/// gleicher Inhalt, gleiche Marke.
+fn begegnung_marke(rumpf: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    rumpf.hash(&mut hasher);
+    format!("\"beg-{}-{:x}\"", rumpf.len(), hasher.finish())
+}
+
+/// Rumpf der Stand-Route: die Begegnung mit dem Live-Stand der Tablets.
+/// Ist die Quelle kein Punktspiel oder noch kein Paket gelesen, ist die
+/// Anzeige inaktiv (`aktiv: false`) — die Seite zeigt dann ihren Hinweis.
+/// Dieselbe Form liefert der Relay (`/{ns}/info/begegnung/state`).
+fn begegnung_rumpf(ctx: &ServerCtx) -> String {
+    let sicht = crate::quelle::begegnung_sicht(&ctx.app_config_arc());
+    let anzeige = crate::quelle::punktspiel::begegnung_anzeige(sicht.as_ref(), &ctx.tablet);
+    serde_json::to_string(&anzeige).unwrap_or_else(|_| "{}".to_string())
+}
+
+async fn info_begegnung_state(
+    State(ctx): State<Arc<ServerCtx>>,
+    Query(q): Query<DeviceHeartbeat>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    note_heartbeat(&ctx, &q);
+    let rumpf = begegnung_rumpf(&ctx);
+    let etag = begegnung_marke(&rumpf);
+    if marke_bekannt(&headers, &etag) {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::CACHE_CONTROL, "no-store".to_string()),
+                (header::ETAG, etag),
+            ],
+        )
+            .into_response();
+    }
+    (
+        [
+            (header::CACHE_CONTROL, "no-store".to_string()),
+            (header::ETAG, etag),
+            (header::CONTENT_TYPE, "application/json".to_string()),
+        ],
+        rumpf,
+    )
+        .into_response()
 }
 
 /// Spielfolge-Anzeige (Spec spielfolge-anzeige): laufende Spiele plus die
@@ -5067,6 +5161,157 @@ mod tests {
 
     fn make_ctx(port: u16) -> ServerCtx {
         make_ctx_with(port, match_on_court())
+    }
+
+    // ───── Monitoransicht „Begegnung“ (Spec punktspiel-monitoransicht) ─────
+
+    async fn begegnung_stand(
+        ctx: &Arc<ServerCtx>,
+        headers: axum::http::HeaderMap,
+    ) -> (StatusCode, Option<String>, serde_json::Value) {
+        let r = info_begegnung_state(
+            State(ctx.clone()),
+            Query(DeviceHeartbeat::default()),
+            headers,
+        )
+        .await;
+        let status = r.status();
+        let marke = r
+            .headers()
+            .get(header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let bytes = axum::body::to_bytes(r.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        (
+            status,
+            marke,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
+    }
+
+    /// Bei einem Turnier (Quelle BTP) ist die Ansicht inaktiv — die Seite
+    /// zeigt ihren Hinweis. Dieselbe Marke ergibt 304.
+    #[tokio::test]
+    async fn begegnung_state_ist_ohne_punktspiel_inaktiv_und_kennt_die_marke() {
+        let ctx = Arc::new(make_ctx(0));
+        let (status, marke, j) = begegnung_stand(&ctx, axum::http::HeaderMap::new()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(j["aktiv"], serde_json::json!(false));
+        assert_eq!(j["spiele"], serde_json::json!([]));
+        let marke = marke.expect("ETag gesetzt");
+        let mut h = axum::http::HeaderMap::new();
+        h.insert(header::IF_NONE_MATCH, marke.parse().unwrap());
+        let (status, _, _) = begegnung_stand(&ctx, h).await;
+        assert_eq!(status, StatusCode::NOT_MODIFIED);
+    }
+
+    /// Der Live-Stand kommt vom Tablet und wird über die Match-ID zugeordnet;
+    /// ein am Tablet entschiedenes Spiel zählt noch nicht.
+    #[test]
+    fn begegnung_anzeige_mischt_den_tablet_stand() {
+        let ctx = make_ctx(0); // Spiel 42 läuft auf Feld 101
+        let zeile = |nr: i64| relay_proto::BegegnungZeile {
+            nr,
+            status: relay_proto::BegegnungStatus::Laeuft,
+            saetze: vec![relay_proto::SetAb { a: 1, b: 0 }],
+            ..Default::default()
+        };
+        let sicht = relay_proto::BegegnungSicht {
+            best_of: 3,
+            ziel: 21,
+            kappe: 30,
+            // Spiel 7 führt die Sicht als laufend, am Feld liegt es nicht.
+            spiele: vec![zeile(42), zeile(7)],
+            ..Default::default()
+        };
+        ctx.tablet.record_score(101, 42, vec![(21, 18), (5, 3)]);
+        let a = crate::quelle::punktspiel::begegnung_anzeige(Some(&sicht), &ctx.tablet);
+        assert_eq!(a.spiele[0].zustand, relay_proto::BegegnungZustand::Laeuft);
+        assert_eq!(a.spiele[0].feld, Some(101));
+        assert_eq!(
+            a.spiele[0].saetze,
+            vec![
+                relay_proto::SetAb { a: 21, b: 18 },
+                relay_proto::SetAb { a: 5, b: 3 }
+            ]
+        );
+        // Ohne Feld bleibt es bei den Sätzen aus der Sicht.
+        assert_eq!(a.spiele[1].saetze, vec![relay_proto::SetAb { a: 1, b: 0 }]);
+
+        ctx.tablet.record_score(101, 42, vec![(21, 18), (21, 3)]);
+        let a = crate::quelle::punktspiel::begegnung_anzeige(Some(&sicht), &ctx.tablet);
+        assert_eq!(
+            a.spiele[0].zustand,
+            relay_proto::BegegnungZustand::WirdUebermittelt
+        );
+        assert_eq!(a.stand, relay_proto::BegegnungStand::default());
+        // Ohne Sicht: inaktiv.
+        assert!(!crate::quelle::punktspiel::begegnung_anzeige(None, &ctx.tablet).aktiv);
+    }
+
+    #[test]
+    fn vereins_id_nimmt_nur_positive_zahlen() {
+        assert_eq!(vereins_id(" 42 "), Some(42));
+        for muell in [
+            "",
+            "0",
+            "-1",
+            "abc",
+            "4 2",
+            "42&name=x",
+            "1/../x",
+            "99999999999",
+            "4.2",
+        ] {
+            assert_eq!(vereins_id(muell), None, "{muell:?}");
+        }
+    }
+
+    #[test]
+    fn logo_per_id_nur_fuer_die_vereine_der_begegnung() {
+        let sicht = relay_proto::BegegnungSicht {
+            heim_verein_id: Some(17),
+            gast_verein_id: None,
+            ..Default::default()
+        };
+        assert!(vereins_id_erlaubt(17, Some(&sicht)));
+        assert!(!vereins_id_erlaubt(18, Some(&sicht)));
+        // Ohne Begegnung (Turnier, noch kein Paket) ist keine ID erlaubt.
+        assert!(!vereins_id_erlaubt(17, None));
+    }
+
+    /// Eine gültige, aber fremde Vereins-ID löst keinen Abruf aus: 404.
+    #[tokio::test]
+    async fn club_logo_mit_fremder_id_ist_404() {
+        let ctx = Arc::new(make_ctx(0));
+        let r = info_club_logo(
+            State(ctx),
+            Query(ClubLogoQuery {
+                name: String::new(),
+                id: Some("17".into()),
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Eine ungültige Vereins-ID fällt nicht auf den Namen zurück.
+    #[tokio::test]
+    async fn club_logo_mit_ungueltiger_id_ist_404() {
+        let ctx = Arc::new(make_ctx(0));
+        let r = info_club_logo(
+            State(ctx),
+            Query(ClubLogoQuery {
+                name: "TSV Irgendwo".into(),
+                id: Some("abc".into()),
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(r.status(), StatusCode::NOT_FOUND);
     }
 
     fn make_ctx_with(port: u16, m: BtpMatch) -> ServerCtx {

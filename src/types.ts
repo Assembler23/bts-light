@@ -550,6 +550,9 @@ export type MonitorTarget =
   | { kind: "court_tafel"; court_id: number }
   | { kind: "info_overview"; hall?: string | null }
   | { kind: "info_preparation" }
+  /** Begegnung eines Punktspiels: alle Spiele und der Gesamtstand
+   *  (Spec punktspiel-monitoransicht). */
+  | { kind: "info_begegnung" }
   | { kind: "info_winners"; rank?: number | null }
   | { kind: "ad_rotation" }
   | { kind: "ad_single"; file: string }

@@ -68,6 +68,15 @@ nach drei Versuchen geparkt). Eigene Aufgabe, höchstens eine zugleich, höchste
 Fehler 30 s Pause. So zeigt badhub den Punktverlauf auch ohne Liveticker, also beim Betrieb ohne Oberfläche. Am PC
 mit Liveticker geht der Verlauf auf beiden Wegen hinaus; badhub nimmt die direkte Meldung.
 
+### Monitoransicht „Begegnung“ (v0.9.475)
+
+Ein TV zeigt alle Spiele der Begegnung und den Gesamtstand, im Kopf die Vereinslogos
+([punktspiel-monitoransicht.md](punktspiel-monitoransicht.md), ADR 0109, Bedienung in
+[court-monitor.md](../court-monitor.md)). `sicht_aus()` bildet das Paket auf eine `BegegnungSicht` ab: je Person nur
+der Name, nie Lizenznummer oder Personen-ID. Anders als `abbilden()` behält die Sicht eine Teilaufstellung. Das Paket
+trägt dafür `heim_verein_id` und `gast_verein_id` (badhub liefert sie seit dem 28.11.2026; ohne sie zeigt die Ansicht
+Initialen). `quelle::begegnung_sicht()` liefert die Sicht nur bei der Quelle Punktspiel.
+
 ## Tests
 
 `src-tauri/src/quelle/punktspiel/tests.rs`: Paket aus badhub-JSON, Abbildung (Felder, Spieler, offene Plätze,

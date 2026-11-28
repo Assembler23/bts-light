@@ -18,6 +18,17 @@ use crate::btp::proto;
 use crate::config::{AppConfig, QuelleArt};
 use crate::tablet::state::TabletState;
 
+/// Die Begegnung für die Monitoransicht „Begegnung“ (Spec
+/// `punktspiel-monitoransicht`) — nur bei der Quelle Punktspiel. Bei einem
+/// Turnier `None`, auch wenn aus einem früheren Punktspiel noch ein Paket
+/// im Speicher liegt: Die Ansicht zeigt dann ihren Hinweis.
+pub fn begegnung_sicht(config: &AppConfig) -> Option<relay_proto::BegegnungSicht> {
+    match config.quelle {
+        QuelleArt::Punktspiel => punktspiel::begegnung_sicht(),
+        QuelleArt::Badhub | QuelleArt::Btp => None,
+    }
+}
+
 /// Liest den aktuellen Turnierstand aus der eingestellten Quelle.
 ///
 /// Für BTP genau der bisherige Abruf (`client::fetch_snapshot` mit Host,
