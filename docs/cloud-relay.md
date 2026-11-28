@@ -97,7 +97,8 @@ Nach dem nginx-Präfix-Strip (`/bts-relay/` → `/`) sieht der Relay:
 | `GET /{ns}/ads/{index}` | Hochgeladenes Werbebild (per **Position** in der Liste) — der Anzeige-Stil reist positionell mit, siehe unten |
 | `GET /{ns}/info/logo` | Hochgeladenes Turnierlogo |
 | `GET /{ns}/stream?courts=` | Stream-Einblendung für OBS (seit v0.9.328, ADR 0069); holt je Feld `/{ns}/court/{id}/state` |
-| `GET /{ns}/info/club-logo?name=` | Vereinslogo der Anzeigen: relativer 302 auf den badhub-Resolver `/api/v1/club-logo?name=` (seit v0.9.327, ADR 0070) |
+| `GET /{ns}/info/club-logo?name=` bzw. `?id=` | Vereinslogo der Anzeigen: relativer 302 auf den badhub-Resolver `/api/v1/club-logo` (per Name seit v0.9.327, ADR 0070; per Vereins-ID für die Begegnungs-Ansicht, ADR 0109) |
+| `GET /{ns}/info/begegnung`, `GET /{ns}/info/begegnung/state` | Monitoransicht „Begegnung“ für Punktspiele: Seite und Stand (ADR 0109, siehe unten) |
 | `GET /{ns}/info/ad/state` | Werbe-/Leisten-Zustand (`ads`, `barAds`, `streamAds`, `streamVer`, `hasLogo`, `intervalS`, `adStyles`); mit `?zweck=stream` 503 statt „leer", wenn der Relay nichts weiß (ADR 0092) |
 | `GET /health` | Status-Schnappschuss |
 
@@ -2063,6 +2064,43 @@ Der Dienst lauscht auf `127.0.0.1:8090` (`PORT`), QR-Codes zeigen auf
   — Adaptereinstellungen → IPv4 → „Folgende DNS-Serveradressen
   verwenden". Das macht Liveticker und Cloud-Relay unabhängig vom
   Router-DNS.
+
+## Begegnung eines Punktspiels (Spec [punktspiel-monitoransicht](features/punktspiel-monitoransicht.md), ADR [0109](adr/0109-begegnungs-sicht-ueber-den-relay-und-logo-per-vereins-id.md))
+
+Die Monitoransicht „Begegnung“ zeigt alle Spiele eines Punktspiels und den Gesamtstand. Der Relay kennt von sich aus
+nur, was auf einem Feld läuft. Die übrigen Spiele bekommt er vom Host.
+
+- **Frame:** `HostFrame::Begegnung { sicht }` (`"type":"begegnung"`). `sicht` ist eine `BegegnungSicht`
+  (Mannschaftsnamen, Staffel, Vereins-IDs, Zählweise, je Spiel Nummer, Disziplin, Namen, Feld, Status, Sätze, Sieger,
+  Ausgang) oder `null` für „kein Punktspiel“. **Positivliste:** Namen sind schlichte Texte; Personen-ID,
+  Lizenznummer, Verein und Nation je Person gibt es in den Typen nicht.
+- **Wann:** einmal je Verbindung und danach bei geändertem Inhalt. Jeder Frame ersetzt den Stand.
+- **Deckel:** Der Relay kürzt Texte (Mannschaft und Staffel 80, Name 60, Disziplin 12, Ausgang 20 Zeichen), kappt
+  Listen (16 Spiele, 2 Namen je Seite, 5 Sätze) und klemmt Zahlen (Punkte 0 bis 99, Spiel- und Feldnummer 0 bis 999). Passt die Sicht danach nicht unter 16 KiB, gilt `null`; der Hinweis
+  steht einmal je Host-Sitzung im Log.
+- **Stand:** `GET /{ns}/info/begegnung/state` liefert dieselbe Form wie der LAN-Server:
+  `{aktiv, heim, gast, staffel, heimVereinId, gastVereinId, spiele[], stand{heim,gast}, endstand}`. Je Spiel steht
+  `zustand` (`offen`, `laeuft`, `wird_uebermittelt`, `beendet`). Mit ETag; dieselbe Marke ergibt 304.
+- **Mischen und Zählen:** `relay_proto::begegnung_anzeige` — dieselbe Funktion am Host und am Relay. Für ein
+  laufendes Spiel nimmt der Relay den Stand des Feldes, dessen Spiel diese Match-ID trägt (Spielnummer = Match-ID).
+  Der Stand eines anderen Spiels auf demselben Feld rutscht so nie in die Zeile. Ist der Stand am Feld nach der
+  Zählweise entschieden, der Host meldet das Spiel aber noch als laufend, heißt die Zeile `wird_uebermittelt` und
+  zählt nicht.
+- **Ohne Turnier-PC:** wie die anderen Stand-Routen 503 `{"grund":"host_weg"}` nach der Karenz. Nach der Daten-Frist
+  ist die Sicht geräumt.
+- **Kein Push-Kanal:** Die Seite fragt im Sekundentakt mit Marke; ein unveränderter Stand kostet eine 304 ohne
+  Rumpf. Der Frame stößt `/monitor-ws` nicht an — Übersicht und Kombi zeigen die Begegnung nicht.
+- **Kurzes Fenster nach dem Spielende:** Gibt der Host das Feld frei, bevor sein nächster Frame das Spiel als beendet
+  meldet (höchstens der Sendetakt von 2 s), zeigt die Zeile so lange „läuft“ mit den Sätzen aus der Sicht.
+- **Ziel:** `MonitorTarget::InfoBegegnung` (`{"kind":"info_begegnung"}`) leitet ein zugewiesenes Gerät auf
+  `/{ns}/info/begegnung` um.
+- **Logo:** `/{ns}/info/club-logo?id=<Zahl>` leitet auf `/api/v1/club-logo?id=<Zahl>`. Die ID wird als Zahl gelesen
+  und neu geschrieben; alles andere ergibt 404 und nie eine Umleitung. Eine ungültige ID fällt nicht auf `name`
+  zurück.
+
+**Reihenfolge beim Ausrollen:** Der Relay muss diese Fassung haben, bevor ein Client das Ziel zuweisen kann. Ein
+Relay ohne die Variante lehnt den ganzen Zuweisungs-Upload ab, und alle Cloud-Zuweisungen der Installation bleiben
+stehen. Den Frame dagegen verwirft ein älterer Relay still.
 
 ## Meetingpoint (seit v0.9.330, ADR 0074)
 

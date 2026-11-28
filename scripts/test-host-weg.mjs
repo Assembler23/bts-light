@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 
-const SEITEN = ["monitor", "tafel", "overview", "preparation", "combo"];
+const SEITEN = ["monitor", "tafel", "overview", "preparation", "combo", "begegnung"];
 const lies = (n) => readFileSync(new URL(`../src-tauri/assets/${n}.html`, import.meta.url), "utf8");
 
 function funktion(html, name) {
@@ -98,7 +98,7 @@ for (const seite of ["monitor", "tafel"]) {
 }
 
 // 3. Die drei Banner-Seiten zeigen ihr Banner schon beim ersten solchen 503.
-for (const seite of ["overview", "preparation", "combo"]) {
+for (const seite of ["overview", "preparation", "combo", "begegnung"]) {
   const html = lies(seite);
   assert.match(html, /fehler && fehler\.hostWeg\)+ (\{\s*)?showOffline\(true\)/, seite);
   assert.match(html, /Keine Verbindung zum Turnier-PC/, seite);

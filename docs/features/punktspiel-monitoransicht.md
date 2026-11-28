@@ -72,7 +72,7 @@ Vor dem ersten Spiel steht `0 : 0` mit offenen Zeilen. Sind alle Spiele beendet,
   - `relay-proto`: neu `BegegnungSicht`, `BegegnungZeile`, `begegnung_anzeige`, `HostFrame::Begegnung`,
     `MonitorTarget::InfoBegegnung`, Deckel-Konstanten; die Satzregeln `set_is_complete` und
     `spiel_ist_entschieden` ziehen aus `tablet/server.rs` hierher um.
-  - `relay`: Namespace-Feld für die Sicht, Frame-Arm mit Deckel und Nudge, Routen `/{ns}/info/begegnung` und
+  - `relay`: Namespace-Feld für die Sicht, Frame-Arm mit Deckel, Routen `/{ns}/info/begegnung` und
     `/{ns}/info/begegnung/state`, `club_logo_ziel` mit `?id=`, Ziel in der Umleitungs-Positivliste, Räumen in
     `leeren`.
   - `src-tauri`: `quelle/punktspiel.rs` (`begegnung_sicht`, Vereins-IDs in `PaketBegegnung`), `tablet/assets.rs`
@@ -104,7 +104,7 @@ Vor dem ersten Spiel steht `0 : 0` mit offenen Zeilen. Sind alle Spiele beendet,
 **`BegegnungSicht`**: `heim`, `gast`, `staffel` (je höchstens 80 Zeichen), `heim_verein_id`, `gast_verein_id`
 (`Option<u32>`), Zählweise (`best_of`, `ziel`, `kappe`), `spiele` (höchstens 16 `BegegnungZeile`).
 
-**`BegegnungZeile`**: `nr`, `disziplin` (höchstens 12 Zeichen), `doppel`, `heim` und `gast` (je höchstens zwei
+**`BegegnungZeile`**: `nr` (0 bis 999), `disziplin` (höchstens 12 Zeichen), `doppel`, `heim` und `gast` (je höchstens zwei
 Namen zu 60 Zeichen), `feld`, `status` (`offen`/`laeuft`/`beendet`), `saetze` (höchstens 5), `sieger`
 (`heim`/`gast`), `ausgang`.
 
@@ -119,6 +119,11 @@ ETag über den Inhalt, 304 bei unverändertem Stand.
 Live-Stand. Ist dieser nach der Zählweise entschieden, wird die Zeile `wird_uebermittelt`. Der Host liefert den
 Live-Stand aus `laufende_saetze` (Match-ID = Spielnummer). Der Relay nimmt den Stand des Feldes, dessen laufendes
 Spiel diese Match-ID trägt; ein fremdes Spiel auf dem Feld wird ignoriert.
+
+**Abruf (Nachtrag aus der Umsetzung, 28.11.2026):** Die Seite fragt den Stand im Sekundentakt mit Marke
+(`If-None-Match`); ein unveränderter Stand kostet eine 304 ohne Rumpf. Sie nutzt keinen Push-Kanal, und der Frame
+stößt am Relay keine andere Anzeige an. Das hält die Fristen von 2 s und 3 s ein und spart eine weitere Kopie der
+Push-Logik. Vor dem ersten Stand bleibt der Bildschirm leer.
 
 ## Akzeptanzkriterien
 
@@ -156,7 +161,7 @@ LAN
 
 Cloud
 
-- [ ] Der Relay nimmt den Frame an, deckelt ihn und stößt die Monitore an. Ein Frame über 16 KiB wird verworfen
+- [ ] Der Relay nimmt den Frame an und deckelt ihn (Texte, Listen, Zahlen). Ein Frame über 16 KiB wird verworfen
   (`None`) und geloggt.
 - [ ] `GET /{ns}/info/begegnung/state` liefert dieselbe Form wie im LAN, mit dem Live-Stand aus den Feldern des
   Relays.
@@ -182,7 +187,7 @@ Rust (TDD, je PR vor dem Code):
 - `relay-proto`: Serde-Roundtrip von Frame und Ziel (JSON exakt `{"kind":"info_begegnung"}`), `redirect_path`,
   Zählregel (alle Ausgänge, beendet ohne Sieger, unbestätigt), Nebenzeile, Mischen (Live ersetzt, fremdes Spiel
   ignoriert), `endstand`, umgezogene Satzregeln mit den bisherigen Fällen, Wächter „kein `lizenz`, keine `id`“.
-- `relay`: Frame-Arm (speichern, Nudge), Deckel (Kürzen, Kappen, zu groß → `None`), Stand-Route (Form, ETag,
+- `relay`: Frame-Arm (speichern, keine andere Anzeige wecken), Deckel (Kürzen, Kappen, Klemmen, zu groß → `None`), Stand-Route (Form, ETag,
   503 ohne Host), `leeren`, Zuweisungs-Upload mit dem neuen Ziel → 200, Umleitung, `club_logo_ziel` mit ID und
   mit Müll.
 - `src-tauri`: `begegnung_sicht` (acht und zwölf Spiele, Teilaufstellung, keine Lizenz, ohne Paket inaktiv),
@@ -254,5 +259,5 @@ Reihenfolge, jeder Schritt ein eigener PR. Versionsnummer erst beim Merge festle
    Windows-PC ohne weiteren Schalter. Kann mit Schritt 3 zusammengehen, wenn Schritt 2 deployt ist.
 5. **badhub: Link.** `OhnePc::links()` und die Ansicht in Mein Badhub. Erst nach dem Relay-Deploy aus Schritt 2.
 
-Bestehende Muster: Stand-Route und ETag wie die Spielfolge (`tablet/server.rs`), Abruf mit Frist und Push-Nudge
-wie `assets/overview.html`, feldloser Anstoß am Relay mit Feld 0, Deckel wie `MAX_MP_PARTIEN`.
+Bestehende Muster: Stand-Route und ETag wie die Spielfolge (`tablet/server.rs`), Abruf mit Frist und Marke
+wie `assets/overview.html`, Deckel wie `MAX_MP_PARTIEN`.

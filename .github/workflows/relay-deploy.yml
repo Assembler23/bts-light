@@ -37,6 +37,7 @@ on:
       - "src-tauri/assets/stream-werbung.html"
       - "src-tauri/assets/anzeige.html"
       - "src-tauri/assets/meetingpoint.html"
+      - "src-tauri/assets/begegnung.html"
       # Flaggen-Verzeichnis, per `include_dir!` eingebettet.
       - "src-tauri/assets/flags/**"
       - ".github/workflows/relay-deploy.yml"

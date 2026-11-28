@@ -75,6 +75,8 @@ const STREAM_WERBUNG_HTML: &str = include_str!("../../src-tauri/assets/stream-we
 /// seinen Basis-Pfad aus der eigenen URL ab, läuft also unter `/{ns}/…` ohne
 /// Templating.
 const PREPARATION_HTML: &str = include_str!("../../src-tauri/assets/preparation.html");
+/// Monitoransicht „Begegnung“ für Punktspiele (Spec punktspiel-monitoransicht).
+const BEGEGNUNG_HTML: &str = include_str!("../../src-tauri/assets/begegnung.html");
 
 /// Die Vollbild-Werbe-Anzeige (Rotation) – dieselbe Datei wie im LAN. Leitet
 /// ihren Basis-Pfad aus der eigenen URL ab, läuft also unter `/{ns}/info/ad`.
@@ -348,6 +350,22 @@ fn host_frame_deckeln(frame: HostFrame) -> (Option<HostFrame>, Option<&'static s
             let hinweis = (devices.len() != vorher)
                 .then_some("TL-Zugang über 256 Zeichen — dieser Eintrag ausgelassen");
             (Some(HostFrame::TlAuth { devices }), hinweis)
+        }
+        HostFrame::Begegnung { sicht } => {
+            // Der Relay vertraut dem Host nicht: Texte kürzen, Listen kappen.
+            // Passt die Sicht danach nicht unter die Obergrenze, gilt „kein
+            // Punktspiel“ — ehrliche Fehlanzeige statt einer halben Begegnung.
+            let mut hinweis = None;
+            let sicht = sicht.and_then(|mut s| {
+                s.deckeln();
+                if s.passt() {
+                    Some(s)
+                } else {
+                    hinweis = Some("Begegnung über 16 KiB — verworfen");
+                    None
+                }
+            });
+            (Some(HostFrame::Begegnung { sicht }), hinweis)
         }
         andere => (Some(andere), None),
     }
@@ -1031,6 +1049,10 @@ struct Namespace {
     /// die Slave-Spielübersicht + den Nachruf am Slave (Cluster C Stufe 2).
     /// Vom Host via `HostFrame::Prepared` gepusht; ersetzt jeweils die Liste.
     prepared: Vec<relay_proto::PreparedMatch>,
+    /// Begegnung eines Punktspiels für die Monitoransicht „Begegnung“ (Spec
+    /// punktspiel-monitoransicht, ADR 0109). Vom Host bei Änderung gepusht;
+    /// `None` = kein Punktspiel. Positivliste ohne Personenschlüssel.
+    begegnung: Option<relay_proto::BegegnungSicht>,
     /// Meetingpoint-Stand aller Hallen (Spec `meetingpoint-spielbereit`),
     /// vom Host bei Änderung gepusht; je Seite auf die Halle zugeschnitten.
     meetingpoint: relay_proto::MeetingpointView,
@@ -1332,6 +1354,7 @@ impl Namespace {
             court_labels: HashMap::new(),
             court_hall: HashMap::new(),
             prepared: Vec::new(),
+            begegnung: None,
             meetingpoint: relay_proto::MeetingpointView::default(),
             freetext: Vec::new(),
             slaves: HashMap::new(),
@@ -1447,6 +1470,7 @@ impl Namespace {
         self.court_hall.clear();
         self.courts.clear();
         self.prepared.clear();
+        self.begegnung = None;
         self.freetext.clear();
         self.meetingpoint = relay_proto::MeetingpointView::default();
         // Bilder und Logo geben dabei ihren Anteil am Bilder-Budget zurück.
@@ -1673,6 +1697,8 @@ fn router(broker: Broker, tl_an: bool) -> Router {
             "/{ns}/meetingpoint/checkin",
             post(meetingpoint_checkin).layer(DefaultBodyLimit::max(MP_CHECKIN_LIMIT)),
         )
+        .route("/{ns}/info/begegnung", get(begegnung_page))
+        .route("/{ns}/info/begegnung/state", get(begegnung_state))
         .route("/{ns}/info/preparation", get(preparation_page))
         .route("/{ns}/info/preparation/state", get(preparation_state))
         .route("/{ns}/info/ad", get(ad_page))
@@ -2200,6 +2226,7 @@ async fn monitor_device_state(
         // Selbstheilung (schlimmer als die Kopplungs-Seite, die weiterpollt).
         Some(
             t @ (relay_proto::MonitorTarget::InfoPreparation
+            | relay_proto::MonitorTarget::InfoBegegnung
             | relay_proto::MonitorTarget::AdRotation
             | relay_proto::MonitorTarget::InfoOverview { .. }),
         ) => {
@@ -2799,6 +2826,9 @@ const CLUB_LOGO_NAME_MAX: usize = 120;
 struct ClubLogoQuery {
     #[serde(default)]
     name: String,
+    /// Vereins-ID in badhub (ADR 0109). Ist sie angegeben, zählt nur sie.
+    #[serde(default)]
+    id: Option<String>,
 }
 
 /// Wohin `/{ns}/info/club-logo?name=…` weiterleitet — `None` bei leerem Namen.
@@ -2818,14 +2848,27 @@ fn club_logo_ziel(name: &str) -> Option<String> {
     ))
 }
 
+/// Wohin `/{ns}/info/club-logo?id=…` weiterleitet (ADR 0109) — `None`, wenn
+/// die ID keine positive Zahl ist. Die ID wird als Zahl gelesen und neu
+/// geschrieben: Aus der Anfrage gelangt kein Zeichen in die Zieladresse.
+fn club_logo_ziel_id(id: &str) -> Option<String> {
+    let n: u32 = id.trim().parse().ok()?;
+    (n > 0).then(|| format!("/api/v1/club-logo?id={n}"))
+}
+
 /// Vereinslogo für die Anzeigen (ADR 0070): dieselbe Adresse wie im LAN
-/// (`info/club-logo?name=`), damit die Seiten LAN und Cloud nicht
-/// unterscheiden müssen.
+/// (`info/club-logo?name=` bzw. `?id=`), damit die Seiten LAN und Cloud
+/// nicht unterscheiden müssen.
 async fn club_logo(Path(ns): Path<String>, Query(q): Query<ClubLogoQuery>) -> Response {
     if !valid_namespace(&ns) {
         return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
     }
-    match club_logo_ziel(&q.name) {
+    // Eine angegebene, aber ungültige ID fällt NICHT auf den Namen zurück.
+    let ziel = match q.id.as_deref() {
+        Some(id) => club_logo_ziel_id(id),
+        None => club_logo_ziel(&q.name),
+    };
+    match ziel {
         Some(ziel) => (
             StatusCode::FOUND,
             [
@@ -3516,6 +3559,95 @@ async fn meetingpoint_checkin(
             )
         }
     }
+}
+
+async fn begegnung_page(Path(ns): Path<String>) -> impl IntoResponse {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Html(BEGEGNUNG_HTML)).into_response()
+}
+
+/// Die Anzeige der Begegnung aus dem Stand eines Namespace: die Sicht des
+/// Hosts, dazu der Live-Stand der Felder.
+///
+/// Zuordnung über die **Match-ID am Feld** (Spielnummer = Match-ID), nicht
+/// über die Feldnummer in der Sicht: Liegt auf dem Feld schon ein anderes
+/// Spiel, darf dessen Stand nicht in die alte Zeile rutschen. Ohne Stand am
+/// Feld bleibt die Zeile bei den Sätzen aus der Sicht.
+fn begegnung_anzeige_von(n: &Namespace) -> relay_proto::BegegnungAnzeige {
+    // Ohne Sicht nichts nachschlagen — die Route wird im Sekundentakt gefragt.
+    if n.begegnung.is_none() {
+        return relay_proto::BegegnungAnzeige::default();
+    }
+    // Einmal umkehren statt je Spiel alle Felder abzusuchen. Tragen zwei
+    // Felder dieselbe Match-ID, gilt das kleinere Feld.
+    let mut feld_von: HashMap<i64, i64> = HashMap::with_capacity(n.court_matches.len());
+    for (feld, brief) in &n.court_matches {
+        feld_von
+            .entry(brief.match_id)
+            .and_modify(|f| *f = (*f).min(*feld))
+            .or_insert(*feld);
+    }
+    relay_proto::begegnung_anzeige(n.begegnung.as_ref(), |nr| {
+        let feld = *feld_von.get(&nr)?;
+        let saetze = n.court_scores.get(&feld)?.clone();
+        Some(relay_proto::BegegnungLive {
+            feld: Some(feld),
+            saetze,
+        })
+    })
+}
+
+/// Marke der Begegnungs-Antwort (Muster [`bild_marke`]).
+fn begegnung_marke(rumpf: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    rumpf.hash(&mut hasher);
+    format!("\"beg-{}-{:x}\"", rumpf.len(), hasher.finish())
+}
+
+/// Stand der Monitoransicht „Begegnung“ — dieselbe Form wie im LAN
+/// (`/info/begegnung/state`). Ohne Sicht vom Host: `aktiv: false`.
+async fn begegnung_state(
+    State(broker): State<Broker>,
+    Path(ns): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    if !valid_namespace(&ns) {
+        return (StatusCode::NOT_FOUND, "Unbekannter Namespace").into_response();
+    }
+    let anzeige = {
+        let map = broker.namespaces.lock().await;
+        if let Some(antwort) = sperre(
+            anzeige_lage(map.get(&ns), now_ms(), broker.start_ms),
+            &headers,
+        ) {
+            return antwort;
+        }
+        map.get(&ns).map(begegnung_anzeige_von).unwrap_or_default()
+    };
+    let rumpf = serde_json::to_string(&anzeige).unwrap_or_else(|_| "{}".to_string());
+    let etag = begegnung_marke(&rumpf);
+    if marke_passt(&headers, &etag) {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::CACHE_CONTROL, "no-store"),
+                (header::ETAG, etag.as_str()),
+            ],
+        )
+            .into_response();
+    }
+    (
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::ETAG, etag.as_str()),
+            (header::CONTENT_TYPE, "application/json"),
+        ],
+        rumpf,
+    )
+        .into_response()
 }
 
 async fn preparation_page(Path(ns): Path<String>) -> impl IntoResponse {
@@ -7396,6 +7528,13 @@ async fn handle_host_frame(broker: &Broker, ns: &str, frame: HostFrame, sender: 
                     superseded: false,
                 });
             }
+        }
+        HostFrame::Begegnung { sicht } => {
+            // Schon gedeckelt (`host_frame_deckeln`). Jeder Push ersetzt den
+            // Stand. Kein Anstoß über `/monitor-ws`: Die Seite fragt im
+            // Sekundentakt mit Marke, und die Abonnenten „alle Felder“
+            // (Übersicht, Kombi) zeigen die Begegnung nicht.
+            namespace.begegnung = sicht;
         }
         HostFrame::Prepared { mut prepared } => {
             // Aufgerufene Spiele der fernen Hallen für die Slave-Spielübersicht
@@ -16517,6 +16656,306 @@ mod tests {
         assert_eq!(falsch.status(), StatusCode::NOT_FOUND);
     }
 
+    // ───────── Monitoransicht „Begegnung“ (Spec punktspiel-monitoransicht) ─────────
+
+    fn beg_zeile(nr: i64, status: relay_proto::BegegnungStatus) -> relay_proto::BegegnungZeile {
+        relay_proto::BegegnungZeile {
+            nr,
+            disziplin: format!("{nr}.HE"),
+            heim: vec!["Hans Heim".into()],
+            gast: vec!["Gerd Gast".into()],
+            status,
+            ausgang: "normal".into(),
+            ..Default::default()
+        }
+    }
+
+    fn beg_sicht() -> relay_proto::BegegnungSicht {
+        let mut beendet = beg_zeile(1, relay_proto::BegegnungStatus::Beendet);
+        beendet.saetze = vec![SetAb { a: 21, b: 10 }, SetAb { a: 21, b: 12 }];
+        beendet.sieger = Some(relay_proto::BegegnungSeite::Heim);
+        let mut laeuft = beg_zeile(2, relay_proto::BegegnungStatus::Laeuft);
+        laeuft.feld = Some(1);
+        relay_proto::BegegnungSicht {
+            heim: "TV Heim 2".into(),
+            gast: "SV Gast 1".into(),
+            staffel: "Bezirksklasse".into(),
+            heim_verein_id: Some(17),
+            gast_verein_id: None,
+            best_of: 3,
+            ziel: 21,
+            kappe: 30,
+            spiele: vec![
+                beendet,
+                laeuft,
+                beg_zeile(3, relay_proto::BegegnungStatus::Offen),
+            ],
+        }
+    }
+
+    async fn beg_stand(
+        broker: &Broker,
+        ns: &str,
+        headers: axum::http::HeaderMap,
+    ) -> (StatusCode, Option<String>, serde_json::Value) {
+        let r = begegnung_state(State(broker.clone()), Path(ns.to_string()), headers).await;
+        let status = r.status();
+        let marke = r
+            .headers()
+            .get(header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let bytes = axum::body::to_bytes(r.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, marke, json)
+    }
+
+    #[tokio::test]
+    async fn begegnung_frame_ersetzt_den_stand_und_weckt_keine_andere_anzeige() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host, _hrx) = kanal_test();
+        register_host(&broker, &ns, &host).await;
+        let (mon, mut mon_rx) = kanal_test();
+        assert!(subscribe_monitor(&broker, &ns, None, &mon).await);
+
+        let frame = || HostFrame::Begegnung {
+            sicht: Some(beg_sicht()),
+        };
+        handle_host_frame(&broker, &ns, frame(), &host).await;
+        // Übersicht und Kombi zeigen die Begegnung nicht — sie werden nicht
+        // geweckt. Die Begegnungs-Seite fragt selbst.
+        assert!(mon_rx.try_recv().is_err(), "kein Anstoß an andere Anzeigen");
+        {
+            let map = broker.namespaces.lock().await;
+            let n = map.get(&ns).unwrap();
+            assert_eq!(n.begegnung, Some(beg_sicht()));
+            assert!(n.monitor_seq.is_empty(), "der Frame legt kein Feld an");
+        }
+        // `None` (kein Punktspiel mehr) räumt.
+        handle_host_frame(&broker, &ns, HostFrame::Begegnung { sicht: None }, &host).await;
+        assert!(broker.namespaces.lock().await[&ns].begegnung.is_none());
+    }
+
+    #[tokio::test]
+    async fn begegnung_state_mischt_den_live_stand_ueber_die_match_id() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let ns = test_ns();
+        let (host, _hrx) = kanal_test();
+        register_host(&broker, &ns, &host).await;
+
+        // Ohne Sicht: inaktiv (Hinweisseite), kein Fehler.
+        let (status, _, leer) = beg_stand(&broker, &ns, axum::http::HeaderMap::new()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(leer["aktiv"], serde_json::json!(false));
+
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::Begegnung {
+                sicht: Some(beg_sicht()),
+            },
+            &host,
+        )
+        .await;
+        {
+            let mut map = broker.namespaces.lock().await;
+            let n = map.get_mut(&ns).unwrap();
+            // Feld 1: Spiel 2 läuft. Feld 2: ein fremdes Spiel (Nr. 9) mit
+            // Stand — der darf in keine Zeile rutschen.
+            n.court_matches.insert(1, brief(2));
+            n.court_scores
+                .insert(1, vec![SetAb { a: 21, b: 18 }, SetAb { a: 4, b: 6 }]);
+            n.court_matches.insert(2, brief(9));
+            n.court_scores.insert(2, vec![SetAb { a: 30, b: 29 }]);
+        }
+        let (status, marke, j) = beg_stand(&broker, &ns, axum::http::HeaderMap::new()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(j["aktiv"], serde_json::json!(true));
+        assert_eq!(j["heim"], serde_json::json!("TV Heim 2"));
+        assert_eq!(j["heimVereinId"], serde_json::json!(17));
+        assert_eq!(j["stand"]["heim"]["spiele"], serde_json::json!(1));
+        assert_eq!(j["stand"]["gast"]["spiele"], serde_json::json!(0));
+        assert_eq!(j["stand"]["heim"]["punkte"], serde_json::json!(42));
+        assert_eq!(j["endstand"], serde_json::json!(false));
+        let spiele = j["spiele"].as_array().unwrap();
+        assert_eq!(spiele[0]["zustand"], serde_json::json!("beendet"));
+        assert_eq!(spiele[1]["zustand"], serde_json::json!("laeuft"));
+        assert_eq!(spiele[1]["feld"], serde_json::json!(1));
+        assert_eq!(
+            spiele[1]["saetze"],
+            serde_json::json!([{"a": 21, "b": 18}, {"a": 4, "b": 6}])
+        );
+        assert_eq!(spiele[2]["zustand"], serde_json::json!("offen"));
+        assert_eq!(spiele[2]["saetze"], serde_json::json!([]));
+        // Datenschutz: keine Personenschlüssel in der Antwort.
+        let text = j.to_string();
+        for verboten in ["lizenz", "memberId", "\"id\"", "nationality", "club"] {
+            assert!(!text.contains(verboten), "{verboten} in der Antwort");
+        }
+
+        // Dieselbe Marke → 304; nach einem Punkt eine neue Marke.
+        let marke = marke.expect("ETag gesetzt");
+        let (status, _, _) = beg_stand(&broker, &ns, if_none_match(&marke)).await;
+        assert_eq!(status, StatusCode::NOT_MODIFIED);
+        broker
+            .namespaces
+            .lock()
+            .await
+            .get_mut(&ns)
+            .unwrap()
+            .court_scores
+            .insert(1, vec![SetAb { a: 21, b: 18 }, SetAb { a: 21, b: 6 }]);
+        let (status, _, j) = beg_stand(&broker, &ns, if_none_match(&marke)).await;
+        assert_eq!(status, StatusCode::OK);
+        // Am Feld entschieden, vom Host noch nicht als beendet gemeldet.
+        assert_eq!(
+            j["spiele"][1]["zustand"],
+            serde_json::json!("wird_uebermittelt")
+        );
+        assert_eq!(j["stand"]["heim"]["spiele"], serde_json::json!(1));
+    }
+
+    #[tokio::test]
+    async fn begegnung_state_ohne_host_ist_gesperrt_und_leeren_raeumt() {
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        // Unbekannter Namespace ohne Marke: 503 „Host weg“.
+        let (status, _, j) = beg_stand(&broker, &test_ns(), axum::http::HeaderMap::new()).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(j["grund"], serde_json::json!("host_weg"));
+        let falsch = begegnung_state(
+            State(broker.clone()),
+            Path("kein-namespace".to_string()),
+            axum::http::HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(falsch.status(), StatusCode::NOT_FOUND);
+
+        let ns = test_ns();
+        let (host, _hrx) = kanal_test();
+        register_host(&broker, &ns, &host).await;
+        handle_host_frame(
+            &broker,
+            &ns,
+            HostFrame::Begegnung {
+                sicht: Some(beg_sicht()),
+            },
+            &host,
+        )
+        .await;
+        let mut map = broker.namespaces.lock().await;
+        let n = map.get_mut(&ns).unwrap();
+        assert!(n.begegnung.is_some());
+        n.leeren();
+        assert!(n.begegnung.is_none(), "Daten-Frist räumt die Begegnung");
+    }
+
+    #[test]
+    fn begegnung_frame_wird_gedeckelt() {
+        let mut sicht = beg_sicht();
+        sicht.heim = "ä".repeat(999);
+        sicht.spiele = vec![beg_zeile(1, relay_proto::BegegnungStatus::Offen); 40];
+        sicht.spiele[0].heim = vec!["x".repeat(999); 5];
+        let (frame, hinweis) = host_frame_deckeln(HostFrame::Begegnung { sicht: Some(sicht) });
+        assert_eq!(hinweis, None);
+        let Some(HostFrame::Begegnung { sicht: Some(s) }) = frame else {
+            panic!("Sicht bleibt erhalten");
+        };
+        assert_eq!(s.heim.chars().count(), 80);
+        assert_eq!(s.spiele.len(), relay_proto::MAX_BEGEGNUNG_SPIELE);
+        assert_eq!(s.spiele[0].saetze, vec![]);
+        assert_eq!(s.spiele[0].heim.len(), 2);
+        assert!(s.passt());
+        // `None` reist unverändert durch.
+        let (frame, _) = host_frame_deckeln(HostFrame::Begegnung { sicht: None });
+        assert_eq!(frame, Some(HostFrame::Begegnung { sicht: None }));
+    }
+
+    /// ADR 0109: Der Relay muss das Ziel kennen, bevor ein Client es zuweist
+    /// — sonst scheitert der ganze Zuweisungs-Upload.
+    #[tokio::test]
+    async fn begegnung_ziel_wird_angenommen_und_leitet_um() {
+        const NS: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567891";
+        let broker = Broker::new("https://example.test/bts-relay".into());
+        let (host, _hrx) = kanal_test();
+        register_host(&broker, NS, &host).await;
+        // Der Upload in der Form, wie der Client ihn schickt.
+        let control: relay_proto::MonitorControl = serde_json::from_str(
+            r#"{"assignments":{},"targets":{"pi-beg":{"kind":"info_begegnung"}},"commands":{}}"#,
+        )
+        .expect("Relay kennt das Ziel");
+        let up =
+            monitor_control_upload(State(broker.clone()), Path(NS.into()), axum::Json(control))
+                .await
+                .into_response();
+        assert_eq!(up.status(), StatusCode::OK);
+        let r = monitor_device_state(
+            State(broker.clone()),
+            Path(NS.into()),
+            axum::extract::Query(DeviceQuery {
+                device: "pi-beg".into(),
+            }),
+            axum::http::HeaderMap::new(),
+        )
+        .await
+        .into_response();
+        let bytes = axum::body::to_bytes(r.into_body(), 8192).await.unwrap();
+        let j: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(j["redirectTo"], serde_json::json!("/info/begegnung"));
+        assert_eq!(j["unassigned"], serde_json::json!(false));
+        // Die Seite selbst wird ausgeliefert.
+        let seite = begegnung_page(Path(NS.to_string())).await.into_response();
+        assert_eq!(seite.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn club_logo_ziel_id_nimmt_nur_positive_zahlen() {
+        assert_eq!(
+            club_logo_ziel_id(" 42 ").as_deref(),
+            Some("/api/v1/club-logo?id=42")
+        );
+        for muell in [
+            "",
+            "0",
+            "-1",
+            "abc",
+            "4 2",
+            "42&name=x",
+            "1/../x",
+            "99999999999",
+            "4.2",
+        ] {
+            assert_eq!(club_logo_ziel_id(muell), None, "{muell:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn club_logo_route_mit_id() {
+        const NS: &str = "c0000000-0000-0000-0000-000000000072";
+        let anfrage = |id: Option<&str>, name: &str| {
+            club_logo(
+                Path(NS.to_string()),
+                Query(ClubLogoQuery {
+                    name: name.to_string(),
+                    id: id.map(str::to_string),
+                }),
+            )
+        };
+        let r = anfrage(Some("17"), "").await;
+        assert_eq!(r.status(), StatusCode::FOUND);
+        assert_eq!(
+            r.headers().get(header::LOCATION).unwrap(),
+            "/api/v1/club-logo?id=17"
+        );
+        // Eine ungültige ID fällt nicht auf den Namen zurück: 404, keine
+        // Umleitung.
+        let r = anfrage(Some("//evil.example"), "TSV").await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND);
+        assert!(r.headers().get(header::LOCATION).is_none());
+    }
+
     #[test]
     fn club_logo_ziel_kodiert_und_kappt() {
         assert_eq!(
@@ -16544,6 +16983,7 @@ mod tests {
             Path(NS.into()),
             Query(ClubLogoQuery {
                 name: "TSV X".into(),
+                id: None,
             }),
         )
         .await;
@@ -16556,6 +16996,7 @@ mod tests {
             Path(NS.into()),
             Query(ClubLogoQuery {
                 name: String::new(),
+                id: None,
             }),
         )
         .await;
@@ -16564,6 +17005,7 @@ mod tests {
             Path("kein-namespace".into()),
             Query(ClubLogoQuery {
                 name: "TSV X".into(),
+                id: None,
             }),
         )
         .await;

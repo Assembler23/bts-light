@@ -25,6 +25,13 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod begegnung;
+pub use begegnung::{
+    begegnung_anzeige, satz_ist_fertig, spiel_entschieden, BegegnungAnzeige, BegegnungAnzeigeZeile,
+    BegegnungLive, BegegnungSeite, BegegnungSicht, BegegnungStand, BegegnungStatus, BegegnungSumme,
+    BegegnungZeile, BegegnungZustand, MAX_BEGEGNUNG_LEN, MAX_BEGEGNUNG_SPIELE,
+};
+
 // ─────────────────────────── Gemeinsame Bausteine ─────────────────────────
 
 /// Ein Satz-Ergebnis als Punkte (Team A, Team B).
@@ -539,6 +546,12 @@ pub enum MonitorTarget {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anzahl: Option<u16>,
     },
+    /// Begegnung eines Punktspiels (`/info/begegnung`, Spec
+    /// punktspiel-monitoransicht): alle Spiele und der Gesamtstand. LAN und
+    /// Cloud. **Der Relay muss die Variante kennen, bevor ein Client sie
+    /// zuweist** — ein Relay ohne sie lehnt den ganzen Zuweisungs-Upload ab
+    /// (ADR 0109).
+    InfoBegegnung,
 }
 
 impl MonitorTarget {
@@ -615,6 +628,7 @@ impl MonitorTarget {
                 Some(format!("/info/ad?mode=single&file={}", url_encode(file)))
             }
             Self::CourtTafel { court_id } => Some(format!("/court/{court_id}/tafel")),
+            Self::InfoBegegnung => Some("/info/begegnung".to_string()),
             Self::InfoSpielfolge {
                 hall,
                 anordnung,
@@ -660,6 +674,7 @@ impl MonitorTarget {
             Self::CourtTafel { .. } => "court_tafel",
             Self::CourtCombo { .. } => "court_combo",
             Self::InfoSpielfolge { .. } => "info_spielfolge",
+            Self::InfoBegegnung => "info_begegnung",
         }
     }
 }
@@ -3245,6 +3260,14 @@ pub enum HostFrame {
         #[serde(default)]
         view: MeetingpointView,
     },
+    /// Begegnung eines Punktspiels für die Monitoransicht „Begegnung“ (Spec
+    /// punktspiel-monitoransicht, ADR 0109). Bei Änderung und einmal je
+    /// Verbindung gepusht, ersetzt den Stand im Relay. `None` = kein
+    /// Punktspiel aktiv. Ein Relay ohne diesen Frame verwirft ihn still.
+    Begegnung {
+        #[serde(default)]
+        sicht: Option<BegegnungSicht>,
+    },
     /// Antwort auf einen weitergeleiteten Meetingpoint-Check-in.
     MeetingpointAck {
         #[serde(rename = "reqId")]
@@ -4885,6 +4908,44 @@ mod tests {
                 state: None,
             }
         );
+    }
+
+    #[test]
+    fn begegnung_frame_und_ziel_roundtrip() {
+        roundtrip(&HostFrame::Begegnung { sicht: None });
+        roundtrip(&HostFrame::Begegnung {
+            sicht: Some(BegegnungSicht {
+                heim: "TV Heim 2".into(),
+                gast: "SV Gast".into(),
+                heim_verein_id: Some(17),
+                spiele: vec![BegegnungZeile {
+                    nr: 1,
+                    disziplin: "1.HD".into(),
+                    doppel: true,
+                    heim: vec!["A".into()],
+                    status: BegegnungStatus::Laeuft,
+                    feld: Some(2),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+        });
+        // Ohne `sicht` (z. B. von einem Host, der das Feld weglässt) = None.
+        assert_eq!(
+            serde_json::from_str::<HostFrame>(r#"{"type":"begegnung"}"#).unwrap(),
+            HostFrame::Begegnung { sicht: None }
+        );
+        // Das Ziel hat exakt diese JSON-Form — sie steht in gespeicherten
+        // Zuweisungen und im Upload an den Relay.
+        let ziel = MonitorTarget::InfoBegegnung;
+        assert_eq!(
+            serde_json::to_string(&ziel).unwrap(),
+            r#"{"kind":"info_begegnung"}"#
+        );
+        roundtrip(&ziel);
+        assert_eq!(ziel.redirect_path().as_deref(), Some("/info/begegnung"));
+        assert_eq!(ziel.kind_str(), "info_begegnung");
+        assert_eq!(ziel.court_id(), None);
     }
 
     #[test]

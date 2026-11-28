@@ -485,6 +485,8 @@ jobs:
       # abdecken und einen rechtzeitigen Abruf in nichts veraendern.
       - name: Frist des Stand-Abrufs der Anzeigen (JS)
         run: node scripts/test-abruf-frist.mjs
+      - name: Monitoransicht Begegnung (Seitenlogik und Inline-Kopie)
+        run: node scripts/test-begegnung-ansicht.mjs
 
       # Server-Uhr der Anzeigen (Etappe ETag, 1c): Der Offset kommt aus dem
       # 200-Abruf UND dem WS-Herzschlag, überlebt eine 304-Serie und bleibt
