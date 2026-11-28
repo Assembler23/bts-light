@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="de" translate="no">
+<head>
+<meta charset="utf-8" />
+<meta name="google" content="notranslate" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Begegnung</title>
+<style>
+/* Monitoransicht „Begegnung“ für Punktspiele (Spec punktspiel-monitoransicht).
+   Palette wie overview.html: dunkles Marineblau, gelbe Akzente. Querformat
+   16:9 ist der Maßstab; alles in vh/vw, die Zeilen teilen sich die Höhe. */
+html, body {
+  margin: 0; height: 100%; background: #0b1120; color: #f8fafc;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: none; overflow: hidden;
+}
+body.rotate-90  { transform: rotate(90deg);  transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+body.rotate-180 { transform: rotate(180deg); }
+body.rotate-270 { transform: rotate(270deg); transform-origin: 50vh 50vh; width: 100vh; height: 100vw; }
+
+#seite { height: 100%; display: flex; flex-direction: column; }
+body.host-weg #seite { opacity: .25; }
+
+/* ── Kopf: Logo · Name · Gesamtstand · Name · Logo ── */
+#kopf {
+  flex: 0 0 26vh; box-sizing: border-box;
+  display: grid; grid-template-columns: 22vh 1fr auto 1fr 22vh;
+  align-items: center; gap: 2vw; padding: 2vh 2.5vw;
+  background: linear-gradient(180deg, #141f33, #1c2942);
+  border-bottom: .3vh solid #334155;
+}
+.logo {
+  width: 22vh; height: 22vh; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  background: #fff; border-radius: 2vh; padding: 1.2vh; overflow: hidden;
+}
+.logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+/* Ohne Logo: gleich große Kachel mit den Initialen. */
+.logo.kachel {
+  background: #24365a; color: #fbbf24; padding: 0;
+  font-size: 10vh; font-weight: 800; letter-spacing: .02em;
+}
+.mannschaft {
+  min-width: 0; font-size: 5.4vh; font-weight: 800; line-height: 1.08;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  overflow-wrap: anywhere;
+}
+#name-heim { text-align: right; }
+#name-gast { text-align: left; }
+#mitte { text-align: center; white-space: nowrap; }
+#staffel { font-size: 2.3vh; font-weight: 600; color: #94a3b8; min-height: 2.8vh;
+  max-width: 34vw; overflow: hidden; text-overflow: ellipsis; margin: 0 auto; }
+#stand { font-size: 13.5vh; font-weight: 900; line-height: 1; color: #fbbf24;
+  font-variant-numeric: tabular-nums; }
+#neben { font-size: 2.4vh; font-weight: 600; color: #cbd5e1; margin-top: .6vh;
+  font-variant-numeric: tabular-nums; }
+#endstand { display: none; font-size: 2.2vh; font-weight: 800; letter-spacing: .12em;
+  text-transform: uppercase; color: #0b1120; background: #fbbf24;
+  border-radius: 1vh; padding: .2vh 1.2vh; margin-left: 1vh; vertical-align: middle; }
+#endstand.an { display: inline-block; }
+
+/* ── Spiele ── */
+#spiele {
+  flex: 1 1 auto; min-height: 0; box-sizing: border-box;
+  padding: 1.6vh 2vw; display: flex; flex-direction: column;
+  gap: var(--abstand, 1vh);
+}
+.zeile {
+  flex: 0 0 var(--zeile, 8vh); min-height: 0; box-sizing: border-box;
+  display: grid; grid-template-columns: 8vw 1fr auto 1fr 12vw;
+  align-items: center; gap: 1.4vw; padding: 0 1.4vw;
+  background: linear-gradient(180deg, #1a2842, #0f1a30);
+  border: .25vmin solid #334155; border-radius: 1.2vmin; overflow: hidden;
+}
+.zeile.laeuft, .zeile.wird_uebermittelt { border-color: #fbbf24; background: linear-gradient(180deg, #26365a, #162444); }
+.zeile.offen { opacity: .72; }
+.disziplin { font-size: var(--name, 3vh); font-weight: 800; color: #fbbf24; white-space: nowrap; }
+.namen { min-width: 0; font-size: var(--name, 3vh); font-weight: 600; line-height: 1.14; }
+.namen.heim { text-align: right; }
+.namen div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.namen .platz-offen { font-weight: 400; font-style: italic; color: #94a3b8; }
+.namen.sieger { color: #fff; font-weight: 800; }
+.namen.verlierer { color: #94a3b8; }
+.saetze {
+  display: flex; gap: .9vw; justify-content: center; min-width: 21vw;
+  font-size: var(--satz, 4vh); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.satz { color: #cbd5e1; }
+.satz b { color: #fff; }
+.satz .klein { font-weight: 600; color: #94a3b8; }
+.satz.live { color: #fbbf24; }
+.satz.live b, .satz.live .klein { color: #fbbf24; }
+.zustand { font-size: calc(var(--name, 3vh) * .78); font-weight: 700; color: #cbd5e1; text-align: right;
+  line-height: 1.1; overflow: hidden; }
+.zeile.laeuft .zustand { color: #fbbf24; }
+.zeile.wird_uebermittelt .zustand { color: #fbbf24; font-size: calc(var(--name, 3vh) * .66); }
+
+/* ── Hinweis und Störung ── */
+#hinweis {
+  display: none; height: 100%; align-items: center; justify-content: center;
+  font-size: 5vh; font-weight: 600; color: #94a3b8; text-align: center; padding: 0 8vw;
+}
+body.inaktiv #seite { display: none; }
+/* Vor dem ersten Stand bleibt der Bildschirm leer — ein „0 : 0“ ohne Daten
+   sähe auf dem Hallen-TV wie ein echter Spielstand aus. */
+body.wartet #seite { visibility: hidden; }
+body.inaktiv #hinweis { display: flex; }
+#offline {
+  display: none; position: fixed; left: 50%; bottom: 3vh; transform: translateX(-50%);
+  background: #7f1d1d; color: #fff; font-size: 3vh; font-weight: 700;
+  padding: 1.2vh 3vw; border-radius: 1.4vh; z-index: 10;
+}
+#offline.an { display: block; }
+</style>
+</head>
+<body class="wartet">
+<div id="seite">
+  <header id="kopf">
+    <div class="logo kachel" id="logo-heim"></div>
+    <div class="mannschaft" id="name-heim"></div>
+    <div id="mitte">
+      <div id="staffel"></div>
+      <div><span id="stand">0 : 0</span><span id="endstand">Endstand</span></div>
+      <div id="neben"></div>
+    </div>
+    <div class="mannschaft" id="name-gast"></div>
+    <div class="logo kachel" id="logo-gast"></div>
+  </header>
+  <main id="spiele"></main>
+</div>
+<div id="hinweis">Diese Ansicht gibt es nur bei Punktspielen.</div>
+<div id="offline">Keine Verbindung zum Turnier-PC</div>
+<script>
+(function () {
+  'use strict';
+
+  var params = new URLSearchParams(location.search);
+
+  // Basis-Pfad aus dem eigenen URL: LAN "/", Cloud "/bts-relay/{ns}/". Alle
+  // Abrufe laufen darüber, damit sie in der Cloud unter dem Namespace landen.
+  var BASE = location.pathname.replace(/info\/begegnung\/?$/, '');
+
+  var rotate = (params.get('rotate') || '0').replace(/[^0-9]/g, '');
+  if (rotate === '90' || rotate === '180' || rotate === '270') {
+    document.body.classList.add('rotate-' + rotate);
+  }
+
+  // Geräte-Code (?device=…): Dann prüft die Seite im Sekundentakt, ob das
+  // Gerät inzwischen einem anderen Ziel zugewiesen ist, und leitet um.
+  var deviceId = (params.get('device') || '').trim();
+
+  // Inline-Kopie von `src/io/begegnungAnsicht.mjs` (dort die kanonische
+  // Fassung; `scripts/test-begegnung-ansicht.mjs` prüft die Gleichheit).
+  // >>> begegnungAnsicht
+  /** So viele Spiele zeigt die Seite höchstens — ohne Blättern, ohne Laufband. */
+  var MAX_ZEILEN = 12;
+  /** Text für einen Platz, der in der Aufstellung noch fehlt. */
+  var PLATZ_OFFEN = "noch nicht aufgestellt";
+
+  /** Initialen für die Kachel ohne Logo: die Anfangsbuchstaben der ersten zwei
+   *  Wörter, die mit einem Buchstaben beginnen. „1. BC Muster 2“ → „BM“. */
+  function initialen(name) {
+    var woerter = String(name == null ? "" : name).split(/[\s.\-\/]+/);
+    var aus = "";
+    for (var i = 0; i < woerter.length && aus.length < 2; i++) {
+      var erster = woerter[i].charAt(0);
+      // Buchstabe = hat Groß- und Kleinform (Ziffern und Zeichen nicht).
+      if (erster && erster.toLowerCase() !== erster.toUpperCase()) aus += erster.toUpperCase();
+    }
+    return aus || "?";
+  }
+
+  /** Namen einer Seite, aufgefüllt auf die erwartete Zahl (Einzel 1, Doppel 2).
+   *  Ein fehlender Platz heißt [`PLATZ_OFFEN`]; ein schon aufgestellter
+   *  Doppelpartner bleibt sichtbar. Liefert `[{ text, offen }]`. */
+  function namenListe(namen, doppel) {
+    var liste = Array.isArray(namen) ? namen : [];
+    var soll = doppel ? 2 : 1;
+    var aus = [];
+    for (var i = 0; i < soll; i++) {
+      var n = typeof liste[i] === "string" ? liste[i].trim() : "";
+      aus.push(n ? { text: n, offen: false } : { text: PLATZ_OFFEN, offen: true });
+    }
+    return aus;
+  }
+
+  /** Text der Zustandsspalte. Leer heißt: nichts zu sagen. */
+  function zustandText(zeile) {
+    var z = zeile || {};
+    if (z.zustand === "laeuft") return z.feld != null ? "Feld " + z.feld : "läuft";
+    if (z.zustand === "wird_uebermittelt") return "Ergebnis wird übermittelt";
+    if (z.zustand === "beendet") {
+      if (z.ausgang === "kampflos") return "kampflos";
+      if (z.ausgang === "aufgabe") return "Aufgabe";
+      if (z.ausgang === "disqualifikation") return "Disqualifikation";
+    }
+    return "";
+  }
+
+  /** Nebenzeile unter dem Gesamtstand: Sätze und Punkte. */
+  function nebenzeile(stand) {
+    var h = (stand && stand.heim) || {}, g = (stand && stand.gast) || {};
+    function zahl(v) { return typeof v === "number" && isFinite(v) ? v : 0; }
+    return zahl(h.saetze) + " : " + zahl(g.saetze) + " Sätze · " +
+      zahl(h.punkte) + " : " + zahl(g.punkte) + " Punkte";
+  }
+
+  /** Die Zeilen, die auf den Bildschirm passen. */
+  function sichtbareZeilen(spiele) {
+    return (Array.isArray(spiele) ? spiele : []).slice(0, MAX_ZEILEN);
+  }
+
+  /** Höhe einer Zeile und Schriftgrößen in Pixeln: Die Zeilen teilen sich die
+   *  verfügbare Höhe, die Schrift folgt der Zeilenhöhe. Mit Doppeln stehen zwei
+   *  Namen übereinander, die Namen sind dann kleiner. Gerechnet wird immer mit
+   *  mindestens vier Zeilen, damit zwei Spiele nicht bildschirmhohe Buchstaben
+   *  bekommen. */
+  function zeilenMass(hoehe, anzahl, mitDoppel) {
+    var n = Math.max(4, Math.min(MAX_ZEILEN, Math.floor(anzahl) || 0));
+    var h = Math.max(0, Number(hoehe) || 0);
+    var abstand = h * 0.012;
+    var zeile = Math.max(0, (h - abstand * (n - 1)) / n);
+    return {
+      zeile: zeile,
+      abstand: abstand,
+      name: zeile * (mitDoppel ? 0.38 : 0.46),
+      satz: zeile * 0.56,
+    };
+  }
+  // <<< begegnungAnsicht
+
+  function el(tag, klasse, text) {
+    var e = document.createElement(tag);
+    if (klasse) e.className = klasse;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  // ── Kopf ──
+  // Das Logo wird nur neu gesetzt, wenn sich Verein oder Name ändern — sonst
+  // lüde jeder Stand das Bild neu und der Kopf flackerte.
+  var logoSchluessel = { heim: null, gast: null };
+  function setzeLogo(seite, vereinId, name) {
+    var schluessel = String(vereinId == null ? '' : vereinId) + '|' + name;
+    if (logoSchluessel[seite] === schluessel) return;
+    logoSchluessel[seite] = schluessel;
+    var kasten = document.getElementById('logo-' + seite);
+    function kachel() {
+      kasten.className = 'logo kachel';
+      kasten.textContent = initialen(name);
+    }
+    var id = Number(vereinId);
+    if (!(id > 0) || Math.floor(id) !== id) { kachel(); return; }
+    var img = new Image();
+    img.alt = '';
+    img.onload = function () {
+      if (logoSchluessel[seite] !== schluessel) return;
+      kasten.className = 'logo';
+      kasten.textContent = '';
+      kasten.appendChild(img);
+    };
+    img.onerror = function () { if (logoSchluessel[seite] === schluessel) kachel(); };
+    // Bis das Bild da ist, steht die Kachel — nie ein leerer Platz.
+    kachel();
+    img.src = BASE + 'info/club-logo?id=' + id;
+  }
+
+  // ── Spiele ──
+  function satzEl(satz, live) {
+    var a = Number(satz && satz.a) || 0, b = Number(satz && satz.b) || 0;
+    var s = el('span', 'satz' + (live ? ' live' : ''));
+    s.appendChild(el(a > b ? 'b' : 'span', a > b ? null : 'klein', String(a)));
+    s.appendChild(document.createTextNode(':'));
+    s.appendChild(el(b > a ? 'b' : 'span', b > a ? null : 'klein', String(b)));
+    return s;
+  }
+  function namenEl(seite, zeile) {
+    var klasse = 'namen ' + seite;
+    if (zeile.zustand === 'beendet' && zeile.sieger) klasse += zeile.sieger === seite ? ' sieger' : ' verlierer';
+    var kasten = el('div', klasse);
+    namenListe(zeile[seite], zeile.doppel).forEach(function (n) {
+      kasten.appendChild(el('div', n.offen ? 'platz-offen' : null, n.text));
+    });
+    return kasten;
+  }
+  function zeileEl(zeile) {
+    var zustand = /^(offen|laeuft|wird_uebermittelt|beendet)$/.test(zeile.zustand) ? zeile.zustand : 'offen';
+    var z = el('div', 'zeile ' + zustand);
+    z.appendChild(el('div', 'disziplin', zeile.disziplin || ''));
+    z.appendChild(namenEl('heim', zeile));
+    var saetze = el('div', 'saetze');
+    var liste = Array.isArray(zeile.saetze) ? zeile.saetze : [];
+    liste.forEach(function (s, i) {
+      saetze.appendChild(satzEl(s, zustand === 'laeuft' && i === liste.length - 1));
+    });
+    z.appendChild(saetze);
+    z.appendChild(namenEl('gast', zeile));
+    z.appendChild(el('div', 'zustand', zustandText(zeile)));
+    return z;
+  }
+
+  var letzte = null;
+  function mass() {
+    var kasten = document.getElementById('spiele');
+    if (!letzte) return;
+    var stil = getComputedStyle(kasten);
+    var hoehe = kasten.clientHeight - parseFloat(stil.paddingTop) - parseFloat(stil.paddingBottom);
+    var zeilen = sichtbareZeilen(letzte.spiele);
+    var m = zeilenMass(hoehe, zeilen.length, zeilen.some(function (z) { return z.doppel; }));
+    kasten.style.setProperty('--zeile', m.zeile + 'px');
+    kasten.style.setProperty('--abstand', m.abstand + 'px');
+    kasten.style.setProperty('--name', m.name + 'px');
+    kasten.style.setProperty('--satz', m.satz + 'px');
+  }
+  window.addEventListener('resize', mass);
+
+  function render(d) {
+    var aktiv = !!(d && d.aktiv);
+    document.body.classList.remove('wartet');
+    document.body.classList.toggle('inaktiv', !aktiv);
+    if (!aktiv) { letzte = null; return; }
+    letzte = d;
+    var stand = d.stand || {}, h = stand.heim || {}, g = stand.gast || {};
+    document.getElementById('name-heim').textContent = d.heim || '';
+    document.getElementById('name-gast').textContent = d.gast || '';
+    document.getElementById('staffel').textContent = d.staffel || '';
+    document.getElementById('stand').textContent = (Number(h.spiele) || 0) + ' : ' + (Number(g.spiele) || 0);
+    document.getElementById('neben').textContent = nebenzeile(stand);
+    document.getElementById('endstand').classList.toggle('an', !!d.endstand);
+    setzeLogo('heim', d.heimVereinId, d.heim || '');
+    setzeLogo('gast', d.gastVereinId, d.gast || '');
+    var kasten = document.getElementById('spiele');
+    kasten.textContent = '';
+    sichtbareZeilen(d.spiele).forEach(function (z) { kasten.appendChild(zeileEl(z || {})); });
+    mass();
+  }
+
+  // ── Wechsel der Zuweisung (wie preparation.html) ──
+  function currentUrlMatches(redirectTo) {
+    try {
+      var here = new URL(location.href);
+      here.searchParams.delete('device');
+      here.searchParams.delete('rotate');
+      here.searchParams.delete('ansage');
+      var there = new URL(redirectTo, location.origin);
+      return here.pathname === there.pathname &&
+             here.searchParams.toString() === there.searchParams.toString();
+    } catch (e) { return false; }
+  }
+  function navigateWithRotate(href) {
+    var hereParams = new URLSearchParams(location.search);
+    var hereRotate = hereParams.get('rotate');
+    if (hereRotate && href.indexOf('rotate=') < 0) {
+      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'rotate=' + encodeURIComponent(hereRotate);
+    }
+    // ?ansage=… (Ansage-Modus) mitnehmen — sonst verstummte ein Pi beim
+    // ersten Zielwechsel.
+    if (hereParams.has('ansage') && !/[?&]ansage(=|&|$)/.test(href)) {
+      href += (href.indexOf('?') >= 0 ? '&' : '?') + 'ansage=' + encodeURIComponent(hereParams.get('ansage') || '');
+    }
+    location.href = href;
+  }
+  function resolveDest(redirectTo) { return BASE + String(redirectTo).replace(/^\//, ''); }
+  var checkLaeuft = false;
+  function checkReassignment() {
+    if (!deviceId) return;
+    if (checkLaeuft) return;
+    checkLaeuft = true;
+    abrufMitFrist(BASE + 'monitor/state?device=' + encodeURIComponent(deviceId) + '&src=check', { cache: 'no-store' }, function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        checkLaeuft = false;
+        if (!s) return;
+        if (s.redirectTo) {
+          var dest = resolveDest(s.redirectTo);
+          if (!currentUrlMatches(dest)) {
+            var sep = dest.indexOf('?') >= 0 ? '&' : '?';
+            navigateWithRotate(dest + sep + 'device=' + encodeURIComponent(deviceId));
+          }
+        } else {
+          navigateWithRotate(BASE + 'monitor?device=' + encodeURIComponent(deviceId));
+        }
+      })
+      .catch(function () { checkLaeuft = false; });
+  }
+  setInterval(checkReassignment, 1000);
+
+  // ── Stand-Abruf ──
+  // Sekundentakt mit Marke: Ein unveränderter Stand kostet eine 304-Antwort
+  // ohne Rumpf. So steht ein Punkt nach höchstens gut einer Sekunde da, ohne
+  // dass die Seite an einem eigenen Push-Kanal hängt.
+  var POLL_OK_MS = 1000, POLL_FAIL_MS = 3000;
+  function stateUrl() {
+    return deviceId
+      ? BASE + 'info/begegnung/state?device=' + encodeURIComponent(deviceId)
+      : BASE + 'info/begegnung/state';
+  }
+  // Frist des Stand-Abrufs: Kopfzeilen 5 s, Rumpf danach 15 s.
+  // **Inline-Kopie von `src/io/abrufFrist.mjs`** — dort die kanonische
+  // Fassung mit Begründung und Test (`scripts/test-abruf-frist.mjs`); hier
+  // ohne `fetchFn`-Parameter. Änderungen hier und dort gemeinsam.
+  var KOPF_FRIST_MS = 5000, RUMPF_FRIST_MS = 15000;
+  function abrufMitFrist(url, opt, lesen) {
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var o = Object.assign({}, opt);
+    if (ctrl) o.signal = ctrl.signal;
+    var timer = null, abgelaufen = false, abbrechen = null;
+    var abbruch = new Promise(function (_, reject) {
+      abbrechen = function (was) {
+        abgelaufen = true;
+        if (ctrl) ctrl.abort();
+        reject(new Error('Abruf-Frist überschritten (' + was + ')'));
+      };
+      timer = setTimeout(function () { abbrechen('Kopfzeilen ' + KOPF_FRIST_MS + ' ms'); }, KOPF_FRIST_MS);
+    });
+    var abruf = fetch(url, o).then(function (r) {
+      // Nur ohne AbortController erreichbar: Der Wettlauf ist entschieden,
+      // der Leser darf seine Nebenwirkungen nicht mehr entfalten.
+      if (abgelaufen) throw new Error('Antwort nach Ablauf der Frist verworfen');
+      clearTimeout(timer);
+      timer = setTimeout(function () { abbrechen('Rumpf ' + RUMPF_FRIST_MS + ' ms'); }, RUMPF_FRIST_MS);
+      return lesen ? lesen(r) : r;
+    });
+    return Promise.race([abruf, abbruch]).then(
+      function (wert) { clearTimeout(timer); return wert; },
+      function (fehler) { clearTimeout(timer); throw fehler; }
+    );
+  }
+
+  // „Turnier-PC weg“: Der Cloud-Relay antwortet dann 503 mit dem Rumpf
+  // {"grund":"host_weg"}. Das Banner erscheint schon beim ersten solchen
+  // Abruf; jeder andere Fehler (und das LAN) braucht zwei Fehlversuche.
+  function istHostWeg(status, text) {
+    if (status !== 503) return false;
+    try { return JSON.parse(text).grund === 'host_weg'; } catch (e) { return false; }
+  }
+  function wirf503(r) {
+    return r.text().then(function (t) {
+      var f = new Error('HTTP 503'); f.hostWeg = istHostWeg(503, t); throw f;
+    });
+  }
+  function showOffline(an) {
+    document.getElementById('offline').classList.toggle('an', an);
+    document.body.classList.toggle('host-weg', an);
+  }
+
+  var errorCount = 0, marke = null;
+  function tick() {
+    var opt = { cache: 'no-store' };
+    if (marke) opt.headers = { 'If-None-Match': marke };
+    abrufMitFrist(stateUrl(), opt, function (r) {
+        if (r.status === 304) return null;
+        if (r.status === 503) return wirf503(r);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        var neu = r.headers.get('ETag');
+        return r.json().then(function (d) { return { daten: d, marke: neu }; });
+      })
+      .then(function (antwort) {
+        errorCount = 0; showOffline(false);
+        if (antwort) {
+          // Ein Fehler beim Zeichnen ist kein Netzfehler: Er darf das Banner
+          // „Keine Verbindung“ nicht auslösen. Die Marke bleibt dann leer,
+          // der nächste Abruf holt den Stand frisch.
+          try { render(antwort.daten); marke = antwort.marke; }
+          catch (e) { marke = null; if (window.console) console.error('Begegnung: Anzeige fehlgeschlagen', e); }
+        }
+        setTimeout(tick, POLL_OK_MS);
+      })
+      .catch(function (fehler) {
+        errorCount++;
+        // Nach einem Fehler den Stand frisch holen, nicht per Marke bestätigen.
+        marke = null;
+        if (errorCount >= 2 || (fehler && fehler.hostWeg)) showOffline(true);
+        setTimeout(tick, POLL_FAIL_MS);
+      });
+  }
+  tick();
+})();
+</script>
+</body>
+</html>

@@ -94,6 +94,9 @@ seiten! {
     Ansage => "ansage.html", ["__BASE__"];
     /// Meetingpoint-Seite (`/meetingpoint`, Spec `meetingpoint-spielbereit`).
     Meetingpoint => "meetingpoint.html", ["__BASE__"];
+    /// Begegnung eines Punktspiels (`/info/begegnung`, Spec
+    /// punktspiel-monitoransicht). Ohne Platzhalter.
+    Begegnung => "begegnung.html", [];
 }
 
 /// Woher der aktive Seitenstand stammt.

@@ -3298,14 +3298,9 @@ type DerivedResult = (Vec<(i64, i64)>, bool, i64);
 /// damit ein noch LAUFENDER Satz nicht als gewonnener gewertet wird
 /// (Plan-12a2-Review). Sinnvolle Defaults, falls das Format fehlt: 21/30.
 pub(crate) fn set_is_complete(a: i64, b: i64, target: i64, cap: i64) -> bool {
-    let target = if target > 0 { target } else { 21 };
-    let cap = if cap >= target { cap } else { target.max(30) };
-    let hi = a.max(b);
-    let lo = a.min(b);
-    if hi < target || hi > cap {
-        return false; // Ziel nicht erreicht oder über dem Deckel
-    }
-    hi >= cap || hi - lo >= 2 // am Deckel reicht 1 Punkt, sonst 2 Vorsprung
+    // Die Regel liegt in `relay-proto`, weil auch der Relay sie braucht
+    // (Monitoransicht „Begegnung“, ADR 0109) — eine Fassung für beide.
+    relay_proto::satz_ist_fertig(a, b, target, cap)
 }
 
 /// Ist dieses Spiel nach seinen Sätzen bereits **entschieden**?
@@ -3337,35 +3332,16 @@ pub(crate) fn spiel_ist_entschieden(
     sets: &[(i64, i64)],
     scoring: &crate::btp::model::ScoringFormat,
 ) -> bool {
-    // Ohne aufgelöste Zählweise wird NICHT gewarnt. `set_is_complete` fällt
-    // still auf 21/30 zurück — in einem 15er-Turnier ohne Format hieße das
-    // reihenweise falsche Alarme. Lieber keine Warnung als eine, der niemand
-    // mehr glaubt.
-    if scoring.target_score <= 0 {
-        return false;
-    }
-    let noetig = (scoring.best_of / 2 + 1).max(1);
-    let (mut a, mut b) = (0i64, 0i64);
-    for &(x, y) in sets {
-        // Geistersatz / noch nicht begonnener Satz: überspringen.
-        if x == 0 && y == 0 {
-            continue;
-        }
-        // Ein angefangener Satz heißt: Es wird gespielt. Dann ist das Spiel
-        // nicht fertig — auch dann nicht, wenn die Sätze davor schon eine
-        // Mehrheit ergäben. Dieser Fall entsteht bei einer Korrektur oder
-        // einem falsch aufgelösten `best_of`, und in beiden Lagen wäre eine
-        // Warnung falsch. Ein Fehlalarm ist teuer (Muster `standstill.mjs`).
-        if !set_is_complete(x, y, scoring.target_score, scoring.cap_score) {
-            return false;
-        }
-        if x > y {
-            a += 1;
-        } else {
-            b += 1;
-        }
-    }
-    a >= noetig || b >= noetig
+    // Die Regel liegt in `relay-proto` (siehe `set_is_complete`). Dort
+    // stehen auch die Begründungen im Einzelnen: Ohne aufgelöste Zählweise
+    // gilt nichts als entschieden, der Geistersatz 0:0 wird übersprungen,
+    // ein angefangener Satz heißt „es wird gespielt“.
+    relay_proto::spiel_entschieden(
+        sets,
+        scoring.best_of,
+        scoring.target_score,
+        scoring.cap_score,
+    )
 }
 
 /// Prüft eine ganze Satzliste gegen die Zählweise des Matches.
