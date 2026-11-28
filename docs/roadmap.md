@@ -659,6 +659,14 @@ gilt nur für Installationen, die schon vor v0.9.6 im Einsatz waren.
 
 ## Spezifiziert (Spec liegt vor, Umsetzung noch nicht begonnen)
 
+- **Monitoransicht „Begegnung“ für Punktspiele** — Spec:
+  [features/punktspiel-monitoransicht.md](features/punktspiel-monitoransicht.md)
+  (**freigegeben 28.11.2026**, ADR 0109). Ein TV zeigt alle Spiele der
+  Begegnung und den Gesamtstand, im Kopf die Vereinslogos von Heim und Gast. LAN und
+  Cloud; ohne Windows-PC über einen festen Link aus Mein Badhub. Fünf Schritte:
+  badhub-Paketfelder → Relay und Seite → Client LAN → Client Cloud → Link in badhub.
+  `AFFECTS` badhub (Paket `/api/ls/v1`, Mein Badhub).
+
 - **Ansage ohne Internet** — Spec:
   [features/ansage-offline-stimme.md](features/ansage-offline-stimme.md)
   (**freigegeben 16.11.2026**, ADR 0104–0106). Fällt in der Halle
